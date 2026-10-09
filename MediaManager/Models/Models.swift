@@ -70,7 +70,8 @@ struct UnifiedAsset: Identifiable, Codable, Sendable {
     init(id: Int, type: AssetType, title: String,
          subtitle: String? = nil, path: String? = nil,
          coverURL: URL? = nil, backdropURL: URL? = nil,
-         position: Double? = nil, duration: Double? = nil) {
+         position: Double? = nil, duration: Double? = nil,
+         playbackURL: URL? = nil) {
         self.id = id
         self.type = type
         self.title = title
@@ -80,6 +81,7 @@ struct UnifiedAsset: Identifiable, Codable, Sendable {
         self.backdropURL = backdropURL
         self.position = position
         self.duration = duration
+        self.playbackURL = playbackURL
     }
 
     // 后端 gin.H 手动拼字段，cover_url 为空串也会输出；
