@@ -60,10 +60,10 @@ struct MockDataProvider: DataProviding {
             let pic = 1000 + (idx % 80) // picsum 固定 id 池
             return Photo(
                 id: idx + 1,
-                thumbURL: URL(string: "https://picsum.photos/id/\(pic)/\(w)/\(h)"),
-                fullURL: URL(string: "https://picsum.photos/id/\(pic)/1200/1600"),
                 width: w,
-                height: h
+                height: h,
+                thumbURL: URL(string: "https://picsum.photos/id/\(pic)/\(w)/\(h)"),
+                fullURL: URL(string: "https://picsum.photos/id/\(pic)/1200/1600")
             )
         }
     }
@@ -101,10 +101,10 @@ struct MockDataProvider: DataProviding {
     static let recentItems: [RecentItem] = [
         RecentItem(id: 201, kind: .movie, title: "沙丘 2", year: 2024, libraryName: "电影库"),
         RecentItem(id: 202, kind: .series, title: "王冠 第六季", year: 2023, libraryName: "剧集库"),
-        RecentItem(id: 203, kind: .album, title: "2026-10-05 扫街", libraryName: "相册库", photoCount: 156),
+        RecentItem(id: 203, kind: .album, title: "2026-10-05 扫街", photoCount: 156, libraryName: "相册库"),
         RecentItem(id: 204, kind: .movie, title: "奥本海默", year: 2023, libraryName: "电影库"),
         RecentItem(id: 205, kind: .series, title: "继承之战 第四季", year: 2023, libraryName: "剧集库"),
-        RecentItem(id: 206, kind: .album, title: "2026-09-30 人像", libraryName: "相册库", photoCount: 88),
+        RecentItem(id: 206, kind: .album, title: "2026-09-30 人像", photoCount: 88, libraryName: "相册库"),
         RecentItem(id: 207, kind: .movie, title: "可怜的东西", year: 2023, libraryName: "电影库"),
         RecentItem(id: 208, kind: .series, title: "怒呛人生", year: 2023, libraryName: "剧集库"),
     ]
