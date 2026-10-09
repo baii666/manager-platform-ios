@@ -90,18 +90,35 @@ struct UnifiedAsset: Identifiable, Codable, Sendable {
         id = try c.decode(Int.self, forKey: .id)
         type = (try? c.decode(AssetType.self, forKey: .type)) ?? .media
         title = (try? c.decode(String.self, forKey: .title)) ?? ""
-        subtitle = (try? c.decodeIfPresent(String.self, forKey: .subtitle)) ?? nil
-        path = (try? c.decodeIfPresent(String.self, forKey: .path)) ?? nil
+        subtitle = optString(c, .subtitle)
+        path = optString(c, .path)
         coverURL = flexURL(c, .coverURL)
         backdropURL = flexURL(c, .backdropURL)
-        position = (try? c.decodeIfPresent(Double.self, forKey: .position)) ?? nil
-        duration = (try? c.decodeIfPresent(Double.self, forKey: .duration)) ?? nil
+        position = optDouble(c, .position)
+        duration = optDouble(c, .duration)
     }
+}
+
+// decodeIfPresent 再包 try? 会产生 String?? / Double??（双层可选），
+// 直接当 String? 用会编译不过，这里统一压平成单层。
+fileprivate func optString<K: CodingKey>(_ c: KeyedDecodingContainer<K>, _ key: K) -> String? {
+    if let v = try? c.decodeIfPresent(String.self, forKey: key) { return v }
+    return nil
+}
+
+fileprivate func optDouble<K: CodingKey>(_ c: KeyedDecodingContainer<K>, _ key: K) -> Double? {
+    if let v = try? c.decodeIfPresent(Double.self, forKey: key) { return v }
+    return nil
+}
+
+fileprivate func optInt<K: CodingKey>(_ c: KeyedDecodingContainer<K>, _ key: K) -> Int? {
+    if let v = try? c.decodeIfPresent(Int.self, forKey: key) { return v }
+    return nil
 }
 
 /// URL 字段的容错解码：空串 / 非法串返回 nil，不让整块数据解码失败
 fileprivate func flexURL<K: CodingKey>(_ c: KeyedDecodingContainer<K>, _ key: K) -> URL? {
-    guard let s = try? c.decodeIfPresent(String.self, forKey: key), !s.isEmpty else { return nil }
+    guard let s = optString(c, key), !s.isEmpty else { return nil }
     return URL(string: s)
 }
 
@@ -193,8 +210,8 @@ struct Library: Identifiable, Codable, Sendable {
         id = try c.decode(Int.self, forKey: .id)
         name = (try? c.decode(String.self, forKey: .name)) ?? ""
         type = (try? c.decode(String.self, forKey: .type)) ?? ""
-        itemCount = (try? c.decodeIfPresent(Int.self, forKey: .itemCount)) ?? 0
-        albumCount = (try? c.decodeIfPresent(Int.self, forKey: .albumCount)) ?? nil
+        itemCount = optInt(c, .itemCount) ?? 0
+        albumCount = optInt(c, .albumCount)
         thumbURL = flexURL(c, .thumbURL)
     }
 }
