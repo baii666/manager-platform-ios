@@ -3,6 +3,7 @@ import SwiftUI
 // MARK: - 继续观看卡（16:9 横版 + 进度条）
 struct ResumeCard: View {
     let asset: UnifiedAsset
+    var onPlay: () -> Void = {}
     @State private var hovering = false
 
     var body: some View {
@@ -14,6 +15,7 @@ struct ResumeCard: View {
                 .animation(.easeOut(duration: 0.2), value: hovering)
         }
         .onHover { hovering = $0 }
+        .onTapGesture { onPlay() }
     }
 
     private var cover: some View {

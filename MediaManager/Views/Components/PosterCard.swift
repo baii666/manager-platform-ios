@@ -5,6 +5,7 @@ import SwiftUI
 struct AssetPosterCard: View {
     let asset: UnifiedAsset
     var aspectRatio: CGFloat = 3.0 / 4.0
+    var onTap: () -> Void = {}
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -12,6 +13,7 @@ struct AssetPosterCard: View {
                 .aspectRatio(aspectRatio, contentMode: .fit)
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
+        .onTapGesture(perform: onTap)
     }
 
     private var cover: some View {

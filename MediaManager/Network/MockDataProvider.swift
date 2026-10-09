@@ -41,25 +41,50 @@ struct MockDataProvider: DataProviding {
         return pool.filter { $0.title.lowercased().contains(q) }
     }
 
+    func fetchPhotos(limit: Int, offset: Int) async throws -> [Photo] {
+        try await Task.sleep(nanoseconds: 300_000_000)
+        return Self.makePhotos(from: offset, count: limit)
+    }
+
     // MARK: 假数据
+
+    /// 演示用 HLS 流（Apple 官方测试流），让播放器离线也能跑通
+    static let demoHLS = URL(string: "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8")
+
+    /// 按 offset 生成一批照片（picsum 占位图，宽高比轮换制造瀑布流错落），模拟无限翻页
+    static func makePhotos(from offset: Int, count: Int) -> [Photo] {
+        let sizes: [(Int, Int)] = [(600, 800), (600, 450), (600, 600), (600, 900), (600, 750), (600, 500)]
+        return (0..<count).map { i in
+            let idx = offset + i
+            let (w, h) = sizes[idx % sizes.count]
+            let pic = 1000 + (idx % 80) // picsum 固定 id 池
+            return Photo(
+                id: idx + 1,
+                thumbURL: URL(string: "https://picsum.photos/id/\(pic)/\(w)/\(h)"),
+                fullURL: URL(string: "https://picsum.photos/id/\(pic)/1200/1600"),
+                width: w,
+                height: h
+            )
+        }
+    }
 
     static let resumeAssets: [UnifiedAsset] = [
         UnifiedAsset(id: 1, type: .media, title: "星际穿越", subtitle: "电影 · 2h49m",
-                     position: 4020, duration: 10140),
+                     position: 4020, duration: 10140, playbackURL: Self.demoHLS),
         UnifiedAsset(id: 2, type: .media, title: "绝命毒师 第一季", subtitle: "剧集 · 第 3 集",
-                     position: 1220, duration: 2820),
+                     position: 1220, duration: 2820, playbackURL: Self.demoHLS),
         UnifiedAsset(id: 3, type: .short, title: "短视频 · 街头掠影", subtitle: "短视频",
-                     position: 18, duration: 45),
+                     position: 18, duration: 45, playbackURL: Self.demoHLS),
         UnifiedAsset(id: 4, type: .shoot, title: "2026-10-02 外景拍摄", subtitle: "拍摄集 · 128 张",
                      position: 12, duration: 60),
         UnifiedAsset(id: 5, type: .photo, title: "写真 · 京都之秋", subtitle: "相册 · 96 张",
                      position: 24, duration: 120),
         UnifiedAsset(id: 6, type: .media, title: "银翼杀手 2049", subtitle: "电影 · 2h43m",
-                     position: 600, duration: 9840),
+                     position: 600, duration: 9840, playbackURL: Self.demoHLS),
         UnifiedAsset(id: 7, type: .media, title: "风骚律师", subtitle: "剧集 · 第 5 集",
-                     position: 2100, duration: 2760),
+                     position: 2100, duration: 2760, playbackURL: Self.demoHLS),
         UnifiedAsset(id: 8, type: .short, title: "短视频 · 城市夜景", subtitle: "短视频",
-                     position: 0, duration: 30),
+                     position: 0, duration: 30, playbackURL: Self.demoHLS),
     ]
 
     static let favoriteAssets: [UnifiedAsset] = [

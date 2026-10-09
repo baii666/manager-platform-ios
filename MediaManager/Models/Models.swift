@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 
 // MARK: - 资产类型
 // 与后端 asset_type 对齐：四类内容共用一套资产模型
@@ -42,6 +43,8 @@ struct UnifiedAsset: Identifiable, Codable, Sendable {
     var backdropURL: URL? = nil
     var position: Double? = nil
     var duration: Double? = nil
+    /// 播放地址（HLS m3u8）；影视/短视频类资产点播放时使用
+    var playbackURL: URL? = nil
 
     /// 播放进度 0...1（继续观看卡片的进度条）
     var progress: Double {
@@ -114,4 +117,36 @@ struct HomeStats: Sendable {
     var shortCount: Int = 0
 
     var totalContent: Int { movieCount + seriesCount + photoCount + shootCount }
+}
+
+// MARK: - 照片
+// 对应后端 /api/photos 返回的单张照片；width/height 用于瀑布流计算展示高度
+struct Photo: Identifiable, Codable, Sendable {
+    let id: Int
+    var thumbURL: URL? = nil
+    var fullURL: URL? = nil
+    var width: Int = 0
+    var height: Int = 0
+
+    /// 展示宽高比（宽/高），瀑布流据此算 cell 高度；默认 2:3
+    var aspectRatio: CGFloat {
+        guard width > 0, height > 0 else { return 2.0 / 3.0 }
+        return CGFloat(width) / CGFloat(height)
+    }
+}
+
+// MARK: - 任务进度（SSE 推送）
+// 后端扫描/转码等后台任务通过 text/event-stream 推送进度
+struct TaskProgress: Identifiable, Sendable {
+    let id: String
+    var taskType: String = ""
+    var message: String = ""
+    var done: Int = 0
+    var total: Int = 0
+    var isFinished: Bool = false
+
+    var percent: Double {
+        guard total > 0 else { return 0 }
+        return min(1, max(0, Double(done) / Double(total)))
+    }
 }

@@ -9,6 +9,7 @@ protocol DataProviding: Sendable {
     func fetchFavorites(limit: Int) async throws -> [UnifiedAsset]
     func fetchRecent(limit: Int) async throws -> [RecentItem]
     func search(query: String) async throws -> [UnifiedAsset]
+    func fetchPhotos(limit: Int, offset: Int) async throws -> [Photo]
 }
 
 // MARK: - 错误

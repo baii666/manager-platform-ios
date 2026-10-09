@@ -7,6 +7,11 @@ import UIKit
 struct HomeView: View {
     @ObservedObject var viewModel: HomeViewModel
 
+    @State private var playingAsset: UnifiedAsset?
+    @State private var showingPhotos = false
+    @State private var showingTasks = false
+    @StateObject private var taskViewModel = TaskProgressViewModel()
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
@@ -32,6 +37,40 @@ struct HomeView: View {
                 ProgressView("加载中…")
                     .padding(20)
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+        }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    showingTasks = true
+                } label: {
+                    Label("任务", systemImage: "gearshape.2")
+                }
+            }
+        }
+        .sheet(isPresented: $showingTasks) {
+            NavigationStack {
+                TaskProgressView(viewModel: taskViewModel)
+                    .navigationTitle("任务进度")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("完成") { showingTasks = false }
+                        }
+                    }
+            }
+            .presentationDetents([.medium, .large])
+        }
+        .sheet(isPresented: $showingPhotos) {
+            NavigationStack {
+                PhotoBrowserView()
+            }
+        }
+        .fullScreenCover(item: $playingAsset) { asset in
+            if let url = asset.playbackURL {
+                NavigationStack {
+                    VideoPlayerView(url: url, startPosition: asset.position, title: asset.title)
+                }
             }
         }
     }
@@ -73,7 +112,9 @@ struct HomeView: View {
             SectionHeader(icon: "clock.fill", title: "继续观看")
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 260), spacing: 16)], spacing: 16) {
                 ForEach(viewModel.resume) { asset in
-                    ResumeCard(asset: asset)
+                    ResumeCard(asset: asset) {
+                        if asset.playbackURL != nil { playingAsset = asset }
+                    }
                 }
             }
         }
@@ -86,7 +127,9 @@ struct HomeView: View {
             SectionHeader(icon: "heart.fill", title: "我的收藏")
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 16)], spacing: 16) {
                 ForEach(viewModel.favorites) { asset in
-                    AssetPosterCard(asset: asset)
+                    AssetPosterCard(asset: asset) {
+                        handleAssetTap(asset)
+                    }
                 }
             }
         }
@@ -111,11 +154,23 @@ struct HomeView: View {
         VStack(alignment: .leading, spacing: 14) {
             SectionHeader(icon: "sparkles", title: "发现")
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 12)], spacing: 12) {
-                DiscoverCard(icon: "shuffle", title: "随机照片", subtitle: "从图库里随便逛", tint: .green)
+                DiscoverCard(icon: "shuffle", title: "随机照片", subtitle: "从图库里随便逛", tint: .green) {
+                    showingPhotos = true
+                }
                 DiscoverCard(icon: "person.2.fill", title: "人物", subtitle: "人脸聚类结果", tint: .cyan)
                 DiscoverCard(icon: "photo.on.rectangle.angled", title: "拍摄集", subtitle: "按拍摄批次浏览", tint: .pink)
                 DiscoverCard(icon: "play.rectangle.fill", title: "短视频连播", subtitle: "刷起来停不下", tint: .orange)
             }
+        }
+    }
+
+    // MARK: 交互
+
+    private func handleAssetTap(_ asset: UnifiedAsset) {
+        if asset.playbackURL != nil {
+            playingAsset = asset
+        } else if asset.type == .photo {
+            showingPhotos = true
         }
     }
 

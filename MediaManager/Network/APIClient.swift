@@ -27,4 +27,5 @@ final class APIClient: DataProviding, @unchecked Sendable {
     func fetchFavorites(limit: Int) async throws -> [UnifiedAsset] { throw DataError.notImplemented }
     func fetchRecent(limit: Int) async throws -> [RecentItem] { throw DataError.notImplemented }
     func search(query: String) async throws -> [UnifiedAsset] { throw DataError.notImplemented }
+    func fetchPhotos(limit: Int, offset: Int) async throws -> [Photo] { throw DataError.notImplemented }
 }

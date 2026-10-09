@@ -7,9 +7,11 @@ struct DiscoverCard: View {
     let title: String
     let subtitle: String
     let tint: Color
+    var action: () -> Void = {}
 
     var body: some View {
         Button {
+            action()
         } label: {
             HStack(spacing: 14) {
                 Image(systemName: icon)

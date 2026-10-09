@@ -78,11 +78,15 @@ struct RootView: View {
             }
             .navigationTitle("媒体库")
         } detail: {
-            switch selection {
-            case .home, .none:
-                HomeView(viewModel: viewModel)
-            default:
-                PlaceholderView(item: selection ?? .home)
+            NavigationStack {
+                switch selection {
+                case .home, .none:
+                    HomeView(viewModel: viewModel)
+                case .photo:
+                    PhotoBrowserView()
+                default:
+                    PlaceholderView(item: selection ?? .home)
+                }
             }
         }
     }
