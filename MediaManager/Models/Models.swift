@@ -174,7 +174,7 @@ struct Library: Identifiable, Codable, Sendable {
     var displayType: String {
         switch type {
         case "movie": return "电影"
-        case "series": return "剧集"
+        case "tv", "series": return "剧集"
         case "photo": return "相册"
         case "shoot": return "拍摄集"
         default: return type

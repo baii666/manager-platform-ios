@@ -15,6 +15,8 @@ final class HomeViewModel: ObservableObject {
     // 搜索
     @Published var searchText = ""
     @Published var semanticSearch = false
+    @Published var searchResults: [UnifiedAsset] = []
+    @Published var isSearching = false
 
     private let provider: DataProviding
 
@@ -58,5 +60,23 @@ final class HomeViewModel: ObservableObject {
 
     private func describe(_ error: Error) -> String {
         (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+    }
+
+    /// 搜索框提交（影视 / 照片 / 相册 / 拍摄集全类型）
+    @MainActor
+    func performSearch() async {
+        let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else {
+            searchResults = []
+            return
+        }
+        isSearching = true
+        defer { isSearching = false }
+        do {
+            searchResults = try await provider.search(query: q)
+        } catch {
+            searchResults = []
+            errorMessage = "搜索失败 · \(describe(error))"
+        }
     }
 }

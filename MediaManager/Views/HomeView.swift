@@ -10,12 +10,14 @@ struct HomeView: View {
     @State private var playingAsset: UnifiedAsset?
     @State private var showingPhotos = false
     @State private var showingTasks = false
+    @State private var showingSearch = false
     @StateObject private var taskViewModel = TaskProgressViewModel()
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
                 hero
+                if let warning = portWarning { warningBanner(warning) }
                 if !viewModel.failures.isEmpty { errorBanner }
                 if !viewModel.resume.isEmpty { resumeSection }
                 if !viewModel.favorites.isEmpty { favoritesSection }
@@ -67,6 +69,24 @@ struct HomeView: View {
                 PhotoBrowserView()
             }
         }
+        .sheet(isPresented: $showingSearch) {
+            NavigationStack {
+                SearchResultsView(results: viewModel.searchResults) { asset in
+                    showingSearch = false
+                    // 等 sheet 收起再弹播放器，避免两个转场打架
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                        handleAssetTap(asset)
+                    }
+                }
+                .navigationTitle("搜索：\(viewModel.searchText)")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("完成") { showingSearch = false }
+                    }
+                }
+            }
+        }
         .fullScreenCover(item: $playingAsset) { asset in
             if let url = asset.playbackURL {
                 NavigationStack {
@@ -74,6 +94,30 @@ struct HomeView: View {
                 }
             }
         }
+    }
+
+    // MARK: 连接告警
+
+    /// 5173 是前端 dev server，只代理 /api，播放和图片直连路径都不通
+    private var portWarning: String? {
+        guard let port = AppSession.shared.baseURL?.port, port == 5173 else { return nil }
+        return "当前连的是前端开发端口 5173，播放和图片会失败。请登出后改填后端网关端口 19876。"
+    }
+
+    private func warningBanner(_ text: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.red)
+            Text(text)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(16)
+        .background(
+            Color.red.opacity(0.12),
+            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+        )
     }
 
     // MARK: 失败提示
@@ -126,13 +170,18 @@ struct HomeView: View {
             SearchBar(
                 text: $viewModel.searchText,
                 semantic: $viewModel.semanticSearch,
-                onSubmit: {}
+                onSubmit: {
+                    Task {
+                        await viewModel.performSearch()
+                        showingSearch = true
+                    }
+                }
             )
             .frame(maxWidth: 640)
 
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], spacing: 12) {
                 ForEach(statEntries) { entry in
-                    StatCard(icon: entry.icon, label: entry.label, value: entry.value, tint: entry.tint)
+                    StatCard(icon: entry.icon, label: entry.label, value: entry.value, tint: entry.tint, action: entry.action)
                 }
             }
         }
@@ -217,7 +266,9 @@ struct HomeView: View {
             StatEntry(id: "lib", icon: "folder.fill", label: "媒体库", value: viewModel.stats.libraryCount, tint: Theme.brand),
             StatEntry(id: "movie", icon: "film", label: "电影", value: viewModel.stats.movieCount, tint: .blue),
             StatEntry(id: "series", icon: "tv", label: "剧集", value: viewModel.stats.seriesCount, tint: .purple),
-            StatEntry(id: "photo", icon: "camera", label: "图片", value: viewModel.stats.photoCount, tint: .green),
+            StatEntry(id: "photo", icon: "camera", label: "图片", value: viewModel.stats.photoCount, tint: .green) {
+                showingPhotos = true
+            },
             StatEntry(id: "shoot", icon: "photo.on.rectangle.angled", label: "拍摄集", value: viewModel.stats.shootCount, tint: .pink),
             StatEntry(id: "short", icon: "play.rectangle.fill", label: "短视频", value: viewModel.stats.shortCount, tint: .orange),
         ]
@@ -230,4 +281,5 @@ private struct StatEntry: Identifiable {
     let label: String
     let value: Int
     let tint: Color
+    var action: (() -> Void)? = nil
 }
