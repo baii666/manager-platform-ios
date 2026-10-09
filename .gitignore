@@ -1,0 +1,25 @@
+# Xcode
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.xcodeproj
+!project.yml
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# macOS
+.DS_Store
+
+# 工程缓存（XcodeGen 生成 *.xcodeproj，不入库）
+*.xcworkspace
+*.xccheckout
+*.moved-aside
+
+# 打包产物
+*.ipa
+*.dSYM
+*.dSYM.zip
+xcuserdata/
