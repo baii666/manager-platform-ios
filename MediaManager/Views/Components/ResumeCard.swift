@@ -3,19 +3,20 @@ import SwiftUI
 // MARK: - 继续观看卡（16:9 横版 + 进度条）
 struct ResumeCard: View {
     let asset: UnifiedAsset
+    var width: CGFloat = 280
     var onPlay: () -> Void = {}
     @State private var hovering = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            cover
-                .aspectRatio(16.0 / 9.0, contentMode: .fit)
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .scaleEffect(hovering ? 1.03 : 1)
-                .animation(.easeOut(duration: 0.2), value: hovering)
-        }
-        .onHover { hovering = $0 }
-        .onTapGesture { onPlay() }
+        cover
+            // 固定 16:9 尺寸：不写死的话横版 / 竖版原图会把卡片撑得高低不一
+            .frame(width: width, height: width * 9.0 / 16.0)
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .contentShape(Rectangle())
+            .scaleEffect(hovering ? 1.03 : 1)
+            .animation(.easeOut(duration: 0.2), value: hovering)
+            .onHover { hovering = $0 }
+            .onTapGesture { onPlay() }
     }
 
     private var cover: some View {

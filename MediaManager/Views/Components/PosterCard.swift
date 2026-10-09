@@ -4,16 +4,17 @@ import SwiftUI
 // 顶部类型标签 + 底部渐变标题，hover 时轻微上浮。
 struct AssetPosterCard: View {
     let asset: UnifiedAsset
-    var aspectRatio: CGFloat = 3.0 / 4.0
+    var width: CGFloat = 150
+    /// 宽/高。显式给 frame 而不是 aspectRatio(.fit)，否则原图比例不同会把卡片撑得高低不一
+    var aspectRatio: CGFloat = 2.0 / 3.0
     var onTap: () -> Void = {}
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            cover
-                .aspectRatio(aspectRatio, contentMode: .fit)
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        }
-        .onTapGesture(perform: onTap)
+        cover
+            .frame(width: width, height: width / aspectRatio)
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .contentShape(Rectangle())
+            .onTapGesture(perform: onTap)
     }
 
     private var cover: some View {
@@ -55,14 +56,13 @@ struct AssetPosterCard: View {
 // MARK: - 最近入库卡（RecentItem 专用）
 struct RecentPosterCard: View {
     let item: RecentItem
+    var width: CGFloat = 150
     var aspectRatio: CGFloat = 2.0 / 3.0
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            cover
-                .aspectRatio(aspectRatio, contentMode: .fit)
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        }
+        cover
+            .frame(width: width, height: width / aspectRatio)
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     private var cover: some View {

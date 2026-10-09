@@ -195,7 +195,7 @@ struct HomeView: View {
     private var resumeSection: some View {
         VStack(alignment: .leading, spacing: 14) {
             SectionHeader(icon: "clock.fill", title: "继续观看")
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 260), spacing: 16)], spacing: 16) {
+            horizontalRow {
                 ForEach(viewModel.resume) { asset in
                     ResumeCard(asset: asset) {
                         if asset.playbackURL != nil { playingAsset = asset }
@@ -210,7 +210,7 @@ struct HomeView: View {
     private var favoritesSection: some View {
         VStack(alignment: .leading, spacing: 14) {
             SectionHeader(icon: "heart.fill", title: "我的收藏")
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 16)], spacing: 16) {
+            horizontalRow {
                 ForEach(viewModel.favorites) { asset in
                     AssetPosterCard(asset: asset) {
                         handleAssetTap(asset)
@@ -225,16 +225,10 @@ struct HomeView: View {
     private var recentSection: some View {
         VStack(alignment: .leading, spacing: 14) {
             SectionHeader(icon: "bolt.fill", title: "最近入库")
-            // 一行横向滚动（不再铺满多行）：条目全部保留，左右滑即可
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: 16) {
-                    ForEach(viewModel.recent) { item in
-                        RecentPosterCard(item: item)
-                            .frame(width: 150)
-                    }
+            horizontalRow {
+                ForEach(viewModel.recent) { item in
+                    RecentPosterCard(item: item)
                 }
-                .padding(.horizontal, 2)
-                .padding(.vertical, 2)
             }
         }
     }
@@ -262,6 +256,16 @@ struct HomeView: View {
             playingAsset = asset
         } else if asset.type == .photo {
             showingPhotos = true
+        }
+    }
+
+    /// 统一的行容器：继续观看 / 收藏 / 最近入库都用它，卡片各自固定尺寸，不再铺满多行
+    @ViewBuilder
+    private func horizontalRow<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            LazyHStack(spacing: 16, content: content)
+                .padding(.horizontal, 2)
+                .padding(.vertical, 2)
         }
     }
 
