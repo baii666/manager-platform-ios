@@ -31,5 +31,29 @@ jobs:
             -scheme MediaManager \
             -destination 'generic/platform=iOS Simulator' \
             -configuration Debug \
+            -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO \
             build
+
+      # 模拟器的安装阶段才会报 missing CFBundleExecutable / missing bundle id，
+      # 编译阶段发现不了，所以这里提前校验产物 plist 的关键键都已解析出真值
+      - name: 校验产物 Info.plist
+        run: |
+          APP="build/Build/Products/Debug-iphonesimulator/MediaManager.app"
+          if [ ! -d "$APP" ]; then
+            echo "::error::未找到编译产物 $APP"
+            exit 1
+          fi
+          for key in CFBundleExecutable CFBundleIdentifier CFBundleName CFBundlePackageType CFBundleVersion; do
+            v=$(/usr/libexec/PlistBuddy -c "Print :$key" "$APP/Info.plist" 2>/dev/null || echo "")
+            echo "$key = '$v'"
+            if [ -z "$v" ]; then
+              echo "::error file=MediaManager/Info.plist::$key 缺失"
+              exit 1
+            fi
+            if echo "$v" | grep -q '\$('; then
+              echo "::error file=MediaManager/Info.plist::$key 变量未展开: $v"
+              exit 1
+            fi
+          done
+          echo "Info.plist 关键字段校验通过"
