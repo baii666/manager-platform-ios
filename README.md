@@ -43,6 +43,40 @@ MediaManager/
 - **封面离线可降级**：`RemoteImage` 有 URL 走 `AsyncImage`，没有/失败时回退到「渐变 + SF Symbol」，保证离线也能看界面。
 - **类型驱动配色**：四类内容（影视/写真/短视频/拍摄集）各有独立占位渐变与标签色，与 Web 端一致。
 
+## Mac 上从零开始（clone + 认证）
+
+私有仓库需要先认证，再 clone。
+
+**前置**：App Store 装 Xcode（15+）；装 Homebrew（https://brew.sh）；Mac 上有能访问 GitHub 的代理。
+
+**认证（SSH 推荐，与 Windows 同款免密）**：
+
+```bash
+ssh-keygen -t ed25519 -C "你的邮箱"     # 一路回车
+cat ~/.ssh/id_ed25519.pub              # 复制输出 → GitHub → Settings → SSH and GPG keys → New SSH key
+
+# 配 SSH 走代理（端口改成你 Mac 代理的；代理不转发 22 端口时用 ssh.github.com:443）
+cat >> ~/.ssh/config <<'EOF'
+Host github.com
+    HostName ssh.github.com
+    Port 443
+    User git
+    IdentityFile ~/.ssh/id_ed25519
+    ProxyCommand nc -X 5 -x 127.0.0.1:7890 %h %p
+EOF
+
+ssh -T git@github.com   # 应返回 "Hi baii666! ..." 即成功
+```
+
+**clone**：
+
+```bash
+git clone git@github.com:baii666/manager-platform-ios.git
+cd manager-platform-ios
+```
+
+> HTTPS 备选：`git clone https://github.com/baii666/manager-platform-ios.git`，用户名 `baii666`、密码填 PAT（先 `git config --global http.proxy http://127.0.0.1:7890`）。
+
 ## 编译运行
 
 > 需要 **macOS + Xcode 15+**（Swift 5.9 / iOS 17+）。当前 Windows 环境无法编译 Swift。
