@@ -16,6 +16,7 @@ struct HomeView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
                 hero
+                if !viewModel.failures.isEmpty { errorBanner }
                 if !viewModel.resume.isEmpty { resumeSection }
                 if !viewModel.favorites.isEmpty { favoritesSection }
                 if !viewModel.recent.isEmpty { recentSection }
@@ -73,6 +74,41 @@ struct HomeView: View {
                 }
             }
         }
+    }
+
+    // MARK: 失败提示
+    // 之前接口报错被静默吞掉，只表现为「页面全空」，无法判断是地址错、401 还是字段不匹配
+
+    private var errorBanner: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("部分数据加载失败", systemImage: "exclamationmark.triangle.fill")
+                .font(.headline)
+                .foregroundStyle(.orange)
+
+            ForEach(viewModel.failures, id: \.self) { item in
+                Text("· \(item)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+
+            if let base = AppSession.shared.baseURL {
+                Text("服务器：\(base.absoluteString)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+
+            Button("重试") { Task { await viewModel.load() } }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            Color.orange.opacity(0.12),
+            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+        )
     }
 
     // MARK: Hero：搜索 + 统计

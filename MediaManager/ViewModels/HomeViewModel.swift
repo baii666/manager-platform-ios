@@ -24,24 +24,39 @@ final class HomeViewModel: ObservableObject {
 
     // MARK: 加载
 
+    /// 记录每个板块的失败原因，便于首页提示（不再静默变空白）
+    @Published var failures: [String] = []
+
     @MainActor
     func load() async {
         isLoading = true
         errorMessage = nil
+        failures = []
+        defer { isLoading = false }
+
+        // ⚠️ 四块必须各自容错：若用一次 try await 同时等待，
+        // 任何一个接口报错（401 / 字段不匹配）都会让整页数据全部丢弃变成空白
         async let statsTask = provider.fetchStats()
         async let resumeTask = provider.fetchResume(limit: 14)
         async let favTask = provider.fetchFavorites(limit: 24)
         async let recentTask = provider.fetchRecent(limit: 24)
 
-        do {
-            let (s, r, f, rc) = try await (statsTask, resumeTask, favTask, recentTask)
-            stats = s
-            resume = r
-            favorites = f
-            recent = rc
-        } catch {
-            errorMessage = error.localizedDescription
-        }
-        isLoading = false
+        do { stats = try await statsTask }
+        catch { stats = HomeStats(); failures.append("统计 · \(describe(error))") }
+
+        do { resume = try await resumeTask }
+        catch { resume = []; failures.append("继续观看 · \(describe(error))") }
+
+        do { favorites = try await favTask }
+        catch { favorites = []; failures.append("我的收藏 · \(describe(error))") }
+
+        do { recent = try await recentTask }
+        catch { recent = []; failures.append("最近入库 · \(describe(error))") }
+
+        errorMessage = failures.isEmpty ? nil : "部分数据加载失败"
+    }
+
+    private func describe(_ error: Error) -> String {
+        (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
     }
 }

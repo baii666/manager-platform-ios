@@ -12,6 +12,12 @@ enum AssetType: String, Codable, CaseIterable, Identifiable, Sendable {
 
     var id: String { rawValue }
 
+    /// 容错解码：后端若出现未知类型，不至于让整条列表解码失败
+    init(from decoder: Decoder) throws {
+        let raw = (try? decoder.singleValueContainer().decode(String.self)) ?? "media"
+        self = AssetType(rawValue: raw) ?? .media
+    }
+
     var label: String {
         switch self {
         case .media: return "影视"
@@ -70,6 +76,12 @@ struct RecentItem: Identifiable, Codable, Sendable {
         case series
         case album
 
+        /// 容错解码：media.type 出现库类型（如 mixed）时兜底，避免整块「最近入库」解码失败
+        init(from decoder: Decoder) throws {
+            let raw = (try? decoder.singleValueContainer().decode(String.self)) ?? "movie"
+            self = Kind(rawValue: raw) ?? .movie
+        }
+
         var label: String {
             switch self {
             case .movie: return "电影"
@@ -100,14 +112,16 @@ struct RecentItem: Identifiable, Codable, Sendable {
     /// 客户端拼好的封面 URL（不来自后端）
     var coverURL: URL? = nil
 
+    // ⚠️ 后端 /api/recent 用的是 camelCase（posterImageId / coverPhotoId / libName），
+    // 写错不会报错，只会静默全为 nil —— 表现为条目有标题但没封面
     enum CodingKeys: String, CodingKey {
         case id, kind, title, year
-        case posterImageId = "poster_image_id"
-        case fanartImageId = "fanart_image_id"
-        case coverPhotoId = "cover_photo_id"
-        case photoCount = "photo_count"
-        case libraryId = "library_id"
-        case libraryName = "lib_name"
+        case posterImageId = "posterImageId"
+        case fanartImageId = "fanartImageId"
+        case coverPhotoId = "coverPhotoId"
+        case photoCount = "photoCount"
+        case libraryId = "libraryId"
+        case libraryName = "libName"
     }
 }
 
@@ -157,8 +171,9 @@ struct Photo: Identifiable, Codable, Sendable {
     let id: Int
     var albumId: Int? = nil
     var fileName: String? = nil
-    var width: Int = 0
-    var height: Int = 0
+    /// 后端在 EXIF 缺失时会返回 null，必须可选，否则整页照片解码失败
+    var width: Int? = nil
+    var height: Int? = nil
     var hasThumb: Int? = nil
     var libraryId: Int? = nil
     /// 客户端拼好的缩略图 / 原图 URL（不来自后端）
@@ -167,7 +182,7 @@ struct Photo: Identifiable, Codable, Sendable {
 
     /// 展示宽高比（宽/高），瀑布流据此算 cell 高度；默认 2:3
     var aspectRatio: CGFloat {
-        guard width > 0, height > 0 else { return 2.0 / 3.0 }
+        guard let width, let height, width > 0, height > 0 else { return 2.0 / 3.0 }
         return CGFloat(width) / CGFloat(height)
     }
 
