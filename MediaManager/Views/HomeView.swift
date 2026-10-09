@@ -225,10 +225,16 @@ struct HomeView: View {
     private var recentSection: some View {
         VStack(alignment: .leading, spacing: 14) {
             SectionHeader(icon: "bolt.fill", title: "最近入库")
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 16)], spacing: 16) {
-                ForEach(viewModel.recent) { item in
-                    RecentPosterCard(item: item)
+            // 一行横向滚动（不再铺满多行）：条目全部保留，左右滑即可
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: 16) {
+                    ForEach(viewModel.recent) { item in
+                        RecentPosterCard(item: item)
+                            .frame(width: 150)
+                    }
                 }
+                .padding(.horizontal, 2)
+                .padding(.vertical, 2)
             }
         }
     }
