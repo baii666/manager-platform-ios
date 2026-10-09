@@ -94,6 +94,25 @@ open MediaManager.xcodeproj
 **方式 B：手动**
 新建一个 iOS App 工程（Device 选 iPad），把 `MediaManager/` 目录整个拖进去，删除自动生成的模板文件即可。
 
+## 安装到 iPad 真机
+
+默认用**免费 Apple ID 签名**（Personal Team），可直接装到自己的 iPad，但有 7 天有效期。
+
+**步骤**：
+
+1. 用数据线把 iPad 连到 Mac，iPad 弹窗点「信任」，Mac 上允许。
+2. Xcode 打开工程，选中项目 → **Signing & Capabilities**：
+   - 勾选 **Automatically manage signing**
+   - **Team** 选你的 Apple ID（没有就点 Add Account 登录，免费账号即可）
+   - **Bundle Identifier** 改成唯一值（`com.mediamanager.ipad` 大概率被占用，改成 `com.你的名字.mediamanager` 之类）
+3. Xcode 顶部设备选择器选你的 **iPad**（不是模拟器）。
+4. 点 **Run（⌘R）**。
+5. 首次运行提示「未受信任的开发者」：iPad → **设置 → 通用 → VPN 与设备管理** → 点你的开发者证书 → **信任**。
+
+**免费签名限制**：7 天后失效，需重新连 Mac 再 Run 一次；最多同时装 3 个自签 app。
+
+**想长期用 / 免电脑安装**：注册 Apple Developer Program（$99/年），即可真机调试 1 年有效、用 **TestFlight** 分发（测试设备点链接安装，不用每次连 Mac）。
+
 ## 接入真实后端
 
 后端是纯 HTTP JSON（约 257 个 REST 端点，默认 `http://<host>:19876`）。接入时：
