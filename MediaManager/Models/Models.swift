@@ -242,9 +242,24 @@ struct Photo: Identifiable, Codable, Sendable {
     var height: Int? = nil
     var hasThumb: Int? = nil
     var libraryId: Int? = nil
+    var fileSize: Int64? = nil
     /// 客户端拼好的缩略图 / 原图 URL（不来自后端）
     var thumbURL: URL? = nil
     var fullURL: URL? = nil
+
+    /// 人类可读的文件大小，信息面板用
+    var sizeText: String? {
+        guard let fileSize, fileSize > 0 else { return nil }
+        if fileSize < 1024 { return "\(fileSize) B" }
+        if fileSize < 1024 * 1024 { return String(format: "%.1f KB", Double(fileSize) / 1024) }
+        return String(format: "%.1f MB", Double(fileSize) / (1024 * 1024))
+    }
+
+    /// “1920 × 1080”，没有 EXIF 时返回 nil
+    var dimensionText: String? {
+        guard let width, let height, width > 0, height > 0 else { return nil }
+        return "\(width) × \(height)"
+    }
 
     /// 展示宽高比（宽/高），瀑布流据此算 cell 高度；默认 2:3
     var aspectRatio: CGFloat {
@@ -258,6 +273,7 @@ struct Photo: Identifiable, Codable, Sendable {
         case fileName = "file_name"
         case hasThumb = "has_thumb"
         case libraryId = "library_id"
+        case fileSize = "file_size"
     }
 }
 

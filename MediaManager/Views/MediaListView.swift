@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // MARK: - 影视列表状态
 // 对齐网页端 MediaListPage：selectedLibID 为 nil 时不传 lib，后端返回用户可见媒体库的全集
@@ -191,27 +192,39 @@ struct MediaCard: View {
     var onTap: () -> Void = {}
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
+        VStack(alignment: .leading, spacing: 0) {
             RemoteImage(
                 url: coverURL,
                 fallbackIcon: item.type == "tv" ? "tv" : "film",
                 fallbackColors: Theme.placeholderGradient(for: .media)
             )
             .frame(width: width, height: width * 3.0 / 2.0)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .contentShape(Rectangle())
-            .onTapGesture(perform: onTap)
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
 
-            Text(item.title)
-                .font(.subheadline.weight(.medium))
-                .lineLimit(2)
-                .multilineTextAlignment(.leading)
-            if !item.subtitle.isEmpty {
-                Text(item.subtitle)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(item.title)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                if !item.subtitle.isEmpty {
+                    Text(item.subtitle)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
             }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 9)
+            .frame(width: width, alignment: .leading)
         }
         .frame(width: width)
+        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color(uiColor: .separator).opacity(0.6), lineWidth: 0.5)
+        }
+        .shadow(color: .black.opacity(0.10), radius: 8, x: 0, y: 3)
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onTap)
     }
 }

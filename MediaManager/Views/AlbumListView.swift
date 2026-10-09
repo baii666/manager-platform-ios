@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // MARK: - 相册列表状态
 final class AlbumListViewModel: ObservableObject {
@@ -160,29 +161,41 @@ struct AlbumCard: View {
     var width: CGFloat = 170
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            RemoteImage(url: coverURL, fallbackIcon: "photo.on.rectangle")
-                .frame(width: width, height: width * 3.0 / 2.0)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .overlay(alignment: .bottomTrailing) {
-                    Text("\(album.count)")
-                        .font(.caption2.weight(.semibold))
-                        .monospacedDigit()
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
-                        .background(.black.opacity(0.55), in: Capsule())
-                        .padding(7)
-                }
-            Text(album.title)
-                .font(.subheadline.weight(.medium))
-                .lineLimit(2)
-                .multilineTextAlignment(.leading)
-            Text("\(album.count) 张")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 0) {
+            ZStack(alignment: .bottomTrailing) {
+                RemoteImage(url: coverURL, fallbackIcon: "photo.on.rectangle")
+                    .frame(width: width, height: width * 3.0 / 2.0)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                Text("\(album.count)")
+                    .font(.caption2.weight(.semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(.black.opacity(0.55), in: Capsule())
+                    .padding(7)
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                Text(album.title)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Text("\(album.count) 张")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 9)
+            .frame(width: width, alignment: .leading)
         }
         .frame(width: width)
+        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color(uiColor: .separator).opacity(0.6), lineWidth: 0.5)
+        }
+        .shadow(color: .black.opacity(0.10), radius: 8, x: 0, y: 3)
     }
 }
 
@@ -194,7 +207,8 @@ struct AlbumPhotosView: View {
 
     @State private var photos: [Photo] = []
     @State private var isLoading = false
-    @State private var selected: Photo?
+    /// 存下标而不是 Photo：看图器要按当前下标左右翻页
+    @State private var selectedIndex: Int?
     @State private var page = 1
     @State private var hasMore = true
     @State private var errorMessage: String?
@@ -203,7 +217,9 @@ struct AlbumPhotosView: View {
         PhotoGrid(
             photos: photos,
             columns: 4,
-            onSelect: { selected = $0 },
+            onSelect: { photo in
+                selectedIndex = photos.firstIndex(where: { $0.id == photo.id })
+            },
             onReachEnd: { Task { await loadMore() } }
         )
         .ignoresSafeArea(edges: .bottom)
@@ -219,8 +235,19 @@ struct AlbumPhotosView: View {
             }
         }
         .task { await loadMore() }
-        .fullScreenCover(item: $selected) { photo in
-            PhotoDetailView(photo: photo)
+        .fullScreenCover(isPresented: Binding(
+            get: { selectedIndex != nil },
+            set: { if !$0 { selectedIndex = nil } }
+        )) {
+            if let index = selectedIndex {
+                PhotoViewerView(
+                    photos: photos,
+                    index: index,
+                    hasMore: hasMore,
+                    onLoadMore: { Task { await loadMore() } },
+                    onClose: { selectedIndex = nil }
+                )
+            }
         }
     }
 

@@ -37,13 +37,16 @@ final class PhotoBrowserViewModel: ObservableObject {
 // MARK: - 照片浏览页（瀑布流 + 懒加载 + 大图查看）
 struct PhotoBrowserView: View {
     @StateObject private var viewModel = PhotoBrowserViewModel()
-    @State private var selectedPhoto: Photo?
+    /// 记住下标而不是 Photo：看图器要按当前下标左右翻页、预取前后各 3 张
+    @State private var selectedIndex: Int?
 
     var body: some View {
         PhotoGrid(
             photos: viewModel.photos,
             columns: 4,
-            onSelect: { selectedPhoto = $0 },
+            onSelect: { photo in
+                selectedIndex = viewModel.photos.firstIndex(where: { $0.id == photo.id })
+            },
             onReachEnd: {
                 Task { await viewModel.loadMore() }
             }
@@ -57,31 +60,18 @@ struct PhotoBrowserView: View {
             }
         }
         .task { await viewModel.loadInitial() }
-        .fullScreenCover(item: $selectedPhoto) { photo in
-            PhotoDetailView(photo: photo)
-        }
-    }
-}
-
-// MARK: - 照片大图查看
-struct PhotoDetailView: View {
-    let photo: Photo
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            ZStack {
-                Color.black.ignoresSafeArea()
-                CachedAsyncImage(
-                    url: photo.fullURL ?? photo.thumbURL,
-                    contentMode: .fit,
-                    fallbackIcon: "photo"
+        .fullScreenCover(isPresented: Binding(
+            get: { selectedIndex != nil },
+            set: { if !$0 { selectedIndex = nil } }
+        )) {
+            if let index = selectedIndex {
+                PhotoViewerView(
+                    photos: viewModel.photos,
+                    index: index,
+                    hasMore: true,
+                    onLoadMore: { Task { await viewModel.loadMore() } },
+                    onClose: { selectedIndex = nil }
                 )
-            }
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("关闭") { dismiss() }
-                }
             }
         }
     }

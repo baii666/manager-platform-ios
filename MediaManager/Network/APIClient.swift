@@ -166,6 +166,8 @@ final class APIClient: DataProviding, @unchecked Sendable {
         ])
         photo.fullURL = makeURL("/photo", queryItems: [
             URLQueryItem(name: "id", value: "\(p.id)"),
+            // ⚠️ 必须显式要原图：不传 size 时后端默认给 400 缩略图，看图器会糊
+            URLQueryItem(name: "size", value: "original"),
         ])
         return photo
     }
@@ -262,6 +264,23 @@ final class APIClient: DataProviding, @unchecked Sendable {
         }
         return (cover, playback)
     }
+
+    // MARK: - 行为层（收藏）
+
+    /// 查询单个资产的收藏状态。GET /api/actions/status?type=photo&ids=1 → {states:[{id,favorite}]}
+    func fetchFavorite(type: String, id: Int) async throws -> Bool {
+        let resp: ActionStatusResponse = try await request("/api/actions/status?type=\(type)&ids=\(id)")
+        return resp.states.first(where: { $0.id == id })?.favorite ?? false
+    }
+
+    /// 设置 / 取消收藏。POST /api/actions/favorite {type,id,on} → {favorite}
+    func setFavorite(type: String, id: Int, on: Bool) async throws -> Bool {
+        let resp: FavoriteResponse = try await request(
+            "/api/actions/favorite", method: "POST",
+            json: ["type": type, "id": id, "on": on]
+        )
+        return resp.favorite
+    }
 }
 
 // MARK: - 响应 DTO
@@ -299,6 +318,19 @@ private struct AlbumListResponse: Decodable {
 
 private struct SearchResponse: Decodable {
     let items: [SearchItem]
+}
+
+/// /api/actions/status 的响应：states 里每项含 id / favorite / rating / position
+private struct ActionStatusResponse: Decodable {
+    struct State: Decodable {
+        let id: Int
+        let favorite: Bool?
+    }
+    let states: [State]
+}
+
+private struct FavoriteResponse: Decodable {
+    let favorite: Bool
 }
 
 /// 搜索结果异构字段：不同类型（影视/照片/相册）返回不同列，这里只取需要的

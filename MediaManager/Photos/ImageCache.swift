@@ -38,12 +38,18 @@ final class ImageCache: @unchecked Sendable {
     }
 
     /// 下载 + 缓存 + 返回；命中缓存则直接返回
-    func load(from url: URL) async -> UIImage? {
+    /// - Parameter cacheToDisk: 原图体积大且后端就是源文件，没必要再往磁盘写一份（会占满缓存目录），
+    ///   传 false 只进内存缓存
+    func load(from url: URL, cacheToDisk: Bool = true) async -> UIImage? {
         if let img = image(for: url) { return img }
         do {
             let (data, _) = try await URLSession.shared.data(from: url)
             guard let img = UIImage(data: data) else { return nil }
-            store(img, for: url)
+            if cacheToDisk {
+                store(img, for: url)
+            } else {
+                memory.setObject(img, forKey: url as NSURL)
+            }
             return img
         } catch {
             return nil
