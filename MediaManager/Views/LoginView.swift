@@ -32,11 +32,6 @@ struct LoginView: View {
             }
             .frame(maxWidth: 420)
 
-            Text("填后端网关端口（默认 19876）。不要填前端开发的 5173 —— 它只代理 /api，播放和图片会失败。")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: 420, alignment: .leading)
-
             if let error = session.errorMessage {
                 Text(error)
                     .font(.caption)

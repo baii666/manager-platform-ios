@@ -17,7 +17,6 @@ struct HomeView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
                 hero
-                if let warning = portWarning { warningBanner(warning) }
                 if !viewModel.failures.isEmpty { errorBanner }
                 if !viewModel.resume.isEmpty { resumeSection }
                 if !viewModel.favorites.isEmpty { favoritesSection }
@@ -94,30 +93,6 @@ struct HomeView: View {
                 }
             }
         }
-    }
-
-    // MARK: 连接告警
-
-    /// 5173 是前端 dev server，只代理 /api，播放和图片直连路径都不通
-    private var portWarning: String? {
-        guard let port = AppSession.shared.baseURL?.port, port == 5173 else { return nil }
-        return "当前连的是前端开发端口 5173，播放和图片会失败。请登出后改填后端网关端口 19876。"
-    }
-
-    private func warningBanner(_ text: String) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.red)
-            Text(text)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(16)
-        .background(
-            Color.red.opacity(0.12),
-            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-        )
     }
 
     // MARK: 失败提示
