@@ -3,7 +3,7 @@
 # 也可以完全不用 XcodeGen：新建一个 iOS App 工程，把 MediaManager/ 目录整个拖进去即可
 name: MediaManager
 options:
-  bundleIdPrefix: com.mediamanager
+  bundleIdPrefix: com.baii666
   deploymentTarget:
     iOS: "17.0"
   createIntermediateGroups: true
@@ -16,7 +16,7 @@ targets:
       - path: MediaManager
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.mediamanager.ipad
+        PRODUCT_BUNDLE_IDENTIFIER: com.baii666.mediamanager
         # 2 = iPad only（本项目只做 iPad 极致体验）
         TARGETED_DEVICE_FAMILY: "2"
         INFOPLIST_FILE: MediaManager/Info.plist
