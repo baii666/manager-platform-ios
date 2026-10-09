@@ -4,8 +4,8 @@ import SwiftUI
 struct SectionHeader: View {
     let icon: String
     let title: String
-    var moreLabel: String?
-    var onMore: (() -> Void)?
+    var moreLabel: String? = nil
+    var onMore: (() -> Void)? = nil
 
     var body: some View {
         HStack(spacing: 8) {

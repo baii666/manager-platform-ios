@@ -37,11 +37,11 @@ struct UnifiedAsset: Identifiable, Codable, Sendable {
     let id: Int
     let type: AssetType
     let title: String
-    var subtitle: String?
-    var coverURL: URL?
-    var backdropURL: URL?
-    var position: Double?
-    var duration: Double?
+    var subtitle: String? = nil
+    var coverURL: URL? = nil
+    var backdropURL: URL? = nil
+    var position: Double? = nil
+    var duration: Double? = nil
 
     /// 播放进度 0...1（继续观看卡片的进度条）
     var progress: Double {
@@ -78,10 +78,10 @@ struct RecentItem: Identifiable, Codable, Sendable {
     let id: Int
     let kind: Kind
     let title: String
-    var year: Int?
-    var coverURL: URL?
-    var libraryName: String?
-    var photoCount: Int?
+    var year: Int? = nil
+    var coverURL: URL? = nil
+    var libraryName: String? = nil
+    var photoCount: Int? = nil
 }
 
 // MARK: - 媒体库
@@ -89,8 +89,8 @@ struct Library: Identifiable, Codable, Sendable {
     let id: Int
     let name: String
     let type: String // movie / series / photo / shoot / mixed
-    var itemCount: Int
-    var thumbURL: URL?
+    var itemCount: Int = 0
+    var thumbURL: URL? = nil
 
     var displayType: String {
         switch type {

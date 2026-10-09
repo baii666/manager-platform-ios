@@ -66,11 +66,13 @@ struct RootView: View {
 
     var body: some View {
         NavigationSplitView {
-            List(selection: $selection) { section in
-                Section(section.title) {
-                    ForEach(SidebarItem.allCases.filter { $0.section == section }) { item in
-                        Label(item.title, systemImage: item.systemImage)
-                            .tag(item)
+            List(selection: $selection) {
+                ForEach(SidebarSection.allCases) { section in
+                    Section(section.title) {
+                        ForEach(SidebarItem.allCases.filter { $0.section == section }) { item in
+                            Label(item.title, systemImage: item.systemImage)
+                                .tag(item)
+                        }
                     }
                 }
             }

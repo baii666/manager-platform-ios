@@ -7,7 +7,7 @@ struct StatCard: View {
     let label: String
     let value: Int
     let tint: Color
-    var action: (() -> Void)?
+    var action: (() -> Void)? = nil
 
     var body: some View {
         Button {
