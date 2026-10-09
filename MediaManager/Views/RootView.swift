@@ -89,8 +89,12 @@ struct RootView: View {
                 switch selection {
                 case .home, .none:
                     HomeView(viewModel: viewModel)
+                case .movie:
+                    MediaListView(type: "movie")
+                case .series:
+                    MediaListView(type: "tv")
                 case .photo:
-                    PhotoBrowserView()
+                    AlbumListView()
                 default:
                     PlaceholderView(item: selection ?? .home)
                 }

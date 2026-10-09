@@ -277,6 +277,92 @@ struct TaskProgress: Identifiable, Sendable {
     }
 }
 
+// MARK: - 相册
+// 对应 /api/photos?lib=x 返回的 folders 项（后端字段：count / display_name / cover_photo_id）
+struct Album: Identifiable, Codable, Sendable, Hashable {
+    let id: Int
+    var folderPath: String = ""
+    var folderName: String = ""
+    var displayName: String? = nil
+    var count: Int = 0
+    var coverPhotoId: Int? = nil
+    var coverPhotoIdPortrait: Int? = nil
+    var coverOrient: String? = nil
+    var releaseDate: String? = nil
+
+    /// display_name 为空时回退 folder_name（与网页端一致）
+    var title: String {
+        if let displayName, !displayName.isEmpty { return displayName }
+        return folderName
+    }
+
+    /// 竖版封面优先，相册卡是 2:3 竖版
+    var preferredCoverId: Int? { coverPhotoIdPortrait ?? coverPhotoId }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case folderPath = "folder_path"
+        case folderName = "folder_name"
+        case displayName = "display_name"
+        case count
+        case coverPhotoId = "cover_photo_id"
+        case coverPhotoIdPortrait = "cover_photo_id_portrait"
+        case coverOrient = "cover_orient"
+        case releaseDate = "release_date"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(Int.self, forKey: .id)
+        folderPath = (try? c.decode(String.self, forKey: .folderPath)) ?? ""
+        folderName = (try? c.decode(String.self, forKey: .folderName)) ?? ""
+        displayName = optString(c, .displayName)
+        count = optInt(c, .count) ?? 0
+        coverPhotoId = optInt(c, .coverPhotoId)
+        coverPhotoIdPortrait = optInt(c, .coverPhotoIdPortrait)
+        coverOrient = optString(c, .coverOrient)
+        releaseDate = optString(c, .releaseDate)
+    }
+}
+
+// MARK: - 影视条目
+// 对应 /api/media?type=movie|tv 返回的 items 项
+struct MediaItem: Identifiable, Codable, Sendable {
+    let id: Int
+    var title: String = ""
+    var year: Int? = nil
+    var type: String = ""
+    var filePath: String? = nil
+    var posterImageId: Int? = nil
+    var fanartImageId: Int? = nil
+    var libraryId: Int? = nil
+
+    var subtitle: String {
+        if let year, year > 0 { return String(year) }
+        return ""
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, year, type
+        case filePath = "file_path"
+        case posterImageId = "poster_image_id"
+        case fanartImageId = "fanart_image_id"
+        case libraryId = "library_id"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(Int.self, forKey: .id)
+        title = (try? c.decode(String.self, forKey: .title)) ?? ""
+        year = optInt(c, .year)
+        type = (try? c.decode(String.self, forKey: .type)) ?? ""
+        filePath = optString(c, .filePath)
+        posterImageId = optInt(c, .posterImageId)
+        fanartImageId = optInt(c, .fanartImageId)
+        libraryId = optInt(c, .libraryId)
+    }
+}
+
 // MARK: - 用户
 // 对应 /api/auth/me、/api/auth/login 返回的 user
 struct User: Codable, Sendable {

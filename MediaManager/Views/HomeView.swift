@@ -9,6 +9,7 @@ struct HomeView: View {
 
     @State private var playingAsset: UnifiedAsset?
     @State private var showingPhotos = false
+    @State private var showingAlbums = false
     @State private var showingTasks = false
     @State private var showingSearch = false
     @StateObject private var taskViewModel = TaskProgressViewModel()
@@ -66,6 +67,17 @@ struct HomeView: View {
         .sheet(isPresented: $showingPhotos) {
             NavigationStack {
                 PhotoBrowserView()
+            }
+        }
+        .sheet(isPresented: $showingAlbums) {
+            NavigationStack {
+                AlbumListView()
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("完成") { showingAlbums = false }
+                        }
+                    }
             }
         }
         .sheet(isPresented: $showingSearch) {
@@ -252,7 +264,7 @@ struct HomeView: View {
             StatEntry(id: "movie", icon: "film", label: "电影", value: viewModel.stats.movieCount, tint: .blue),
             StatEntry(id: "series", icon: "tv", label: "剧集", value: viewModel.stats.seriesCount, tint: .purple),
             StatEntry(id: "photo", icon: "camera", label: "图片", value: viewModel.stats.photoCount, tint: .green) {
-                showingPhotos = true
+                showingAlbums = true
             },
             StatEntry(id: "shoot", icon: "photo.on.rectangle.angled", label: "拍摄集", value: viewModel.stats.shootCount, tint: .pink),
             StatEntry(id: "short", icon: "play.rectangle.fill", label: "短视频", value: viewModel.stats.shortCount, tint: .orange),

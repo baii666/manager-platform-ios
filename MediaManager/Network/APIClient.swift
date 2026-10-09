@@ -200,6 +200,57 @@ final class APIClient: DataProviding, @unchecked Sendable {
         cachedPhotoLibID = photoLib.id
         return photoLib.id
     }
+
+    // MARK: - 相册 / 影视列表
+
+    /// 相册列表。GET /api/photos?lib=x&page=1&size=60（返回 folders 数组）
+    func fetchAlbums(libID: Int, page: Int = 1, size: Int = 60) async throws -> (items: [Album], total: Int) {
+        let resp: AlbumListResponse = try await request(
+            "/api/photos?lib=\(libID)&page=\(page)&size=\(size)&sort=updated_desc"
+        )
+        return (resp.folders, resp.total)
+    }
+
+    /// 相册内照片。GET /api/photos?folder=<path>
+    func fetchAlbumPhotos(folder: String, page: Int = 1, size: Int = 120) async throws -> [Photo] {
+        guard let encoded = folder.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
+            return []
+        }
+        let resp: ItemsResponse<Photo> = try await request(
+            "/api/photos?folder=\(encoded)&page=\(page)&size=\(size)"
+        )
+        return resp.items.map { resolvePhoto($0) }
+    }
+
+    /// 影视列表。type: movie / tv；不带 lib 时后端返回用户可见媒体库的全集
+    func fetchMedia(type: String, page: Int = 1, size: Int = 60) async throws -> (items: [MediaItem], total: Int) {
+        let resp: MediaListResponse = try await request(
+            "/api/media?type=\(type)&page=\(page)&size=\(size)&sort=updated_desc"
+        )
+        return (resp.items, resp.total)
+    }
+
+    /// 所有照片库（用于相册页的库切换）
+    func photoLibraries() async throws -> [Library] {
+        let libs: [Library] = try await request("/api/libraries")
+        return libs.filter { $0.type == "photo" }
+    }
+
+    /// 影视条目的封面 / 播放地址
+    func resolveMedia(_ m: MediaItem) -> (cover: URL?, playback: URL?) {
+        var cover: URL?
+        if let posterId = m.posterImageId {
+            cover = makeURL("/media-image", queryItems: [
+                URLQueryItem(name: "id", value: "\(posterId)"),
+                URLQueryItem(name: "size", value: "600"),
+            ])
+        }
+        var playback: URL?
+        if let path = m.filePath, !path.isEmpty {
+            playback = makeURL("/stream", queryItems: [URLQueryItem(name: "path", value: path)])
+        }
+        return (cover, playback)
+    }
 }
 
 // MARK: - 响应 DTO
@@ -221,6 +272,17 @@ private struct ShootListResponse: Decodable {
 }
 
 private struct ShortsCountResponse: Decodable {
+    let total: Int
+}
+
+private struct MediaListResponse: Decodable {
+    let items: [MediaItem]
+    let total: Int
+}
+
+/// /api/photos 的相册列表响应（数组挂在 folders 键下）
+private struct AlbumListResponse: Decodable {
+    let folders: [Album]
     let total: Int
 }
 
