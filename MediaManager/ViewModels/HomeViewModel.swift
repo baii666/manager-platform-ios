@@ -18,8 +18,8 @@ final class HomeViewModel: ObservableObject {
 
     private let provider: DataProviding
 
-    init(provider: DataProviding = MockDataProvider()) {
-        self.provider = provider
+    init(provider: DataProviding? = nil) {
+        self.provider = provider ?? AppSession.shared.client ?? MockDataProvider()
     }
 
     // MARK: 加载

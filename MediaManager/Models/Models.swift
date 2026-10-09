@@ -32,24 +32,33 @@ enum AssetType: String, Codable, CaseIterable, Identifiable, Sendable {
 }
 
 // MARK: - 统一资产
-// 对应后端的统一行为层 asset_actions：
-// 「继续观看」「我的收藏」都返回这种结构，天然覆盖四类内容
+// 对应后端统一行为层 asset_actions 返回的 AssetRef：
+// 「继续观看」「我的收藏」都返回这种结构，天然覆盖四类内容。
+// cover_url / backdrop_url 是相对路径，由 APIClient 拼成完整 URL。
 struct UnifiedAsset: Identifiable, Codable, Sendable {
     let id: Int
     let type: AssetType
     let title: String
     var subtitle: String? = nil
+    /// 文件路径（media=video_file、short=file_path、photo=file_path、shoot=folder_path）
+    var path: String? = nil
     var coverURL: URL? = nil
     var backdropURL: URL? = nil
     var position: Double? = nil
     var duration: Double? = nil
-    /// 播放地址（HLS m3u8）；影视/短视频类资产点播放时使用
+    /// 客户端拼好的播放地址（/stream?path=），不来自后端
     var playbackURL: URL? = nil
 
     /// 播放进度 0...1（继续观看卡片的进度条）
     var progress: Double {
         guard let position, let duration, duration > 0 else { return 0 }
         return min(1, max(0, position / duration))
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, type, title, subtitle, path, position, duration
+        case coverURL = "cover_url"
+        case backdropURL = "backdrop_url"
     }
 }
 
@@ -82,9 +91,24 @@ struct RecentItem: Identifiable, Codable, Sendable {
     let kind: Kind
     let title: String
     var year: Int? = nil
-    var coverURL: URL? = nil
-    var libraryName: String? = nil
+    var posterImageId: Int? = nil
+    var fanartImageId: Int? = nil
+    var coverPhotoId: Int? = nil
     var photoCount: Int? = nil
+    var libraryId: Int = 0
+    var libraryName: String? = nil
+    /// 客户端拼好的封面 URL（不来自后端）
+    var coverURL: URL? = nil
+
+    enum CodingKeys: String, CodingKey {
+        case id, kind, title, year
+        case posterImageId = "poster_image_id"
+        case fanartImageId = "fanart_image_id"
+        case coverPhotoId = "cover_photo_id"
+        case photoCount = "photo_count"
+        case libraryId = "library_id"
+        case libraryName = "lib_name"
+    }
 }
 
 // MARK: - 媒体库
@@ -93,6 +117,7 @@ struct Library: Identifiable, Codable, Sendable {
     let name: String
     let type: String // movie / series / photo / shoot / mixed
     var itemCount: Int = 0
+    var albumCount: Int? = nil
     var thumbURL: URL? = nil
 
     var displayType: String {
@@ -103,6 +128,13 @@ struct Library: Identifiable, Codable, Sendable {
         case "shoot": return "拍摄集"
         default: return type
         }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, type
+        case itemCount = "item_count"
+        case albumCount = "album_count"
+        case thumbURL = "thumb_url"
     }
 }
 
@@ -123,15 +155,28 @@ struct HomeStats: Sendable {
 // 对应后端 /api/photos 返回的单张照片；width/height 用于瀑布流计算展示高度
 struct Photo: Identifiable, Codable, Sendable {
     let id: Int
-    var thumbURL: URL? = nil
-    var fullURL: URL? = nil
+    var albumId: Int? = nil
+    var fileName: String? = nil
     var width: Int = 0
     var height: Int = 0
+    var hasThumb: Int? = nil
+    var libraryId: Int? = nil
+    /// 客户端拼好的缩略图 / 原图 URL（不来自后端）
+    var thumbURL: URL? = nil
+    var fullURL: URL? = nil
 
     /// 展示宽高比（宽/高），瀑布流据此算 cell 高度；默认 2:3
     var aspectRatio: CGFloat {
         guard width > 0, height > 0 else { return 2.0 / 3.0 }
         return CGFloat(width) / CGFloat(height)
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, width, height
+        case albumId = "album_id"
+        case fileName = "file_name"
+        case hasThumb = "has_thumb"
+        case libraryId = "library_id"
     }
 }
 
@@ -148,5 +193,22 @@ struct TaskProgress: Identifiable, Sendable {
     var percent: Double {
         guard total > 0 else { return 0 }
         return min(1, max(0, Double(done) / Double(total)))
+    }
+}
+
+// MARK: - 用户
+// 对应 /api/auth/me、/api/auth/login 返回的 user
+struct User: Codable, Sendable {
+    let id: Int
+    let username: String
+    var displayName: String? = nil
+    var role: String = "user"
+    var enabled: Int = 1
+
+    var isAdmin: Bool { role == "admin" }
+
+    enum CodingKeys: String, CodingKey {
+        case id, username, role, enabled
+        case displayName = "display_name"
     }
 }

@@ -9,8 +9,8 @@ final class PhotoBrowserViewModel: ObservableObject {
     private let pageSize = 60
     private var offset = 0
 
-    init(provider: DataProviding = MockDataProvider()) {
-        self.provider = provider
+    init(provider: DataProviding? = nil) {
+        self.provider = provider ?? AppSession.shared.client ?? MockDataProvider()
     }
 
     @MainActor

@@ -75,6 +75,13 @@ struct RootView: View {
                         }
                     }
                 }
+                Section {
+                    Button(role: .destructive) {
+                        AppSession.shared.logout()
+                    } label: {
+                        Label("登出", systemImage: "rectangle.portrait.and.arrow.right")
+                    }
+                }
             }
             .navigationTitle("媒体库")
         } detail: {

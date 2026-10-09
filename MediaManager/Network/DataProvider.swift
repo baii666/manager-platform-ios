@@ -15,10 +15,14 @@ protocol DataProviding: Sendable {
 // MARK: - 错误
 enum DataError: LocalizedError {
     case notImplemented
+    case server(String)
+    case http(Int)
 
     var errorDescription: String? {
         switch self {
         case .notImplemented: return "该数据源尚未实现"
+        case .server(let message): return message
+        case .http(let code): return "请求失败（HTTP \(code)）"
         }
     }
 }
