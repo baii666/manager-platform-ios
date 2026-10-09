@@ -66,6 +66,43 @@ struct UnifiedAsset: Identifiable, Codable, Sendable {
         case coverURL = "cover_url"
         case backdropURL = "backdrop_url"
     }
+
+    init(id: Int, type: AssetType, title: String,
+         subtitle: String? = nil, path: String? = nil,
+         coverURL: URL? = nil, backdropURL: URL? = nil,
+         position: Double? = nil, duration: Double? = nil) {
+        self.id = id
+        self.type = type
+        self.title = title
+        self.subtitle = subtitle
+        self.path = path
+        self.coverURL = coverURL
+        self.backdropURL = backdropURL
+        self.position = position
+        self.duration = duration
+    }
+
+    // 后端 gin.H 手动拼字段，cover_url 为空串也会输出；
+    // Swift 的 URL? 解码空串 / 非法串会抛错 → 一条坏记录拖垮整块列表。
+    // 这里自定义解码：URL 解析失败只丢这张封面。
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(Int.self, forKey: .id)
+        type = (try? c.decode(AssetType.self, forKey: .type)) ?? .media
+        title = (try? c.decode(String.self, forKey: .title)) ?? ""
+        subtitle = (try? c.decodeIfPresent(String.self, forKey: .subtitle)) ?? nil
+        path = (try? c.decodeIfPresent(String.self, forKey: .path)) ?? nil
+        coverURL = flexURL(c, .coverURL)
+        backdropURL = flexURL(c, .backdropURL)
+        position = (try? c.decodeIfPresent(Double.self, forKey: .position)) ?? nil
+        duration = (try? c.decodeIfPresent(Double.self, forKey: .duration)) ?? nil
+    }
+}
+
+/// URL 字段的容错解码：空串 / 非法串返回 nil，不让整块数据解码失败
+fileprivate func flexURL<K: CodingKey>(_ c: KeyedDecodingContainer<K>, _ key: K) -> URL? {
+    guard let s = try? c.decodeIfPresent(String.self, forKey: key), !s.isEmpty else { return nil }
+    return URL(string: s)
 }
 
 // MARK: - 最近入库
@@ -149,6 +186,16 @@ struct Library: Identifiable, Codable, Sendable {
         case itemCount = "item_count"
         case albumCount = "album_count"
         case thumbURL = "thumb_url"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(Int.self, forKey: .id)
+        name = (try? c.decode(String.self, forKey: .name)) ?? ""
+        type = (try? c.decode(String.self, forKey: .type)) ?? ""
+        itemCount = (try? c.decodeIfPresent(Int.self, forKey: .itemCount)) ?? 0
+        albumCount = (try? c.decodeIfPresent(Int.self, forKey: .albumCount)) ?? nil
+        thumbURL = flexURL(c, .thumbURL)
     }
 }
 
