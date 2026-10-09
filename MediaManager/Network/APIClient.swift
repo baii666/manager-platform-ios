@@ -211,13 +211,12 @@ final class APIClient: DataProviding, @unchecked Sendable {
         return (resp.folders, resp.total)
     }
 
-    /// 相册内照片。GET /api/photos?folder=<path>
-    func fetchAlbumPhotos(folder: String, page: Int = 1, size: Int = 120) async throws -> [Photo] {
-        guard let encoded = folder.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
-            return []
-        }
+    /// 相册内照片。GET /api/photos?lib=x&albumId=y
+    /// ⚠️ lib 是必填（缺失直接 400）；用 albumId 比 folder 精确——
+    /// 后端只按 folder_path 匹配，同目录可能被多个库共用
+    func fetchAlbumPhotos(albumID: Int, libID: Int, page: Int = 1, size: Int = 120) async throws -> [Photo] {
         let resp: ItemsResponse<Photo> = try await request(
-            "/api/photos?folder=\(encoded)&page=\(page)&size=\(size)"
+            "/api/photos?lib=\(libID)&albumId=\(albumID)&page=\(page)&size=\(size)"
         )
         return resp.items.map { resolvePhoto($0) }
     }

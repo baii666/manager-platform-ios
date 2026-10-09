@@ -103,7 +103,7 @@ struct AlbumListView: View {
         }
         .navigationTitle("相册")
         .navigationDestination(for: Album.self) { album in
-            AlbumPhotosView(album: album)
+            AlbumPhotosView(album: album, libID: viewModel.selectedLibID ?? 0)
         }
         .overlay {
             if viewModel.albums.isEmpty && !viewModel.isLoading {
@@ -173,6 +173,8 @@ struct AlbumCard: View {
 // MARK: - 相册内照片
 struct AlbumPhotosView: View {
     let album: Album
+    /// 后端 /api/photos 强制要求 lib，缺失会 400
+    let libID: Int
 
     @State private var photos: [Photo] = []
     @State private var isLoading = false
@@ -212,7 +214,7 @@ struct AlbumPhotosView: View {
         isLoading = true
         defer { isLoading = false }
         do {
-            let batch = try await client.fetchAlbumPhotos(folder: album.folderPath, page: page)
+            let batch = try await client.fetchAlbumPhotos(albumID: album.id, libID: libID, page: page)
             photos.append(contentsOf: batch)
             page += 1
             hasMore = !batch.isEmpty
