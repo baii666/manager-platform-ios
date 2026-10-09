@@ -94,6 +94,18 @@ open MediaManager.xcodeproj
 **方式 B：手动**
 新建一个 iOS App 工程（Device 选 iPad），把 `MediaManager/` 目录整个拖进去，删除自动生成的模板文件即可。
 
+> ⚠️ 手动建工程时 **必须** 手动设置 Bundle Identifier，否则模拟器安装会报 `missing bundle id`：
+> 选中 TARGETS → MediaManager → **General** → **Bundle Identifier** 填 `com.baii666.mediamanager`
+> （填完可在 **Build Settings** 搜索 `PRODUCT_BUNDLE_IDENTIFIER` 确认有值）
+
+## 常见报错
+
+| 报错 | 原因 | 修复 |
+| --- | --- | --- |
+| `missing bundle id` / `simulator device failed to install` | `PRODUCT_BUNDLE_IDENTIFIER` 为空，Info.plist 里的 `$(PRODUCT_BUNDLE_IDENTIFIER)` 展开成空字符串 | 用 `xcodegen generate` 重新生成工程；或在 General → Bundle Identifier 填 `com.baii666.mediamanager` |
+| `your team has no devices...` | 免费 Apple ID 没注册真机 | 改用模拟器调试，或先在 Xcode → Devices and Simulators 里注册设备 |
+| App 启动后黑屏 | `UILaunchScreen` 是空配置，默认启动底色为黑 | ⌘⇧A 切亮色模式；或等首屏加载完成 |
+
 ## 安装到 iPad 真机
 
 默认用**免费 Apple ID 签名**（Personal Team），可直接装到自己的 iPad，但有 7 天有效期。
