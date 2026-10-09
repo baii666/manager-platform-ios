@@ -1,11 +1,13 @@
 import SwiftUI
 
 // MARK: - 影视列表状态
-// 对齐网页端 MediaListPage：不传 lib，后端返回用户可见媒体库的全集
+// 对齐网页端 MediaListPage：selectedLibID 为 nil 时不传 lib，后端返回用户可见媒体库的全集
 final class MediaListViewModel: ObservableObject {
     let type: String
 
     @Published var items: [MediaItem] = []
+    @Published var libraries: [Library] = []
+    @Published var selectedLibID: Int?
     @Published var totalCount = 0
     @Published var isLoading = false
     @Published var errorMessage: String?
@@ -16,8 +18,32 @@ final class MediaListViewModel: ObservableObject {
 
     private var client: APIClient? { AppSession.shared.client }
 
+    var selectedLibrary: Library? { libraries.first { $0.id == selectedLibID } }
+
     init(type: String) {
         self.type = type
+    }
+
+    @MainActor
+    func loadLibraries() async {
+        guard let client else {
+            errorMessage = "未连接服务器"
+            return
+        }
+        do {
+            libraries = try await client.mediaLibraries(ofMediaType: type)
+            await reload()
+        } catch {
+            // 库列表拉不到不阻塞内容加载，退化成「全部」
+            libraries = []
+            await reload()
+        }
+    }
+
+    @MainActor
+    func selectLibrary(_ id: Int?) async {
+        selectedLibID = id
+        await reload()
     }
 
     @MainActor
@@ -34,7 +60,7 @@ final class MediaListViewModel: ObservableObject {
         isLoading = true
         defer { isLoading = false }
         do {
-            let (batch, total) = try await client.fetchMedia(type: type, page: page, size: pageSize)
+            let (batch, total) = try await client.fetchMedia(type: type, libID: selectedLibID, page: page, size: pageSize)
             totalCount = total
             items.append(contentsOf: batch)
             page += 1
@@ -88,6 +114,12 @@ struct MediaListView: View {
             }
         }
         .navigationTitle(type == "tv" ? "剧集" : "电影")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                if !viewModel.libraries.isEmpty { libraryMenu }
+            }
+        }
         .overlay {
             if viewModel.items.isEmpty && !viewModel.isLoading {
                 ContentUnavailableView(
@@ -96,7 +128,7 @@ struct MediaListView: View {
                 )
             }
         }
-        .task { await viewModel.reload() }
+        .task { await viewModel.loadLibraries() }
         .fullScreenCover(item: Binding(
             get: { playing.map { PlaybackItem(url: $0.url, title: $0.title) } },
             set: { newValue in
@@ -106,6 +138,40 @@ struct MediaListView: View {
             NavigationStack {
                 VideoPlayerView(url: item.url, title: item.title)
             }
+        }
+    }
+
+    /// 库选择放导航栏下拉菜单（iOS 常见样式），不再挤在顶部占一整行
+    private var libraryMenu: some View {
+        Menu {
+            Button {
+                Task { await viewModel.selectLibrary(nil) }
+            } label: {
+                if viewModel.selectedLibID == nil {
+                    Label("全部", systemImage: "checkmark")
+                } else {
+                    Text("全部")
+                }
+            }
+            ForEach(viewModel.libraries) { lib in
+                Button {
+                    Task { await viewModel.selectLibrary(lib.id) }
+                } label: {
+                    if lib.id == viewModel.selectedLibID {
+                        Label(lib.name, systemImage: "checkmark")
+                    } else {
+                        Text(lib.name)
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(viewModel.selectedLibrary?.name ?? "全部")
+                    .font(.subheadline.weight(.medium))
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 10, weight: .semibold))
+            }
+            .foregroundStyle(Theme.brand)
         }
     }
 }

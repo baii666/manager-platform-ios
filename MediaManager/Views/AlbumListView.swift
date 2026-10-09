@@ -78,9 +78,6 @@ struct AlbumListView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                if viewModel.libraries.count > 1 {
-                    libraryPicker
-                }
                 LazyVGrid(columns: columns, spacing: 18) {
                     ForEach(viewModel.albums) { album in
                         NavigationLink(value: album) {
@@ -102,6 +99,12 @@ struct AlbumListView: View {
             .padding(24)
         }
         .navigationTitle("相册")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                if viewModel.libraries.count > 1 { libraryMenu }
+            }
+        }
         .navigationDestination(for: Album.self) { album in
             AlbumPhotosView(album: album, libID: viewModel.selectedLibID ?? 0)
         }
@@ -116,16 +119,29 @@ struct AlbumListView: View {
         .task { await viewModel.loadLibraries() }
     }
 
-    private var libraryPicker: some View {
-        Picker("媒体库", selection: Binding(
-            get: { viewModel.selectedLibID ?? 0 },
-            set: { newValue in Task { await viewModel.selectLibrary(newValue) } }
-        )) {
+    /// 库选择放导航栏下拉菜单（iOS 常见样式），不再挤在顶部占一整行
+    private var libraryMenu: some View {
+        Menu {
             ForEach(viewModel.libraries) { lib in
-                Text(lib.name).tag(lib.id)
+                Button {
+                    Task { await viewModel.selectLibrary(lib.id) }
+                } label: {
+                    if lib.id == viewModel.selectedLibID {
+                        Label(lib.name, systemImage: "checkmark")
+                    } else {
+                        Text(lib.name)
+                    }
+                }
             }
+        } label: {
+            HStack(spacing: 4) {
+                Text(viewModel.selectedLibrary?.name ?? "选择相册库")
+                    .font(.subheadline.weight(.medium))
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 10, weight: .semibold))
+            }
+            .foregroundStyle(Theme.brand)
         }
-        .pickerStyle(.segmented)
     }
 
     private func coverURL(for album: Album) -> URL? {

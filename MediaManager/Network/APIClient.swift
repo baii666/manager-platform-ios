@@ -221,18 +221,30 @@ final class APIClient: DataProviding, @unchecked Sendable {
         return resp.items.map { resolvePhoto($0) }
     }
 
-    /// 影视列表。type: movie / tv；不带 lib 时后端返回用户可见媒体库的全集
-    func fetchMedia(type: String, page: Int = 1, size: Int = 60) async throws -> (items: [MediaItem], total: Int) {
-        let resp: MediaListResponse = try await request(
-            "/api/media?type=\(type)&page=\(page)&size=\(size)&sort=updated_desc"
-        )
+    /// 影视列表。type: movie / tv；libID 为 nil 时后端返回用户可见媒体库的全集
+    func fetchMedia(type: String, libID: Int? = nil, page: Int = 1, size: Int = 60) async throws -> (items: [MediaItem], total: Int) {
+        var path = "/api/media?type=\(type)&page=\(page)&size=\(size)&sort=updated_desc"
+        if let libID { path += "&lib=\(libID)" }
+        let resp: MediaListResponse = try await request(path)
         return (resp.items, resp.total)
     }
 
-    /// 所有照片库（用于相册页的库切换）
-    func photoLibraries() async throws -> [Library] {
+    /// 指定类型的媒体库（movie / tv / photo / shoot），用于列表页的库筛选
+    func libraries(ofType type: String) async throws -> [Library] {
         let libs: [Library] = try await request("/api/libraries")
-        return libs.filter { $0.type == "photo" }
+        return libs.filter { $0.type == type }
+    }
+
+    func photoLibraries() async throws -> [Library] {
+        try await libraries(ofType: "photo")
+    }
+
+    /// 影视库筛选。⚠️ 库表的 type 是 movie/series/mixed，而 /api/media 用 movie/tv，
+    /// 直接拿 "tv" 去过滤会得到一个空列表，这里做一次映射
+    func mediaLibraries(ofMediaType type: String) async throws -> [Library] {
+        let wanted: Set<String> = type == "tv" ? ["series", "tv", "mixed"] : ["movie", "mixed"]
+        let libs: [Library] = try await request("/api/libraries")
+        return libs.filter { wanted.contains($0.type) }
     }
 
     /// 影视条目的封面 / 播放地址
