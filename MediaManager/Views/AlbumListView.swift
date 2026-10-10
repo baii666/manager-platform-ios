@@ -219,6 +219,9 @@ struct AlbumListView: View {
         // 返回靠系统边缘右滑手势。
         // ⚠️ 跨库模式（library == nil，首页相册 sheet 入口）要保留导航栏（含「完成」按钮）
         .toolbar(library == nil ? .automatic : .hidden, for: .navigationBar)
+        // 固定库模式下隐藏导航栏，系统右滑返回失效，用自定义左缘右滑手势补齐；
+        // 跨库模式（sheet 里，导航栏保留）不需要
+        .edgePopGesture(enabled: library != nil)
         // ⚠️ iOS 17 起 onChange(of:) 零参闭包
         .onChange(of: viewModel.searchText) {
             Task {
