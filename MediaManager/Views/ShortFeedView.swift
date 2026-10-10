@@ -111,7 +111,8 @@ private struct ShortFeedPage: View {
                                 autoplay: isActive,
                                 loop: true,
                                 isActive: isActive,
-                                showsCloseButton: false)
+                                showsCloseButton: false,
+                                dragGesturesEnabled: false)
             } else {
                 placeholder
             }

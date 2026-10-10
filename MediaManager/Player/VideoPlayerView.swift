@@ -46,6 +46,10 @@ struct VideoPlayerView: View {
     var isActive: Bool = true
     /// 是否显示自带的关闭按钮。刷流里关闭由外层 ShortFeedView 统一管，这里隐藏避免重叠。
     var showsCloseButton: Bool = true
+    /// 是否启用拖拽手势（水平快进 + 垂直亮度/音量）。
+    /// 抖音式刷流里上下滑要交给 ScrollView 切视频，亮度音量手势会跟它抢，
+    /// 所以刷流里关掉，只保留单击显隐控制条 / 双击暂停。
+    var dragGesturesEnabled: Bool = true
 
     @StateObject private var engine = PlayerEngine()
     @Environment(\.dismiss) private var dismiss
@@ -198,7 +202,8 @@ struct VideoPlayerView: View {
     private var gestureCapture: some View {
         Color.clear
             .contentShape(Rectangle())
-            .gesture(dragGesture)
+            // iOS 17 的 gesture(_:isEnabled:)：刷流里关掉，垂直滑动才不跟 ScrollView 抢
+            .gesture(dragGesture, isEnabled: dragGesturesEnabled)
             // 双击优先于单击，故先声明
             .onTapGesture(count: 2) { engine.togglePlay() }
             .onTapGesture { toggleControls() }
