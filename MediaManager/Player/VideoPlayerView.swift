@@ -488,8 +488,11 @@ struct VideoPlayerView: View {
     }
 
     /// 重开 HLS 会话跳到指定绝对位置。
-    /// 用 fallbackPlayback 强制走 HLS（不回落直连，避免 hev1 又黑屏一轮），
-    /// copy 策略沿用当前档：降级档 <2 都是「换封装(copy)」，档 2 才是重编码。
+    ///
+    /// ⚠️ copy 策略要格外小心：HEVC（hev1 那批 x265 片源）是**开放 GOP**，
+    /// `-ss` 从中间切片会落到 CRA 关键帧（不是 IDR）。AVFoundation 从 CRA 起解不出画面
+    /// （status 仍 ready、音频照播）→ 表现就是「有声音没画面」。所以 HEVC 必须重编码
+    /// 输出封闭 GOP；H.264 等编码 copy 即可。
     private func restartHLS(from seconds: Double) {
         guard !isRestarting, let path = sourcePath, !path.isEmpty else { return }
         guard let client = AppSession.shared.client else { return }
@@ -499,9 +502,12 @@ struct VideoPlayerView: View {
         let type = assetType
         let id = assetID
         let kd = knownDuration
-        let copy = fallbackLevel < 2
         Task {
             do {
+                // 探测编码决定 copy/重编码（playbackInfo 有 5 分钟缓存，命中秒回）
+                let codec = (try? await client.playbackInfo(path: path))?.videoCodec?.lowercased() ?? ""
+                let isHEVC = codec.contains("hevc")
+                let copy = fallbackLevel < 2 && !isHEVC
                 let target = try await client.fallbackPlayback(
                     path: path, startAt: seconds > 1 ? seconds : nil, copyVideo: copy,
                     title: name, assetType: type, assetID: id, knownDuration: kd)
