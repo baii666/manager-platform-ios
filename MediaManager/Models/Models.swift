@@ -693,7 +693,7 @@ struct SearchItem: Identifiable, Codable, Sendable {
 
     var titleText: String {
         if !title.isEmpty { return title }
-        return displayName?.isEmpty == false ? displayName! : folderName
+        return displayName?.isEmpty == false ? displayName! : (folderName ?? "")
     }
 
     enum CodingKeys: String, CodingKey {

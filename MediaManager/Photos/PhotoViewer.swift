@@ -233,7 +233,7 @@ struct PhotoViewerView: View {
 
     private var backgroundOpacity: Double {
         guard dismissY != 0 else { return 1 }
-        return max(0.15, 1 - abs(dismissY) / 900)
+        return max(CGFloat(0.15), 1 - abs(dismissY) / CGFloat(900))
     }
 
     @MainActor
