@@ -103,12 +103,23 @@ final class AlbumListViewModel: ObservableObject {
         await loadMore()
     }
 
-    /// 下拉刷新：保留旧列表，加载第一页后替换（避免闪空）
+    /// 下拉刷新：保留旧列表，加载第一页后替换（避免闪空）。
+    /// ⚠️ 不碰 isLoading（触发 body 重算会让 .refreshable 的刷新 Task 被取消），
+    /// 刷新指示由系统 refreshable 转圈承担。
     @MainActor
     func refresh() async {
+        guard let client, let libID = selectedLibID, !isLoading else { return }
         page = 1
         hasMore = true
-        await loadMore(replacing: true)
+        do {
+            let (items, total) = try await client.fetchAlbums(libID: libID, page: page, size: pageSize, sort: sort.rawValue, q: searchText.isEmpty ? nil : searchText)
+            totalCount = total
+            albums = items
+            page += 1
+            hasMore = !items.isEmpty && albums.count < total
+        } catch {
+            errorMessage = "加载相册失败 · \(describe(error))"
+        }
     }
 
     @MainActor

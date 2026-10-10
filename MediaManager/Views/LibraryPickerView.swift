@@ -61,11 +61,14 @@ struct LibraryPickerView: View {
             isLoading = false
             return
         }
-        isLoading = true
-        // 切换分类（task 重新触发）时清空，避免短暂显示上一分类的库；
-        // 下拉刷新保留旧数据，加载完替换
-        if clear { libraries = [] }
-        defer { isLoading = false }
+        // 切换分类/首次加载才显示加载指示；下拉刷新用系统指示器。
+        // ⚠️ isLoading 触发 body 重算，在 .refreshable 里会导致刷新 Task 被取消（请求取消），
+        // 所以下拉刷新（clear=false）不碰 isLoading。
+        if clear {
+            isLoading = true
+            libraries = []  // 切换分类时清空，避免短暂显示上一分类的库
+        }
+        defer { if clear { isLoading = false } }
         do {
             libraries = try await client.libraries(ofType: type)
         } catch {

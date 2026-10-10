@@ -30,11 +30,13 @@ final class HomeViewModel: ObservableObject {
     @Published var failures: [String] = []
 
     @MainActor
-    func load() async {
-        isLoading = true
+    func load(showSpinner: Bool = true) async {
+        // 下拉刷新不碰 isLoading：isLoading 触发 body 重算会让 .refreshable 的
+        // 刷新 Task 被取消（请求取消），刷新转圈由系统 refreshable 承担
+        if showSpinner { isLoading = true }
         errorMessage = nil
         failures = []
-        defer { isLoading = false }
+        defer { if showSpinner { isLoading = false } }
 
         // ⚠️ 四块必须各自容错：若用一次 try await 同时等待，
         // 任何一个接口报错（401 / 字段不匹配）都会让整页数据全部丢弃变成空白
