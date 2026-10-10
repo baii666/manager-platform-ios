@@ -514,6 +514,7 @@ struct PhotoViewerView: View {
                 .padding(.vertical, 8)
             }
             .frame(maxWidth: .infinity)
+            .frame(height: 68)  // ⚠️ 固定高度：ScrollView 在 overlay 里会被提议全屏高，不加就会撑满、纯黑背景盖住图片/按钮并吃掉点击
             .background(Color.black)  // 纯黑不透明，避免半透明蒙层透出底图
             .onAppear { scrollStrip(proxy) }
             .onChange(of: index) { _, _ in scrollStrip(proxy) }
