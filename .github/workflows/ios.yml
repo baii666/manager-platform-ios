@@ -26,6 +26,7 @@ jobs:
 
       - name: Build for iOS Simulator
         run: |
+          set -o pipefail
           xcodebuild \
             -project MediaManager.xcodeproj \
             -scheme MediaManager \
@@ -33,7 +34,14 @@ jobs:
             -configuration Debug \
             -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO \
-            build
+            build 2>&1 | tee build.log
+
+      # 把 swiftc 编译错误以 ::error:: 形式回显，使其变成 check-run annotation，
+      # 便于在拿不到构建日志（无 admin token）时也能读到真实报错
+      - name: Surface compile errors
+        if: always()
+        run: |
+          grep -E ': error:' build.log | sed 's/^/::error::/' | head -80 || true
 
       # 模拟器的安装阶段才会报 missing CFBundleExecutable / missing bundle id，
       # 编译阶段发现不了，所以这里提前校验产物 plist 的关键键都已解析出真值
