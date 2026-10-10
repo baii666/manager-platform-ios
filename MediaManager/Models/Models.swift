@@ -516,7 +516,7 @@ struct MediaDetail: Identifiable, Decodable, Sendable {
         }
         if let iss = try? c.decode([String].self, forKey: .issues) {
             issues = iss
-        } else if let issStr = optString(c, .issuesStr) {
+        } else if let issStr = optString(c, .issues) {
             if let data = issStr.data(using: .utf8),
                let arr = try? JSONDecoder().decode([String].self, from: data) {
                 issues = arr
@@ -536,7 +536,7 @@ struct MediaDetail: Identifiable, Decodable, Sendable {
         case filePath = "file_path"
         case videoFiles = "video_files"
         case stills, folderPath = "folder_path"
-        case issues, issuesStr = "issues"
+        case issues
     }
 }
 
