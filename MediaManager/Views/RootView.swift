@@ -1,5 +1,13 @@
 import SwiftUI
 
+// MARK: - 全屏覆盖层状态
+// 短视频刷流用 ZStack overlay 在 ShortsView 内呈现，但底 bar 在 RootView 的
+// safeAreaInset 里、层级更高，刷流盖不住它。用这个共享单例在刷流打开时隐藏底 bar。
+final class FullscreenOverlay: ObservableObject {
+    static let shared = FullscreenOverlay()
+    @Published var active = false
+}
+
 // MARK: - 根 tab（底 bar）
 enum RootTab: String, CaseIterable, Identifiable {
     case home, library, short
@@ -29,6 +37,7 @@ enum RootTab: String, CaseIterable, Identifiable {
 // 用 opacity + allowsHitTesting 切换，保留各 tab 的导航栈状态。
 struct RootView: View {
     @StateObject private var viewModel = HomeViewModel()
+    @ObservedObject private var overlay = FullscreenOverlay.shared
     @State private var tab: RootTab = .home
 
     var body: some View {
@@ -47,6 +56,8 @@ struct RootView: View {
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             BottomTabBar(selection: $tab)
+                .opacity(overlay.active ? 0 : 1)
+                .allowsHitTesting(!overlay.active)
         }
     }
 }

@@ -106,6 +106,10 @@ struct ShortsView: View {
         }
         // 刷流打开时隐藏导航栏（否则列表页导航栏盖在刷流上）
         .toolbar(feedEntry == nil ? .automatic : .hidden, for: .navigationBar)
+        // 刷流打开时隐藏底 bar（底 bar 在 RootView 层级，刷流盖不住它）
+        .onChange(of: feedEntry) {
+            FullscreenOverlay.shared.active = feedEntry != nil
+        }
         .alert("无法播放", isPresented: Binding(
             get: { playError != nil },
             set: { if !$0 { playError = nil } }
