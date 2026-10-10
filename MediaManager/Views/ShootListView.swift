@@ -206,7 +206,7 @@ struct ShootCard: View {
                     }
                     .overlay(alignment: .bottomTrailing) {
                         if shoot.totalDuration > 0 {
-                            Text(formatDuration(shoot.totalDuration))
+                            Text(formatDuration(Int(shoot.totalDuration)))
                                 .font(.caption2.weight(.semibold)).monospacedDigit()
                                 .foregroundStyle(.white)
                                 .padding(.horizontal, 6).padding(.vertical, 3)
@@ -225,7 +225,7 @@ struct ShootCard: View {
                             Label(size, systemImage: "internaldrive").font(.caption2)
                         }
                         if shoot.totalDuration > 0 {
-                            Label(formatDuration(shoot.totalDuration), systemImage: "clock").font(.caption2)
+                            Label(formatDuration(Int(shoot.totalDuration)), systemImage: "clock").font(.caption2)
                         }
                     }
                     .foregroundStyle(.secondary)

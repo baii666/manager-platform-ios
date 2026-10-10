@@ -550,7 +550,9 @@ struct Shoot: Identifiable, Codable, Sendable, Hashable {
     var videoCount: Int = 0
     var photoCount: Int = 0
     var totalSize: Int64 = 0
-    var totalDuration: Int = 0
+    /// ⚠️ SQLite 里 total_duration 是 REAL（ffprobe 给的是浮点秒），
+    /// 必须按 Double 解码 —— 声明成 Int 会因为 893.74 这种值直接 typeMismatch 整页挂掉
+    var totalDuration: Double = 0
     var folderMtime: Int64 = 0
 
     var title: String { displayName?.isEmpty == false ? displayName! : folderName }
@@ -578,7 +580,8 @@ struct ShootFile: Identifiable, Codable, Sendable, Hashable {
     var mediaType: String = "video"  // video / image
     var width: Int? = nil
     var height: Int? = nil
-    var duration: Int? = nil
+    /// ⚠️ 同 Shoot.totalDuration：shoot_files.duration 在库里 100% 是 REAL，按 Double 解
+    var duration: Double? = nil
     var hasThumb: Int = 0
 
     var isVideo: Bool { mediaType == "video" }
@@ -590,7 +593,8 @@ struct ShootFile: Identifiable, Codable, Sendable, Hashable {
     }
     var durationText: String? {
         guard let d = duration, d > 0 else { return nil }
-        let h = d/3600, m = (d%3600)/60, s = d%60
+        let t = Int(d)
+        let h = t/3600, m = (t%3600)/60, s = t%60
         return h > 0 ? "\(h):\(String(format: "%02d:%02d", m, s))" : "\(m):\(String(format: "%02d", s))"
     }
     var dimensionText: String? {
@@ -622,7 +626,8 @@ struct ShortVideo: Identifiable, Codable, Sendable, Hashable {
     var fileName: String = ""
     var title: String? = nil
     var year: Int? = nil
-    var duration: Int? = nil
+    /// ⚠️ 同 Shoot.totalDuration：short_videos.duration 在库里 100% 是 REAL，按 Double 解
+    var duration: Double? = nil
     var fileSize: Int64 = 0
     var width: Int? = nil
     var height: Int? = nil
@@ -637,7 +642,8 @@ struct ShortVideo: Identifiable, Codable, Sendable, Hashable {
 
     var durationText: String? {
         guard let d = duration, d > 0 else { return nil }
-        let h = d/3600, m = (d%3600)/60, s = d%60
+        let t = Int(d)
+        let h = t/3600, m = (t%3600)/60, s = t%60
         return h > 0 ? "\(h):\(String(format: "%02d:%02d", m, s))" : "\(m):\(String(format: "%02d", s))"
     }
     var dimensionText: String? {
