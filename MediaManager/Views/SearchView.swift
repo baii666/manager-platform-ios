@@ -272,6 +272,9 @@ private struct SearchCard: View {
             VStack(alignment: .leading, spacing: 0) {
                 let isPortrait = item.type == "album" || item.type == "movie" || item.type == "series" || item.type == "tv"
                 RemoteImage(url: cover, fallbackIcon: fallbackIcon, fallbackColors: fallbackColors)
+                    // 搜索结果混合了海报/抽帧封面/照片缩略图，尺寸各不相同，
+                    // 必须按容器尺寸渲染，否则会按原图像素撑开、压住相邻卡片
+                    .imageFilled()
                     .frame(height: isPortrait ? 200 : 150)
                     .frame(maxWidth: .infinity)
                     .clipped()

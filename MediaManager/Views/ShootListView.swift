@@ -190,6 +190,8 @@ struct ShootCard: View {
             VStack(alignment: .leading, spacing: 0) {
                 RemoteImage(url: coverURL, fallbackIcon: "photo.on.rectangle.angled",
                             fallbackColors: Theme.placeholderGradient(for: .shoot))
+                    // 同短视频卡：封面是抽帧产物，横竖分辨率不一，必须钉进容器尺寸里
+                    .imageFilled()
                     .frame(height: 130)
                     .frame(maxWidth: .infinity)
                     .clipped()

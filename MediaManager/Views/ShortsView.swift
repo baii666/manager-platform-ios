@@ -10,50 +10,53 @@ struct ShortsView: View {
     @State private var playError: String?
 
     private let gridSpacing: CGFloat = 12
-    private let minCardWidth: CGFloat = 150
     private let edgePadding: CGFloat = 16
+    /// 封面高度写死成常量，不跟列宽挂钩。
+    ///
+    /// 短视频封面是 FFmpeg 抽帧，横屏 1920×1080 / 竖屏 1080×1920 / 4K 混在一起，
+    /// 尺寸完全没有统一标准。只要行高还会随内容变（列宽测量、图片加载完成），
+    /// LazyVGrid 就不会重算已布局的行 —— 表现就是卡片互相压住。
+    /// 所以这里连列宽都不自己量，改用 adaptive 交给系统，高度保持常量。
+    private let coverHeight: CGFloat = 240
+    /// 标题区高度也写死，让整卡高度成为常量
+    private let titleHeight: CGFloat = 28
+
+    private var columns: [GridItem] {
+        [GridItem(.adaptive(minimum: 160, maximum: 220), spacing: gridSpacing)]
+    }
 
     var body: some View {
-        // ⚠️ 封面高度必须显式算出来，不能交给 .aspectRatio 让 SwiftUI 自己推。
-        // aspectRatio 在「高度未指定」时拿子视图的 ideal size 兜底，而 AsyncImage
-        // 加载中（占位图标 ~26pt）/ 加载完（原图像素 3000×4000，且每张封面还不一样）
-        // 的 ideal size 天差地别 —— 同一列卡片高度各不相同，整墙看起来就是错位的。
-        GeometryReader { geo in
-            let metrics = shortsGridMetrics(width: geo.size.width,
-                                            spacing: gridSpacing,
-                                            minCard: minCardWidth,
-                                            edge: edgePadding)
-            ScrollView {
-                if viewModel.items.isEmpty && !viewModel.isLoading {
-                    ContentUnavailableView(viewModel.errorMessage ?? "暂无短视频",
-                                           systemImage: viewModel.errorMessage == nil ? "play.rectangle.fill" : "exclamationmark.triangle")
-                        .frame(maxWidth: .infinity, minHeight: 400)
-                } else {
-                    LazyVGrid(columns: metrics.columns, spacing: gridSpacing) {
-                        ForEach(viewModel.items) { v in
-                            ShortCard(video: v, client: viewModel.client,
-                                      mediaHeight: metrics.cardWidth * 4.0 / 3.0) {
-                                guard let path = v.filePath, !path.isEmpty else {
-                                    playError = "这条记录没有文件路径"
-                                    return
-                                }
-                                guard let url = viewModel.client?.makeURL(
-                                    "/stream",
-                                    queryItems: [URLQueryItem(name: "path", value: path)]) else {
-                                    playError = "播放地址构造失败\n\(path)"
-                                    return
-                                }
-                                playTarget = PlayerTarget(url: url)
+        ScrollView {
+            if viewModel.items.isEmpty && !viewModel.isLoading {
+                ContentUnavailableView(viewModel.errorMessage ?? "暂无短视频",
+                                       systemImage: viewModel.errorMessage == nil ? "play.rectangle.fill" : "exclamationmark.triangle")
+                    .frame(maxWidth: .infinity, minHeight: 400)
+            } else {
+                LazyVGrid(columns: columns, spacing: gridSpacing) {
+                    ForEach(viewModel.items) { v in
+                        ShortCard(video: v, client: viewModel.client,
+                                  coverHeight: coverHeight,
+                                  cardHeight: coverHeight + titleHeight) {
+                            guard let path = v.filePath, !path.isEmpty else {
+                                playError = "这条记录没有文件路径"
+                                return
                             }
-                            .task {
-                                if v.id == viewModel.items.last?.id { await viewModel.loadMore() }
+                            guard let url = viewModel.client?.makeURL(
+                                "/stream",
+                                queryItems: [URLQueryItem(name: "path", value: path)]) else {
+                                playError = "播放地址构造失败\n\(path)"
+                                return
                             }
+                            playTarget = PlayerTarget(url: url)
+                        }
+                        .task {
+                            if v.id == viewModel.items.last?.id { await viewModel.loadMore() }
                         }
                     }
-                    .padding(edgePadding)
-                    if viewModel.isLoading {
-                        ProgressView().frame(maxWidth: .infinity).padding()
-                    }
+                }
+                .padding(edgePadding)
+                if viewModel.isLoading {
+                    ProgressView().frame(maxWidth: .infinity).padding()
                 }
             }
         }
@@ -108,16 +111,6 @@ struct ShortsView: View {
             Text(playError ?? "")
         }
     }
-}
-
-/// 按可用宽度算出「刚好铺满」的列数与列宽。
-/// 用 .fixed 而不是 .adaptive，是为了拿到确定的列宽 —— 封面高度要由它反推。
-private func shortsGridMetrics(width: CGFloat, spacing: CGFloat, minCard: CGFloat, edge: CGFloat)
-    -> (columns: [GridItem], cardWidth: CGFloat) {
-    let available = max(width - edge * 2, minCard)
-    let count = max(2, Int(floor((available + spacing) / (minCard + spacing))))
-    let cardWidth = floor((available - spacing * CGFloat(count - 1)) / CGFloat(count))
-    return (Array(repeating: GridItem(.fixed(cardWidth), spacing: spacing), count: count), cardWidth)
 }
 
 // MARK: - 短视频 VM
@@ -188,11 +181,12 @@ final class ShortsViewModel: ObservableObject {
     }
 }
 
-// MARK: - 短视频封面卡（封面固定 3:4，高度由列宽反推）
+// MARK: - 短视频封面卡（高度全常量：封面 coverHeight + 标题 titleHeight）
 private struct ShortCard: View {
     let video: ShortVideo
     let client: APIClient?
-    let mediaHeight: CGFloat
+    let coverHeight: CGFloat
+    let cardHeight: CGFloat
     var onTap: () -> Void
 
     private var poster: URL? {
@@ -206,8 +200,9 @@ private struct ShortCard: View {
                 ZStack(alignment: .bottomLeading) {
                     RemoteImage(url: poster, fallbackIcon: "play.rectangle.fill",
                                 fallbackColors: Theme.placeholderGradient(for: .short))
-                        // 同拍摄集卡：高度写死，宽度撑满列宽，超出部分裁掉
-                        .frame(height: mediaHeight)
+                        // imageFilled 把图片钉死在容器尺寸里，杜绝按原图像素渲染
+                        .imageFilled()
+                        .frame(height: coverHeight)
                         .frame(maxWidth: .infinity)
                         .clipped()
                     LinearGradient(colors: [.clear, .black.opacity(0.75)],
@@ -255,8 +250,13 @@ private struct ShortCard: View {
                 Text(video.titleText)
                     .font(.caption)
                     .lineLimit(1).truncationMode(.tail)
-                    .padding(.horizontal, 8).padding(.vertical, 6)
+                    .padding(.horizontal, 8)
+                    .frame(height: titleHeight, alignment: .leading)
             }
+            // 整卡高度也钉死：LazyVGrid 行高是「首帧测出来就固定」的，
+            // 只要高度有任何变化（图片加载完成、列宽重算）都不会重排 → 卡片压在一起
+            .frame(height: cardHeight, alignment: .top)
+            .clipped()
             .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(.separator))
         }

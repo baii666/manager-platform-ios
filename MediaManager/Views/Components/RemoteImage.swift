@@ -42,3 +42,20 @@ struct RemoteImage: View {
         }
     }
 }
+
+extension View {
+    /// 把内容压进「父级实际给到的尺寸」里渲染。
+    ///
+    /// AsyncImage 里的 `Image.resizable().scaledToFill()` 在拿不到确定尺寸时，会按
+    /// **原图像素**当 ideal size 使用（3000×4000 / 1920×1080 / 1080×1920 …）。
+    /// 短视频封面是 FFmpeg 直接抽帧，横竖分辨率完全没有统一标准，于是一旦父级约束
+    /// 不是硬性的，封面就会按各自的原始尺寸渲染、互相压住。
+    ///
+    /// ⚠️ 用法：尺寸 frame 必须写在**外面** —— `RemoteImage(...).imageFilled().frame(height: h)`
+    /// 反了的话 GeometryReader 拿不到确定尺寸，反而会塌缩。
+    func imageFilled() -> some View {
+        GeometryReader { geo in
+            self.frame(width: geo.size.width, height: geo.size.height).clipped()
+        }
+    }
+}
