@@ -36,13 +36,8 @@ struct LibraryPickerView: View {
         }
         // 顶 bar 已显示「电影 / 相册 / 拍摄集」，这里隐藏导航栏
         .toolbar(.hidden, for: .navigationBar)
-        .navigationDestination(for: Library.self) { lib in
-            contentView(for: lib)
-        }
         // ⚠️ 用 task(id: type)：顶 bar 切换分类时重新加载对应类型的媒体库
         .task(id: type) { await load() }
-        // 下拉刷新：保留旧数据，加载完替换（避免闪空）
-        .refreshable { await load(clear: false) }
     }
 
     private var emptyIcon: String {
@@ -55,40 +50,20 @@ struct LibraryPickerView: View {
     }
 
     @MainActor
-    private func load(clear: Bool = true) async {
+    private func load() async {
         guard let client = AppSession.shared.client else {
             errorMessage = "未连接服务器"
             isLoading = false
             return
         }
-        // 切换分类/首次加载才显示加载指示；下拉刷新用系统指示器。
-        // ⚠️ isLoading 触发 body 重算，在 .refreshable 里会导致刷新 Task 被取消（请求取消），
-        // 所以下拉刷新（clear=false）不碰 isLoading。
-        if clear {
-            isLoading = true
-            libraries = []  // 切换分类时清空，避免短暂显示上一分类的库
-        }
-        defer { if clear { isLoading = false } }
+        isLoading = true
+        libraries = []  // 切换分类时清空，避免短暂显示上一分类的库
+        defer { isLoading = false }
         do {
             libraries = try await client.libraries(ofType: type)
         } catch {
             libraries = []
             errorMessage = "加载媒体库失败"
-        }
-    }
-
-    /// 点库卡片后进对应类型的「库内容页」
-    @ViewBuilder
-    private func contentView(for lib: Library) -> some View {
-        switch type {
-        case "movie":
-            MediaListView(type: "movie", library: lib)
-        case "photo":
-            AlbumListView(library: lib)
-        case "shoot":
-            ShootListView(library: lib)
-        default:
-            EmptyView()
         }
     }
 }

@@ -146,5 +146,15 @@ struct LibraryHomeView: View {
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
         }
+        // navigationDestination 统一挂在这里（而不是每个 LibraryPickerView 各挂一个）。
+        // TabView(.page) 会同时挂载三个 page，三个 page 各自声明同类型 destination
+        // 会互相冲突 → NavigationLink push 失效（卡片点了没反应）。这里只声明一次。
+        .navigationDestination(for: Library.self) { lib in
+            switch category {
+            case .movie: MediaListView(type: "movie", library: lib)
+            case .photo: AlbumListView(library: lib)
+            case .shoot: ShootListView(library: lib)
+            }
+        }
     }
 }
