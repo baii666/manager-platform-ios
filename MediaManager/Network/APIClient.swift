@@ -81,6 +81,17 @@ final class APIClient: DataProviding, @unchecked Sendable {
         return try decoder.decode(PlaybackInfo.self, from: data)
     }
 
+    /// 带缓存的探测。
+    /// 服务端每次都要跑一遍 `ffmpeg -i` 才能知道编码，在 X: 挂载盘上要 1~3 秒。
+    /// 同一部片第二次点进去不该再等一次 —— 缓存 5 分钟，返回播放 / 重进直接秒开。
+    /// （文件被替换的极端情况最多错 5 分钟，代价可接受。）
+    func playbackInfo(path: String) async throws -> PlaybackInfo {
+        if let hit = PlaybackInfoStore.shared.get(path) { return hit }
+        let info = try await fetchPlaybackInfo(path: path)
+        PlaybackInfoStore.shared.set(path, info)
+        return info
+    }
+
     /// 直连地址。⚠️ 只对 MP4/M4V/MOV 有意义 —— 别的容器 AVPlayer 不认，
     /// 这里直接返回 nil，免得谁拿它去播 MKV 又得到一个「能拼出来但播不了」的地址。
     /// 非直连容器一律走 `resolvePlayback(path:startAt:...)`。
@@ -149,7 +160,7 @@ final class APIClient: DataProviding, @unchecked Sendable {
                          knownDuration: Double? = nil) async throws -> PlaybackTarget {
         let ext = (path as NSString).pathExtension.lowercased()
 
-        let info = try? await fetchPlaybackInfo(path: path)
+        let info = try? await playbackInfo(path: path)
         let codec = info?.videoCodec?.lowercased() ?? ""
         let tag = info?.videoTag?.lowercased() ?? ""
 
@@ -642,4 +653,26 @@ private struct ShortVideosResponse: Decodable {
 
 private struct PoolsResponse: Decodable {
     let pools: [ShortPool]
+}
+
+// MARK: - 播放探测缓存
+// `GET /api/playback/info` 每次都要让服务端跑一遍 ffprobe 才拿得到编码 / 容器 / tag。
+// 同一部片连点两次不该重复付这个代价（尤其是挂载盘上的大文件）。
+private final class PlaybackInfoStore: @unchecked Sendable {
+    static let shared = PlaybackInfoStore()
+
+    private let lock = NSLock()
+    private var items: [String: (date: Date, info: APIClient.PlaybackInfo)] = [:]
+    private let ttl: TimeInterval = 300
+
+    func get(_ path: String) -> APIClient.PlaybackInfo? {
+        lock.lock(); defer { lock.unlock() }
+        guard let hit = items[path], Date().timeIntervalSince(hit.date) < ttl else { return nil }
+        return hit.info
+    }
+
+    func set(_ path: String, _ info: APIClient.PlaybackInfo) {
+        lock.lock(); defer { lock.unlock() }
+        items[path] = (Date(), info)
+    }
 }

@@ -24,8 +24,9 @@ final class PlayerEngine: ObservableObject {
     ///
     /// ⚠️ 这种情况 `item.status` 依然是 `.readyToPlay`，**不会**走 `.failed`，
     /// 所以不会触发上面的 failure，界面表现就是「只有声音没有画面」的黑屏。
-    /// 最典型的触发源是 10-bit HEVC（Main 10 / yuv420p10le）：老一点的 iPad
-    /// 硬解只到 8-bit，AVFoundation 直接把视频轨 disable 掉而不报错。
+    /// 最典型的触发源不是编码本身，而是**封装 tag**：MP4 里装 HEVC 有两种 sample entry，
+    /// AVFoundation 只认 `hvc1`，ffmpeg 及多数封装工具写出来的是 `hev1`，
+    /// 碰上就直接禁用视频轨 —— iPad Air M4 解 10-bit HEVC 毫无压力，不是能力问题。
     @Published private(set) var videoTrackDisabled = false
 
     /// 用户正在拖动进度条 / 快进手势中。为 true 时屏蔽时间回调，避免进度条回跳。
@@ -98,7 +99,11 @@ final class PlayerEngine: ObservableObject {
         load(url: url, startAt: currentTime > 1 ? currentTime : nil)
     }
 
-    /// 视频轨被禁用的判断可能晚于 readyToPlay，延迟复查一次
+    /// tracks 不一定在 readyToPlay 那一刻就填充好，所以要复查一次 ——
+    /// 但**不该无脑等 2 秒**：hev1 那种情况 tracks 通常是齐的，
+    /// 第一次 checkVideoTracks 就已经判出来了，立刻降级能省掉整段空等。
+    /// 只有 tracks 还是空的时候才说明「还没解析出来」，那时早点复查（0.6s）；
+    /// 已经判过一次正常的，1.5 秒后再兜一次底就够了。
     private func scheduleTrackRecheck(_ item: AVPlayerItem) {
         trackCheckWork?.cancel()
         let work = DispatchWorkItem { [weak self, weak item] in
@@ -106,7 +111,8 @@ final class PlayerEngine: ObservableObject {
             self.checkVideoTracks(item)
         }
         trackCheckWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0, execute: work)
+        let delay = item.tracks.isEmpty ? 0.6 : 1.5
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
     /// 视频轨是否被本机解得出。

@@ -112,23 +112,19 @@ struct VideoPlayerView: View {
                     .background(Capsule().fill(Color.black.opacity(0.65)))
             }
 
-            // 加载指示：没 ready 且没失败时给个转圈，别让人以为卡死
-            if !engine.isReady, engine.failure == nil {
+            // 等待层：没 ready（首帧缓冲 / 降级换源）时给反馈。
+            // ⚠️ 降级提示和通用缓冲走**同一个**视图，否则 engine.load 复位 isReady 的
+            // 一瞬间两个 if 会叠成双转圈。
+            // 还要注意：降级提示是在「检测到黑屏 → 等服务端开会话」这段设的，
+            // 那会儿 isReady 还是 true（声音在响），所以条件里得单独把 fallbackNotice 算进去。
+            if engine.failure == nil, !engine.isReady || fallbackNotice != nil {
+                PlayerLoadingOverlay(title: title, message: fallbackNotice)
+            } else if engine.isReady, engine.failure == nil, !engine.isPlaying,
+                      engine.loadedRange > 0, engine.loadedRange < engine.currentTime + 1.5 {
+                // 已 ready 但停住了：HLS 分片还没供上（服务端转码跟不上），给个转圈
                 ProgressView()
                     .controlSize(.large)
                     .tint(.white)
-            }
-
-            // 降级提示：视频轨解不出来时正在让服务端实时转码，等个几秒
-            if let fallbackNotice {
-                VStack(spacing: 10) {
-                    ProgressView().controlSize(.large).tint(.white)
-                    Text(fallbackNotice)
-                        .font(.subheadline)
-                        .foregroundStyle(.white.opacity(0.85))
-                }
-                .padding(22)
-                .background(Color.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
 
             // 失败一定要看得见。之前没有任何错误状态，
@@ -480,6 +476,60 @@ struct VideoPlayerView: View {
         let session = AVAudioSession.sharedInstance()
         try? session.setCategory(.playback, mode: .moviePlayback)
         try? session.setActive(true)
+    }
+}
+
+// MARK: - 等待层
+// 之前播放器里只有一个光秃秃的 ProgressView：全黑背景上一个小转圈，
+// 没有片名、没有说明、没有计时。慢起来跟卡死没有区别 —— 这正是「准备播放体验差」的主因。
+// 这里把三件事写出来：在播什么、在等什么、等了多久。
+private struct PlayerLoadingOverlay: View {
+    let title: String?
+    /// 降级中的说明。nil 时按等待时长自动给文案
+    let message: String?
+
+    @State private var elapsed = 0
+
+    var body: some View {
+        VStack(spacing: 12) {
+            ProgressView()
+                .controlSize(.large)
+                .tint(.white)
+            if let title, !title.isEmpty {
+                Text(title)
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+            }
+            Text(text)
+                .font(.subheadline)
+                .foregroundStyle(.white.opacity(0.8))
+                .multilineTextAlignment(.center)
+        }
+        .padding(22)
+        .background(Color.black.opacity(0.5),
+                    in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .frame(maxWidth: 400)
+        .task { await tick() }
+    }
+
+    private var text: String {
+        if let message { return message }
+        switch elapsed {
+        case 0..<3:  return "正在缓冲…"
+        case 3..<10: return "正在从服务器取视频数据"
+        default:     return "还在缓冲（已 \(elapsed) 秒），服务端正在准备这个视频"
+        }
+    }
+
+    @MainActor
+    private func tick() async {
+        while !Task.isCancelled {
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            if Task.isCancelled { break }
+            elapsed += 1
+        }
     }
 }
 

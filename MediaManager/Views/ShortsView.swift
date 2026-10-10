@@ -4,12 +4,10 @@ import SwiftUI
 // 对齐网页端 ShortsPage（消费侧）：池筛选 + 搜索 + 封面墙 + 点开播放
 struct ShortsView: View {
     @StateObject private var viewModel = ShortsViewModel()
-    /// 播放目标。地址直接挂在 item 上，避免 isPresented + 分离 URL 状态不同步
-    @State private var playTarget: PlaybackTarget?
+    /// 播放请求。交给 PlayerHostView 去拿地址，它一弹出就有片名和进度反馈
+    @State private var playRequest: PlaybackRequest?
     /// 播放地址构造失败时给出明确原因，而不是静默什么都不发生
     @State private var playError: String?
-    /// 非 MP4 容器要先找服务端开 HLS 会话，这期间给个转圈
-    @State private var preparing = false
 
     private let gridSpacing: CGFloat = 12
     private let edgePadding: CGFloat = 16
@@ -92,25 +90,8 @@ struct ShortsView: View {
             }
         }
         .task { await viewModel.loadInitial() }
-        .fullScreenCover(item: $playTarget) { target in
-            NavigationStack {
-                VideoPlayerView(url: target.url,
-                                startPosition: target.startAt,
-                                timeOffset: target.timeOffset,
-                                sourcePath: target.sourcePath,
-                                knownDuration: target.knownDuration,
-                                title: target.title)
-                    .toolbar { ToolbarItem(placement: .cancellationAction) {
-                        Button("关闭") { playTarget = nil }
-                    } }
-            }
-        }
-        .overlay {
-            if preparing {
-                ProgressView("准备播放…")
-                    .padding(20)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            }
+        .fullScreenCover(item: $playRequest) { request in
+            PlayerHostView(request: request)
         }
         .alert("无法播放", isPresented: Binding(
             get: { playError != nil },
@@ -122,28 +103,16 @@ struct ShortsView: View {
         }
     }
 
-    /// 播放。非 MP4 容器要先找服务端开 HLS 会话，拿不到地址就明确报错，别静默。
+    /// 播放。这里只交出一个「请求」，真正拿地址（可能要为非 MP4 容器开 HLS 会话）
+    /// 由 PlayerHostView 接手，它一弹出就有片名和进度反馈，不再是列表页一个小转圈。
     private func openPlayback(path: String, title: String?, knownDuration: Double? = nil) {
-        guard let client = viewModel.client else {
-            playError = "还没连接到服务器，请重新登录"
-            return
-        }
-        guard !preparing else { return }
-        preparing = true
         let name = (title?.isEmpty == false) ? title! : (path as NSString).lastPathComponent
-        Task {
-            do {
-                let target = try await client.resolvePlayback(
-                    path: path, startAt: nil,
-                    title: name, assetType: nil, assetID: nil,
-                    knownDuration: knownDuration)
-                preparing = false
-                playTarget = target
-            } catch {
-                preparing = false
-                playError = "准备播放失败：\(error.localizedDescription)\n\(path)"
-            }
-        }
+        playRequest = PlaybackRequest(path: path,
+                                      title: name,
+                                      assetType: nil,
+                                      assetID: nil,
+                                      startAt: nil,
+                                      knownDuration: knownDuration)
     }
 }
 

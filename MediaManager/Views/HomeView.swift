@@ -7,11 +7,10 @@ import UIKit
 struct HomeView: View {
     @ObservedObject var viewModel: HomeViewModel
 
-    @State private var playing: PlaybackTarget?
+    /// 点开之后交给 PlayerHostView 去拿地址：它自己会立刻全屏并把等待过程摊开给人看
+    @State private var pending: PlaybackRequest?
     /// 点开却拿不到播放地址时给出明确原因，而不是「点了没反应」
     @State private var playError: String?
-    /// 非 MP4 容器要发两次请求（探测编码 + 开 HLS 会话）才拿得到地址，这期间得有反馈
-    @State private var preparing = false
     @State private var showingPhotos = false
     @State private var showingAlbums = false
     @State private var showingTasks = false
@@ -42,11 +41,6 @@ struct HomeView: View {
         .overlay {
             if viewModel.isLoading {
                 ProgressView("加载中…")
-                    .padding(20)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            } else if preparing {
-                // 不给反馈的话，MKV 点下去会有 1~2 秒完全没反应，像是卡了
-                ProgressView("准备播放…")
                     .padding(20)
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
@@ -107,19 +101,8 @@ struct HomeView: View {
         } message: {
             Text(playError ?? "")
         }
-        .fullScreenCover(item: $playing) { target in
-            NavigationStack {
-                VideoPlayerView(
-                    url: target.url,
-                    startPosition: target.startAt,
-                    timeOffset: target.timeOffset,
-                    sourcePath: target.sourcePath,
-                    knownDuration: target.knownDuration,
-                    title: target.title,
-                    assetType: target.assetType,
-                    assetID: target.assetID
-                )
-            }
+        .fullScreenCover(item: $pending) { request in
+            PlayerHostView(request: request)
         }
     }
 
@@ -263,38 +246,14 @@ struct HomeView: View {
             }
             return
         }
-        openPlayback(path: path,
-                     startAt: asset.position,
-                     title: asset.title,
-                     assetType: asset.type.rawValue,
-                     assetID: asset.id,
-                     knownDuration: asset.duration)
-    }
-
-    /// 拿播放地址是个异步过程（非 MP4 容器要服务端开 HLS 会话），所以不能像以前那样
-    /// 在点击的瞬间就拼个 URL 出来。失败一定要弹出来，别静默吞掉。
-    private func openPlayback(path: String, startAt: Double?,
-                              title: String, assetType: String, assetID: Int,
-                              knownDuration: Double? = nil) {
-        guard let client = AppSession.shared.client else {
-            playError = "还没连接到服务器，请重新登录"
-            return
-        }
-        guard !preparing else { return }
-        preparing = true
-        Task {
-            do {
-                let target = try await client.resolvePlayback(
-                    path: path, startAt: startAt,
-                    title: title, assetType: assetType, assetID: assetID,
-                    knownDuration: knownDuration)
-                preparing = false
-                playing = target
-            } catch {
-                preparing = false
-                playError = "《\(title)》准备播放失败：\(error.localizedDescription)"
-            }
-        }
+        // 只负责把「要播什么」交出去，不做任何网络请求。
+        // 拿地址的等待由 PlayerHostView 接手，它一弹出就有片名和进度反馈。
+        pending = PlaybackRequest(path: path,
+                                  title: asset.title,
+                                  assetType: asset.type.rawValue,
+                                  assetID: asset.id,
+                                  startAt: asset.position,
+                                  knownDuration: asset.duration)
     }
 
     /// 统一的行容器：继续观看 / 收藏 / 最近入库都用它，卡片各自固定尺寸，不再铺满多行
