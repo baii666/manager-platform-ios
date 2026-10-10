@@ -161,6 +161,10 @@ struct AlbumListView: View {
             VStack(spacing: 10) {
                 ListSearchBar(text: $viewModel.searchText, placeholder: "搜索相册名…")
                 HStack(spacing: 8) {
+                    // 库名（从导航栏挪到这里）
+                    Text(library?.name ?? "相册")
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
                     sortMenu
                     ToolChip(label: layout.landscape ? "横版" : "竖版",
                              icon: layout.landscape ? "rectangle" : "rectangle.portrait",
@@ -169,6 +173,8 @@ struct AlbumListView: View {
                     }
                     ToolSlider(icon: "arrow.up.left.and.arrow.down.right", layout: layout)
                     Spacer()
+                    // 固定库模式不显示库筛选
+                    if library == nil && viewModel.libraries.count > 1 { libraryMenu }
                     Text("\(viewModel.albums.count) / \(viewModel.totalCount)")
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
@@ -209,14 +215,9 @@ struct AlbumListView: View {
                 .simultaneousGesture(pinchGesture)
             }
         }
-        .navigationTitle(library?.name ?? "相册")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                // 固定库模式不显示库筛选
-                if library == nil && viewModel.libraries.count > 1 { libraryMenu }
-            }
-        }
+        // 隐藏系统导航栏（返回 / 侧边栏按钮都不要，库名已挪进工具行）；
+        // 返回靠系统边缘右滑手势与侧边栏切换
+        .toolbar(.hidden, for: .navigationBar)
         // ⚠️ iOS 17 起 onChange(of:) 零参闭包
         .onChange(of: viewModel.searchText) {
             Task {

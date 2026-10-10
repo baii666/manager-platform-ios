@@ -16,31 +16,52 @@ struct ShootListView: View {
     }
 
     var body: some View {
-        ScrollView {
-            if viewModel.items.isEmpty && !viewModel.isLoading {
-                ContentUnavailableView(viewModel.errorMessage ?? "暂无拍摄集",
-                                       systemImage: viewModel.errorMessage == nil ? "photo.on.rectangle.angled" : "exclamationmark.triangle")
-                    .frame(maxWidth: .infinity, minHeight: 400)
-            } else {
-                LazyVGrid(columns: columns, spacing: 16) {
-                    ForEach(viewModel.items) { shoot in
-                        ShootCard(shoot: shoot, client: viewModel.client) {
-                            selected = shoot
-                        }
-                        .task {
-                            if shoot.id == viewModel.items.last?.id { await viewModel.loadMore() }
+        VStack(spacing: 0) {
+            // 顶部状态栏：搜索框第一行，工具行第二行（库名从导航栏挪到这里）
+            VStack(spacing: 10) {
+                ListSearchBar(text: $viewModel.searchText, placeholder: "搜索拍摄集…")
+                HStack(spacing: 8) {
+                    Text(library?.name ?? "拍摄集")
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                    sortMenu
+                    Spacer()
+                    // 固定库模式不显示库筛选
+                    if library == nil && !viewModel.libraries.isEmpty { libraryMenu }
+                    Text("\(viewModel.items.count) / \(viewModel.totalCount)")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 10)
+            .padding(.bottom, 4)
+
+            ScrollView {
+                if viewModel.items.isEmpty && !viewModel.isLoading {
+                    ContentUnavailableView(viewModel.errorMessage ?? "暂无拍摄集",
+                                           systemImage: viewModel.errorMessage == nil ? "photo.on.rectangle.angled" : "exclamationmark.triangle")
+                        .frame(maxWidth: .infinity, minHeight: 400)
+                } else {
+                    LazyVGrid(columns: columns, spacing: 16) {
+                        ForEach(viewModel.items) { shoot in
+                            ShootCard(shoot: shoot, client: viewModel.client) {
+                                selected = shoot
+                            }
+                            .task {
+                                if shoot.id == viewModel.items.last?.id { await viewModel.loadMore() }
+                            }
                         }
                     }
-                }
-                .padding(20)
-                if viewModel.isLoading {
-                    ProgressView().frame(maxWidth: .infinity).padding()
+                    .padding(16)
+                    if viewModel.isLoading {
+                        ProgressView().frame(maxWidth: .infinity).padding()
+                    }
                 }
             }
         }
-        .navigationTitle(library?.name ?? "拍摄集")
-        .navigationBarTitleDisplayMode(.inline)
-        .searchable(text: $viewModel.searchText, prompt: "搜索拍摄集…")
+        // 隐藏系统导航栏（返回 / 侧边栏按钮都不要，库名已挪进工具行）
+        .toolbar(.hidden, for: .navigationBar)
         // ⚠️ iOS 17 起 `onChange(of:) { newValue in }`（单参数）已废弃，用零参数闭包
         .onChange(of: viewModel.searchText) {
             Task {
@@ -49,30 +70,23 @@ struct ShootListView: View {
                 await viewModel.reload()
             }
         }
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                // 固定库模式不显示库筛选
-                if library == nil && !viewModel.libraries.isEmpty { libraryMenu }
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    ForEach(ShootListViewModel.Sort.allCases, id: \.self) { s in
-                        Button {
-                            Task { await viewModel.setSort(s) }
-                        } label: {
-                            if viewModel.sort == s { Label(s.label, systemImage: "checkmark") }
-                            else { Text(s.label) }
-                        }
-                    }
-                } label: {
-                    Image(systemName: "arrow.up.arrow.down")
-                        .foregroundStyle(Theme.brand)
-                }
-            }
-        }
         .task { await viewModel.loadInitial() }
         .navigationDestination(item: $selected) { shoot in
             ShootDetailView(shoot: shoot)
+        }
+    }
+
+    /// 排序选择（对齐电影/相册列表页的胶囊样式）
+    private var sortMenu: some View {
+        ToolMenuChip(label: viewModel.sort.label, icon: "arrow.up.arrow.down") {
+            ForEach(ShootListViewModel.Sort.allCases, id: \.self) { s in
+                Button {
+                    Task { await viewModel.setSort(s) }
+                } label: {
+                    if viewModel.sort == s { Label(s.label, systemImage: "checkmark") }
+                    else { Text(s.label) }
+                }
+            }
         }
     }
 

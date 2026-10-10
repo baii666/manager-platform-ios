@@ -162,6 +162,10 @@ struct MediaListView: View {
             VStack(spacing: 10) {
                 ListSearchBar(text: $viewModel.searchText, placeholder: "搜索标题、演员、类型…")
                 HStack(spacing: 8) {
+                    // 库名（从导航栏挪到这里）
+                    Text(library?.name ?? (type == "tv" ? "剧集" : "电影"))
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
                     sortMenu
                     ToolChip(label: layout.landscape ? "横版" : "竖版",
                              icon: layout.landscape ? "rectangle" : "rectangle.portrait",
@@ -170,6 +174,8 @@ struct MediaListView: View {
                     }
                     ToolSlider(icon: "arrow.up.left.and.arrow.down.right", layout: layout)
                     Spacer()
+                    // 固定库模式不显示库筛选（只有一个库）
+                    if library == nil && !viewModel.libraries.isEmpty { libraryMenu }
                     Text("\(viewModel.items.count) / \(viewModel.totalCount)")
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
@@ -209,14 +215,8 @@ struct MediaListView: View {
                 .simultaneousGesture(pinchGesture)
             }
         }
-        .navigationTitle(library?.name ?? (type == "tv" ? "剧集" : "电影"))
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                // 固定库模式不显示库筛选（只有一个库）
-                if library == nil && !viewModel.libraries.isEmpty { libraryMenu }
-            }
-        }
+        // 隐藏系统导航栏（返回 / 侧边栏按钮都不要，库名已挪进工具行）
+        .toolbar(.hidden, for: .navigationBar)
         // ⚠️ iOS 17 起 onChange(of:) 零参闭包
         .onChange(of: viewModel.searchText) {
             Task {
