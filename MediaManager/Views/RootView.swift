@@ -69,14 +69,13 @@ struct BottomTabBar: View {
                     }
                     .foregroundStyle(selection == tab ? Theme.brand : Color.secondary)
                     .frame(minWidth: 60)
-                    .padding(.top, 6)
-                    .padding(.bottom, 4)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }
         }
         .frame(maxWidth: .infinity)
+        .frame(height: 50)  // 固定内容区高度，按钮图标+文字在其内垂直居中
         .padding(.horizontal, 16)
         .background(
             Color(uiColor: .systemBackground)
