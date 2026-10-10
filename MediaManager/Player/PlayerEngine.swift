@@ -49,6 +49,9 @@ final class PlayerEngine: ObservableObject {
     private var currentURL: URL?
     /// 视频轨复查（延迟执行）
     private var trackCheckWork: DispatchWorkItem?
+    /// 循环播放：播到末尾回到开头重播（短视频抖音式刷要用）
+    private var loop = false
+    private var endObserver: NSObjectProtocol?
 
     // MARK: 画中画
     // 放弃 AVPlayerViewController 后系统 PiP 按钮也没了，必须自己接回来，
@@ -77,9 +80,10 @@ final class PlayerEngine: ObservableObject {
 
     // MARK: 装载
 
-    func load(url: URL, startAt: Double?) {
+    func load(url: URL, startAt: Double?, autoplay: Bool = true, loop: Bool = false) {
         teardown()
         currentURL = url
+        self.loop = loop
         failure = nil
         videoTrackDisabled = false
         trackCheckWork?.cancel()
@@ -90,13 +94,23 @@ final class PlayerEngine: ObservableObject {
         bindItem(item)
         bindPlayer()
         startTicking()
-        player.play()
+        if loop {
+            // 播到末尾自动回到开头重播。object 用 item，换源后旧 observer 会被 teardown 清掉
+            endObserver = NotificationCenter.default.addObserver(
+                forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main) { [weak self] _ in
+                guard let self, self.loop else { return }
+                self.player.seek(to: .zero) { _ in self.player.play() }
+            }
+        }
+        if autoplay {
+            player.play()
+        }
     }
 
     /// 失败后重试：默认从断点续播
     func retry() {
         guard let url = currentURL else { return }
-        load(url: url, startAt: currentTime > 1 ? currentTime : nil)
+        load(url: url, startAt: currentTime > 1 ? currentTime : nil, loop: loop)
     }
 
     /// tracks 不一定在 readyToPlay 那一刻就填充好，所以要复查一次 ——
@@ -129,6 +143,10 @@ final class PlayerEngine: ObservableObject {
     func teardown() {
         trackCheckWork?.cancel()
         trackCheckWork = nil
+        if let endObserver {
+            NotificationCenter.default.removeObserver(endObserver)
+            self.endObserver = nil
+        }
         if let timeObserver {
             player.removeTimeObserver(timeObserver)
             self.timeObserver = nil

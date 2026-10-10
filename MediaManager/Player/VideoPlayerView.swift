@@ -38,6 +38,14 @@ struct VideoPlayerView: View {
     /// 传了才会上报播放进度（对接统一行为层 POST /api/actions/progress）
     var assetType: String? = nil
     var assetID: Int? = nil
+    /// 载入后是否立刻播放。短视频刷流里，非当前页也要提前缓冲，但先不播。
+    var autoplay: Bool = true
+    /// 循环播放（短视频抖音式刷）
+    var loop: Bool = false
+    /// 是否当前活跃页。刷流里滑走要暂停、滑回来继续播。
+    var isActive: Bool = true
+    /// 是否显示自带的关闭按钮。刷流里关闭由外层 ShortFeedView 统一管，这里隐藏避免重叠。
+    var showsCloseButton: Bool = true
 
     @StateObject private var engine = PlayerEngine()
     @Environment(\.dismiss) private var dismiss
@@ -143,6 +151,10 @@ struct VideoPlayerView: View {
         // ⚠️ iOS 17 起 `onChange(of:) { v in }`（单参数）已废弃，用零参数闭包
         .onChange(of: engine.videoTrackDisabled) {
             if engine.videoTrackDisabled { startFallback() }
+        }
+        .onChange(of: isActive) {
+            // 刷流里滑走暂停、滑回来继续播。首次出现时 setup() 已按 autoplay 决定，这里只处理切换
+            if isActive { engine.play() } else { engine.pause() }
         }
     }
 
@@ -275,7 +287,9 @@ struct VideoPlayerView: View {
 
     private var topBar: some View {
         HStack(spacing: 14) {
-            playerButton("xmark") { dismiss() }
+            if showsCloseButton {
+                playerButton("xmark") { dismiss() }
+            }
             Text(title ?? "")
                 .font(.headline)
                 .lineLimit(1)
@@ -371,7 +385,8 @@ struct VideoPlayerView: View {
 
     private func setup() {
         configureAudioSession()
-        engine.load(url: activeURL, startAt: fallback?.startAt ?? startPosition)
+        engine.load(url: activeURL, startAt: fallback?.startAt ?? startPosition,
+                    autoplay: autoplay, loop: loop)
         scheduleHide()
         startProgressReporting()
     }
@@ -408,7 +423,8 @@ struct VideoPlayerView: View {
                 fallback = target
                 fallbackNotice = nil
                 // load 会把 videoTrackDisabled 复位；若还是解不出会再触发一次，档位已 +1
-                engine.load(url: target.url, startAt: target.startAt)
+                // autoplay 用 isActive：降级检测可能晚于滑走，别让已离屏的页抢着出声
+                engine.load(url: target.url, startAt: target.startAt, autoplay: isActive, loop: loop)
             } catch {
                 fallbackNotice = nil
                 fallbackError = "兼容模式启动失败：\(error.localizedDescription)"

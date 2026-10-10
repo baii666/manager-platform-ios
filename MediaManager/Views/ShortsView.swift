@@ -4,8 +4,8 @@ import SwiftUI
 // 对齐网页端 ShortsPage（消费侧）：池筛选 + 搜索 + 封面墙 + 点开播放
 struct ShortsView: View {
     @StateObject private var viewModel = ShortsViewModel()
-    /// 播放请求。交给 PlayerHostView 去拿地址，它一弹出就有片名和进度反馈
-    @State private var playRequest: PlaybackRequest?
+    /// 刷流入口：点卡片后带着起始下标弹全屏抖音式刷流
+    @State private var feedEntry: ShortFeedEntry?
     /// 播放地址构造失败时给出明确原因，而不是静默什么都不发生
     @State private var playError: String?
 
@@ -42,7 +42,8 @@ struct ShortsView: View {
                                 playError = "这条记录没有文件路径"
                                 return
                             }
-                            openPlayback(path: path, title: v.title, knownDuration: v.duration)
+                            guard let idx = viewModel.items.firstIndex(where: { $0.id == v.id }) else { return }
+                            feedEntry = ShortFeedEntry(id: v.id, startIndex: idx)
                         }
                         .task {
                             if v.id == viewModel.items.last?.id { await viewModel.loadMore() }
@@ -90,8 +91,8 @@ struct ShortsView: View {
             }
         }
         .task { await viewModel.loadInitial() }
-        .fullScreenCover(item: $playRequest) { request in
-            PlayerHostView(request: request)
+        .fullScreenCover(item: $feedEntry) { entry in
+            ShortFeedView(viewModel: viewModel, startIndex: entry.startIndex)
         }
         .alert("无法播放", isPresented: Binding(
             get: { playError != nil },
@@ -102,18 +103,14 @@ struct ShortsView: View {
             Text(playError ?? "")
         }
     }
+}
 
-    /// 播放。这里只交出一个「请求」，真正拿地址（可能要为非 MP4 容器开 HLS 会话）
-    /// 由 PlayerHostView 接手，它一弹出就有片名和进度反馈，不再是列表页一个小转圈。
-    private func openPlayback(path: String, title: String?, knownDuration: Double? = nil) {
-        let name = (title?.isEmpty == false) ? title! : (path as NSString).lastPathComponent
-        playRequest = PlaybackRequest(path: path,
-                                      title: name,
-                                      assetType: nil,
-                                      assetID: nil,
-                                      startAt: nil,
-                                      knownDuration: knownDuration)
-    }
+// MARK: - 刷流入口
+// 用 item 触发 fullScreenCover（而不是 isPresented + 分离 index），
+// 避免闭包读到「更新前」的下标。
+private struct ShortFeedEntry: Identifiable {
+    let id: Int
+    let startIndex: Int
 }
 
 // MARK: - 短视频 VM
