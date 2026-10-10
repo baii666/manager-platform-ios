@@ -57,8 +57,10 @@ struct PhotoViewerView: View {
 
     var body: some View {
         GeometryReader { geo in
+            // ignoresSafeArea 后 geo.size = 整块屏幕；UI 元素用 safeAreaInsets 避让
+            let safe = geo.safeAreaInsets
             ZStack {
-                Color.black.opacity(backgroundOpacity).ignoresSafeArea()
+                Color.black.opacity(backgroundOpacity)
 
                 imageLayer(size: geo.size)
 
@@ -72,17 +74,21 @@ struct PhotoViewerView: View {
                     if showThumbs { thumbStrip }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                .padding(.top, 52)
+                .padding(.top, 52 + safe.top)
 
-                topBar
-                if showInfo, let photo { infoPanel(photo) }
-                bottomBar
+                topBar(topInset: safe.top)
+                if showInfo, let photo { infoPanel(photo, topInset: safe.top) }
+                bottomBar(bottomInset: safe.bottom)
                 if let tip { toast(tip) }
             }
             .frame(width: geo.size.width, height: geo.size.height)
             .onAppear { containerSize = geo.size }
             .onChange(of: geo.size) { _, new in containerSize = new }
         }
+        // ⚠️ 底部黑边根因：GeometryReader 默认遵守 safe area，图片层只画到
+        // home indicator 上沿，底下露出黑色背景。ignore 后 geo.size = 全屏，
+        // 图片真正铺满整屏；顶栏/底栏用 safeAreaInsets 手动避让。
+        .ignoresSafeArea()
         .statusBarHidden(true)
         .task(id: index) { await didChangeIndex() }
         .onAppear { scheduleIdleHide() }
@@ -331,7 +337,7 @@ struct PhotoViewerView: View {
 
     // MARK: - 顶部栏
 
-    private var topBar: some View {
+    private func topBar(topInset: CGFloat) -> some View {
         ZStack(alignment: .top) {
             HStack(alignment: .center) {
                 Text("\(index + 1) / \(photos.count)")
@@ -352,7 +358,7 @@ struct PhotoViewerView: View {
                 }
             }
             .padding(.horizontal, 16)
-            .padding(.top, 8)
+            .padding(.top, 8 + topInset)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .opacity(showUI ? 1 : 0)
@@ -362,7 +368,7 @@ struct PhotoViewerView: View {
 
     // MARK: - 信息面板
 
-    private func infoPanel(_ photo: Photo) -> some View {
+    private func infoPanel(_ photo: Photo, topInset: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(photo.fileName ?? "#\(photo.id)")
                 .font(.caption.weight(.medium))
@@ -387,14 +393,14 @@ struct PhotoViewerView: View {
         .background(.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
         .padding(.trailing, 16)
-        .padding(.top, 60)
+        .padding(.top, 60 + topInset)
         .opacity(showUI ? 1 : 0)
         .animation(.easeOut(duration: 0.25), value: showUI)
     }
 
     // MARK: - 底部工具栏
 
-    private var bottomBar: some View {
+    private func bottomBar(bottomInset: CGFloat) -> some View {
         ZStack(alignment: .bottom) {
             HStack(spacing: 6) {
                 Spacer(minLength: 0)
@@ -424,6 +430,8 @@ struct PhotoViewerView: View {
             .frame(maxWidth: .infinity)
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
+            // 按钮内容避开 home indicator 触摸条；背景渐变在 padding 外、延伸到屏幕底
+            .padding(.bottom, bottomInset)
             .background(
                 LinearGradient(colors: [.black.opacity(0.85), .black.opacity(0.55)],
                                startPoint: .bottom, endPoint: .top)
