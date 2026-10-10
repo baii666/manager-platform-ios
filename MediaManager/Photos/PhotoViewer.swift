@@ -96,6 +96,8 @@ struct PhotoViewerView: View {
             if let photo {
                 ViewerImageView(
                     photo: photo,
+                    containerSize: size,
+                    rotated: Int(rotation) % 180 != 0,
                     onLoaded: { imagePixelSize = $0 }
                 )
                 .scaleEffect(scale)
@@ -193,17 +195,14 @@ struct PhotoViewerView: View {
         }
     }
 
-    /// 1:1 原始像素：按容器算出 fit 后的显示宽度，再反推缩放比
+    /// 1:1 原始像素：按容器算出 scale=1 时的显示宽度，再反推缩放比
+    /// （竖图竖屏走 fill，显示宽度要按 fill 算，否则 1:1 会偏小）
     private func fitNative() {
-        guard let px = imagePixelSize, px.width > 0, px.height > 0,
-              containerSize.width > 0, containerSize.height > 0 else { return }
-        let aspect = px.width / px.height
-        let displayedWidth = aspect >= containerSize.width / containerSize.height
-            ? containerSize.width
-            : containerSize.height * aspect
-        guard displayedWidth > 0 else { return }
+        guard let px = imagePixelSize,
+              let fit = viewerFit(image: px, container: containerSize),
+              fit.width > 0 else { return }
         withAnimation(.easeOut(duration: 0.22)) {
-            scale = min(max(px.width / displayedWidth, 0.3), 10)
+            scale = min(max(px.width / fit.width, 0.3), 10)
             lastScale = scale
             offset = .zero
             lastOffset = .zero
@@ -515,10 +514,47 @@ struct PhotoViewerView: View {
     }
 }
 
+// MARK: - 显示尺寸计算
+//
+// iOS 版 iPad 竖屏容器宽高比约 820/1180 ≈ 0.695。默认 .fit 会把图片完整塞进容器，
+// 于是 3:4 竖图（0.75）得到 820×1093 —— 上下各留 ~43pt 黑边；2:3 竖图（0.667）
+// 得到 787×1180 —— 宽度比屏幕窄一截。两种都「不满屏」。
+//
+// 对策：竖图 + 竖屏时改用 .fill（等比放大到铺满，溢出部分裁掉），
+// 可见宽度恒等于屏宽、上下不留黑边。但裁切比例超过 20% 的超长图（9:16 长截图等）
+// 仍然走 .fit，否则一张图会被切掉一大截。
+fileprivate struct ViewerFit {
+    /// scale = 1 时图片的显示宽度
+    let width: CGFloat
+    let mode: ContentMode
+}
+
+fileprivate func viewerFit(image px: CGSize, container box: CGSize) -> ViewerFit? {
+    guard px.width > 0, px.height > 0, box.width > 0, box.height > 0 else { return nil }
+    let aspect = px.width / px.height
+    let boxAspect = box.width / box.height
+
+    // fit：宽度受限时取屏宽，否则按高度反推
+    let fitWidth: CGFloat = aspect >= boxAspect ? box.width : box.height * aspect
+
+    // 仅「竖图 + 竖屏」才考虑铺满
+    if aspect < 1, boxAspect < 1, fitWidth > 0 {
+        let fillWidth: CGFloat = max(box.width, box.height * aspect)
+        if fillWidth / fitWidth <= 1.25 {
+            return ViewerFit(width: fillWidth, mode: .fill)
+        }
+    }
+    return ViewerFit(width: fitWidth, mode: .fit)
+}
+
 // MARK: - 单张图（原图加载 + 缩略图占位 + 重试回退）
 
 struct ViewerImageView: View {
     let photo: Photo
+    /// 容器（即整屏）尺寸，用来决定 fit / fill 并把图撑到屏宽
+    var containerSize: CGSize = .zero
+    /// 已旋转 90°/270°：图片实际朝向与原始像素相反，此时一律走 fit，避免裁切加剧
+    var rotated: Bool = false
     var onLoaded: ((CGSize) -> Void)? = nil
 
     @State private var image: UIImage?
@@ -532,13 +568,9 @@ struct ViewerImageView: View {
     var body: some View {
         ZStack {
             if let image {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFit()
+                imageContent(image)
             } else if let placeholder {
-                Image(uiImage: placeholder)
-                    .resizable()
-                    .scaledToFit()
+                imageContent(placeholder)
             }
             if showSpinner {
                 ProgressView()
@@ -547,6 +579,29 @@ struct ViewerImageView: View {
             }
         }
         .task(id: photo.id) { await load() }
+    }
+
+    /// 撑满容器再按 fit / fill 摆放。
+    /// ⚠️ 不能直接写 resizable().scaledToFill() 而不给 frame —— resizable 后 Image
+    /// 的 ideal size 就是原图像素尺寸（动辄 3000×4000），没有 frame 约束会按原尺寸渲染。
+    @ViewBuilder
+    private func imageContent(_ img: UIImage) -> some View {
+        // 旋转 90°/270° 后朝向翻转，按翻转后的尺寸判定，避免竖图旋转后被过度裁切
+        let px = rotated
+            ? CGSize(width: img.size.height, height: img.size.width)
+            : img.size
+        if let fit = viewerFit(image: px, container: containerSize) {
+            Image(uiImage: img)
+                .resizable()
+                .aspectRatio(contentMode: fit.mode)
+                .frame(width: containerSize.width, height: containerSize.height)
+                // fill 时超出容器的部分由这里裁掉（外层 imageLayer 也有一道 .clipped()）
+                .clipped()
+        } else {
+            Image(uiImage: img)
+                .resizable()
+                .scaledToFit()
+        }
     }
 
     @MainActor
