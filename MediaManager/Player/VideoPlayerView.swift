@@ -68,6 +68,8 @@ struct VideoPlayerView: View {
 
     @State private var hideWork: DispatchWorkItem?
     @State private var reportTask: Task<Void, Never>?
+    /// 长按倍速的延迟任务：按下后 0.35s 才真正开始加速，期间松手就取消
+    @State private var holdWork: DispatchWorkItem?
 
     /// 降级后的播放目标（服务端重新封装 / 转码）。nil 表示还在用原地址
     @State private var fallback: PlaybackTarget? = nil
@@ -217,14 +219,20 @@ struct VideoPlayerView: View {
             .contentShape(Rectangle())
             // iOS 17 的 gesture(_:isEnabled:)：刷流里关掉，垂直滑动才不跟 ScrollView 抢
             .gesture(dragGesture, isEnabled: dragGesturesEnabled)
-            // 长按倍速：perform 在长按成功时触发（开始加速），onPressingChanged(false) 在松手时触发（恢复）。
-            // ⚠️ 必须用 onLongPressGesture 的 onPressingChanged 来感知松手，不能靠
-            // LongPressGesture.onChanged：后者在长按成功后手势即结束，之后松手不再有任何回调，
-            // 会卡成「加速了却松手不恢复」（实测踩过）。
-            .onLongPressGesture(minimumDuration: 0.35) {
-                engine.beginSpeedHold()
-            } onPressingChanged: { pressing in
-                if !pressing { engine.endSpeedHold() }
+            // 长按倍速：全靠 onPressingChanged 控制「按下/松手」，自己延迟 0.35s 才加速。
+            // 不用 perform（长按成功）来开始：它的触发时机不可控，实测会出现
+            // 「按着没反应、松手反而倍速」的反转。手动延迟最稳。
+            .onLongPressGesture(minimumDuration: 0.35, perform: {}) { pressing in
+                if pressing {
+                    holdWork?.cancel()
+                    let work = DispatchWorkItem { engine.beginSpeedHold() }
+                    holdWork = work
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: work)
+                } else {
+                    holdWork?.cancel()
+                    holdWork = nil
+                    engine.endSpeedHold()
+                }
             }
             // 双击优先于单击，故先声明
             .onTapGesture(count: 2) { engine.togglePlay() }
@@ -462,6 +470,8 @@ struct VideoPlayerView: View {
     private func teardown() {
         hideWork?.cancel()
         hideWork = nil
+        holdWork?.cancel()
+        holdWork = nil
         reportTask?.cancel()
         reportTask = nil
         let pos = engine.currentTime + activeOffset
