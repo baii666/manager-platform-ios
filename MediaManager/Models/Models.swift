@@ -215,7 +215,7 @@ struct RecentItem: Identifiable, Codable, Sendable {
 }
 
 // MARK: - 媒体库
-struct Library: Identifiable, Codable, Sendable {
+struct Library: Identifiable, Codable, Sendable, Hashable {
     let id: Int
     let name: String
     let type: String // movie / series / photo / shoot / mixed

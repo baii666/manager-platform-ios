@@ -3,10 +3,17 @@ import SwiftUI
 // MARK: - 拍摄集列表页
 // 对齐网页端 ShootListPage：网格 + 搜索 + 排序 + 库选择
 struct ShootListView: View {
-    @StateObject private var viewModel = ShootListViewModel()
+    let library: Library?
+
+    @StateObject private var viewModel: ShootListViewModel
     @State private var selected: Shoot?
 
     private let columns = [GridItem(.adaptive(minimum: 200), spacing: 16)]
+
+    init(library: Library? = nil) {
+        self.library = library
+        _viewModel = StateObject(wrappedValue: ShootListViewModel(library: library))
+    }
 
     var body: some View {
         ScrollView {
@@ -31,7 +38,7 @@ struct ShootListView: View {
                 }
             }
         }
-        .navigationTitle("拍摄集")
+        .navigationTitle(library?.name ?? "拍摄集")
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $viewModel.searchText, prompt: "搜索拍摄集…")
         // ⚠️ iOS 17 起 `onChange(of:) { newValue in }`（单参数）已废弃，用零参数闭包
@@ -44,7 +51,8 @@ struct ShootListView: View {
         }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                if !viewModel.libraries.isEmpty { libraryMenu }
+                // 固定库模式不显示库筛选
+                if library == nil && !viewModel.libraries.isEmpty { libraryMenu }
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
@@ -99,6 +107,9 @@ final class ShootListViewModel: ObservableObject {
         }
     }
 
+    /// 固定库模式：从「媒体库卡片墙」点进来时传入，直接看该库内容
+    let fixedLibrary: Library?
+
     @Published var items: [Shoot] = []
     @Published var libraries: [Library] = []
     @Published var selectedLibID: Int?
@@ -115,8 +126,19 @@ final class ShootListViewModel: ObservableObject {
     private let pageSize = 30
     private var hasMore = true
 
+    init(library: Library? = nil) {
+        self.fixedLibrary = library
+        self.selectedLibID = library?.id
+    }
+
     @MainActor
     func loadInitial() async {
+        if fixedLibrary != nil {
+            // 固定库：直接加载内容，不拉库列表
+            guard items.isEmpty else { return }
+            await reload()
+            return
+        }
         await loadLibraries()
         // 同 AlbumListView：从详情返回本页时 .task 可能重跑，此时 reload 会清空 items
         // 让 ScrollView 弹回顶部。已有数据就跳过，保住滚动位置。
@@ -128,7 +150,8 @@ final class ShootListViewModel: ObservableObject {
     @MainActor
     func loadLibraries() async {
         guard let client else { return }
-        do { libraries = try await client.mediaLibraries(ofMediaType: "shoot") } catch { libraries = [] }
+        // ⚠️ 用精确 type 匹配（shoot 库 type 就是 "shoot"，不是 movie/mixed）
+        do { libraries = try await client.libraries(ofType: "shoot") } catch { libraries = [] }
     }
 
     @MainActor

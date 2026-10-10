@@ -3,6 +3,9 @@ import UIKit
 
 // MARK: - 相册列表状态
 final class AlbumListViewModel: ObservableObject {
+    /// 固定库模式：从「媒体库卡片墙」点进来时传入，直接看该库相册
+    let fixedLibrary: Library?
+
     @Published var albums: [Album] = []
     @Published var libraries: [Library] = []
     @Published var selectedLibID: Int?
@@ -18,10 +21,23 @@ final class AlbumListViewModel: ObservableObject {
 
     var selectedLibrary: Library? { libraries.first { $0.id == selectedLibID } }
 
+    init(library: Library? = nil) {
+        self.fixedLibrary = library
+        self.selectedLibID = library?.id
+    }
+
     @MainActor
     func loadLibraries() async {
         guard let client else {
             errorMessage = "未连接服务器"
+            return
+        }
+        // 固定库模式：库已指定，直接加载
+        if let lib = fixedLibrary {
+            libraries = [lib]
+            selectedLibID = lib.id
+            guard albums.isEmpty else { return }
+            await reload()
             return
         }
         do {
@@ -80,9 +96,16 @@ final class AlbumListViewModel: ObservableObject {
 // MARK: - 相册列表页
 // 对齐网页端 AlbumListPage：相册网格（封面 + 标题 + 张数），点进相册看照片
 struct AlbumListView: View {
-    @StateObject private var viewModel = AlbumListViewModel()
+    let library: Library?
+
+    @StateObject private var viewModel: AlbumListViewModel
 
     private let columns = [GridItem(.adaptive(minimum: 170), spacing: 18)]
+
+    init(library: Library? = nil) {
+        self.library = library
+        _viewModel = StateObject(wrappedValue: AlbumListViewModel(library: library))
+    }
 
     var body: some View {
         ScrollView {
@@ -107,11 +130,12 @@ struct AlbumListView: View {
             }
             .padding(24)
         }
-        .navigationTitle("相册")
+        .navigationTitle(library?.name ?? "相册")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                if viewModel.libraries.count > 1 { libraryMenu }
+                // 固定库模式不显示库筛选
+                if library == nil && viewModel.libraries.count > 1 { libraryMenu }
             }
         }
         .navigationDestination(for: Album.self) { album in

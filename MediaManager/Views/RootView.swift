@@ -17,14 +17,14 @@ enum SidebarSection: String, CaseIterable, Identifiable {
 
 enum SidebarItem: String, CaseIterable, Identifiable, Hashable {
     case home, resume, favorites, recent, discover
-    case movie, series, photo, shoot, short
+    case movie, photo, shoot, short
 
     var id: String { rawValue }
 
     var section: SidebarSection {
         switch self {
         case .home, .resume, .favorites, .recent, .discover: return .browse
-        case .movie, .series, .photo, .shoot, .short: return .library
+        case .movie, .photo, .shoot, .short: return .library
         }
     }
 
@@ -36,7 +36,6 @@ enum SidebarItem: String, CaseIterable, Identifiable, Hashable {
         case .recent: return "最近入库"
         case .discover: return "发现"
         case .movie: return "电影"
-        case .series: return "剧集"
         case .photo: return "相册"
         case .shoot: return "拍摄集"
         case .short: return "短视频"
@@ -51,7 +50,6 @@ enum SidebarItem: String, CaseIterable, Identifiable, Hashable {
         case .recent: return "bolt.fill"
         case .discover: return "sparkles"
         case .movie: return "film"
-        case .series: return "tv"
         case .photo: return "camera"
         case .shoot: return "photo.on.rectangle.angled"
         case .short: return "play.rectangle.fill"
@@ -90,13 +88,11 @@ struct RootView: View {
                 case .home, .none:
                     HomeView(viewModel: viewModel)
                 case .movie:
-                    MediaListView(type: "movie")
-                case .series:
-                    MediaListView(type: "tv")
+                    LibraryPickerView(type: "movie")
                 case .photo:
-                    AlbumListView()
+                    LibraryPickerView(type: "photo")
                 case .shoot:
-                    ShootListView()
+                    LibraryPickerView(type: "shoot")
                 case .short:
                     ShortsView()
                 default:

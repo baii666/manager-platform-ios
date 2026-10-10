@@ -5,6 +5,8 @@ import UIKit
 // 对齐网页端 MediaListPage：selectedLibID 为 nil 时不传 lib，后端返回用户可见媒体库的全集
 final class MediaListViewModel: ObservableObject {
     let type: String
+    /// 固定库模式：从「媒体库卡片墙」点进来时传入，直接看该库内容，不再拉库列表/显示筛选菜单
+    let fixedLibrary: Library?
 
     @Published var items: [MediaItem] = []
     @Published var libraries: [Library] = []
@@ -21,14 +23,21 @@ final class MediaListViewModel: ObservableObject {
 
     var selectedLibrary: Library? { libraries.first { $0.id == selectedLibID } }
 
-    init(type: String) {
+    init(type: String, library: Library? = nil) {
         self.type = type
+        self.fixedLibrary = library
+        self.selectedLibID = library?.id
     }
 
     @MainActor
     func loadLibraries() async {
         guard let client else {
             errorMessage = "未连接服务器"
+            return
+        }
+        // 固定库模式：库已由外层指定，直接加载内容
+        if fixedLibrary != nil {
+            if items.isEmpty { await reload() }
             return
         }
         // 库列表和内容并行：库列表只喂顶部筛选菜单，不该阻塞内容首屏。
@@ -85,15 +94,17 @@ final class MediaListViewModel: ObservableObject {
 // MARK: - 影视列表页（电影 / 剧集通用）
 struct MediaListView: View {
     let type: String
+    let library: Library?
 
     @StateObject private var viewModel: MediaListViewModel
     @State private var selected: MediaItem?
 
     private let columns = [GridItem(.adaptive(minimum: 150), spacing: 18)]
 
-    init(type: String) {
+    init(type: String, library: Library? = nil) {
         self.type = type
-        _viewModel = StateObject(wrappedValue: MediaListViewModel(type: type))
+        self.library = library
+        _viewModel = StateObject(wrappedValue: MediaListViewModel(type: type, library: library))
     }
 
     var body: some View {
@@ -118,11 +129,12 @@ struct MediaListView: View {
                 ProgressView().frame(maxWidth: .infinity).padding()
             }
         }
-        .navigationTitle(type == "tv" ? "剧集" : "电影")
+        .navigationTitle(library?.name ?? (type == "tv" ? "剧集" : "电影"))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                if !viewModel.libraries.isEmpty { libraryMenu }
+                // 固定库模式不显示库筛选（只有一个库）
+                if library == nil && !viewModel.libraries.isEmpty { libraryMenu }
             }
         }
         .overlay {
