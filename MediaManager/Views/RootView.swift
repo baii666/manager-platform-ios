@@ -75,17 +75,17 @@ struct BottomTabBar: View {
             }
         }
         .frame(maxWidth: .infinity)
-        .frame(height: 50)  // 固定内容区高度，按钮图标+文字在其内垂直居中
+        .frame(height: 70)  // 覆盖「内容区 + home indicator 留白」整体，按钮在整体内垂直居中
         .padding(.horizontal, 16)
-        .background(
-            Color(uiColor: .systemBackground)
-                .ignoresSafeArea(edges: .bottom)  // 背景延伸到屏幕底，消除 home indicator 留白
-        )
+        .background(Color(uiColor: .systemBackground))
         .overlay(alignment: .top) {
             Rectangle()
                 .fill(Color(uiColor: .separator).opacity(0.5))
                 .frame(height: 0.5)
         }
+        // 整个 bar（含按钮）延伸到屏幕底：按钮才会落在 home indicator 留白的中间，
+        // 而不是悬在留白上方（之前只有背景延伸、按钮没跟着下移，所以一直偏上）
+        .ignoresSafeArea(edges: .bottom)
     }
 }
 
