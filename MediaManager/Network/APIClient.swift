@@ -152,13 +152,15 @@ final class APIClient: DataProviding, @unchecked Sendable {
 
     func fetchMediaDetail(id: Int) async throws -> MediaDetail {
         var detail: MediaDetail = try await request("/api/media/\(id)")
-        detail.posterURL = detail.posterImageId.map { makeURL("/media-image", queryItems: [
+        // ⚠️ makeURL 返回 URL?，用 flatMap 而不是 `.map { } ?? nil`
+        // （map 会得到 URL??，那种靠 ?? nil 压平的写法会招编译器警告）
+        detail.posterURL = detail.posterImageId.flatMap { makeURL("/media-image", queryItems: [
             URLQueryItem(name: "id", value: "\($0)"),
             URLQueryItem(name: "size", value: "600"),
-        ]) } ?? nil
-        detail.backdropURL = detail.fanartImageId.map { makeURL("/media-image", queryItems: [
+        ]) }
+        detail.backdropURL = detail.fanartImageId.flatMap { makeURL("/media-image", queryItems: [
             URLQueryItem(name: "id", value: "\($0)"),
-        ]) } ?? nil
+        ]) }
         // 剧照 relative → absolute
         if !detail.stills.isEmpty {
             detail.stills = detail.stills.compactMap { resolve($0) }
@@ -301,7 +303,10 @@ final class APIClient: DataProviding, @unchecked Sendable {
     private func resolveSearchItem(_ item: SearchItem) -> UnifiedAsset? {
         let isPhoto = item.hasThumb != nil || item.albumId != nil || item.folderName != nil
         let type: AssetType = isPhoto ? .photo : .media
-        let title = item.title ?? item.folderName ?? item.displayName ?? ""
+        // ⚠️ title 是非可选 String（默认 ""），写 `item.title ?? ...` 会被警告
+        // "left side of nil coalescing operator has non-optional type"。
+        // 直接用模型自带的 titleText：title → displayName → folderName → ""
+        let title = item.titleText
         guard !title.isEmpty else { return nil }
 
         var cover: URL?

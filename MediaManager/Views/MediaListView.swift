@@ -98,7 +98,8 @@ struct MediaListView: View {
             LazyVGrid(columns: columns, spacing: 18) {
                 ForEach(viewModel.items) { item in
                     let resolved = AppSession.shared.client?.resolveMedia(item)
-                    let cover: URL? = resolved?.cover ?? nil
+                    // resolved?.cover 是 URL??（cover 本身就是可选），flatMap 压平
+                    let cover: URL? = resolved.flatMap { $0.cover }
                     MediaCard(item: item, coverURL: cover) {
                         selected = item
                     }

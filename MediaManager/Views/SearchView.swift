@@ -226,12 +226,13 @@ private struct SearchCard: View {
     private var cover: URL? {
         switch item.type {
         case "movie", "series", "tv":
-            return item.posterImageId.map {
+            // .map 已返回可选，别再 ?? nil（no-op，会招警告）
+            return item.posterImageId.flatMap {
                 client?.makeURL("/media-image", queryItems: [
                     URLQueryItem(name: "id", value: "\($0)"),
                     URLQueryItem(name: "size", value: "600"),
                 ])
-            } ?? nil
+            }
         case "album", "photo":
             let aid = item.coverPhotoId ?? item.id
             return client?.makeURL("/photo", queryItems: [
