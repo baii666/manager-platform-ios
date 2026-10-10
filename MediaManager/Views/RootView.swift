@@ -61,15 +61,16 @@ struct BottomTabBar: View {
                 Button {
                     selection = tab
                 } label: {
-                    VStack(spacing: 3) {
+                    VStack(spacing: 2) {
                         Image(systemName: tab.systemImage)
-                            .font(.system(size: 22, weight: .semibold))
+                            .font(.system(size: 21, weight: .semibold))
                         Text(tab.title)
                             .font(.caption2.weight(.medium))
                     }
                     .foregroundStyle(selection == tab ? Theme.brand : Color.secondary)
                     .frame(minWidth: 60)
-                    .padding(.vertical, 8)
+                    .padding(.top, 6)
+                    .padding(.bottom, 4)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -77,7 +78,10 @@ struct BottomTabBar: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.horizontal, 16)
-        .background(Color(uiColor: .systemBackground))
+        .background(
+            Color(uiColor: .systemBackground)
+                .ignoresSafeArea(edges: .bottom)  // 背景延伸到屏幕底，消除 home indicator 留白
+        )
         .overlay(alignment: .top) {
             Rectangle()
                 .fill(Color(uiColor: .separator).opacity(0.5))

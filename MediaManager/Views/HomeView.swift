@@ -13,9 +13,7 @@ struct HomeView: View {
     @State private var playError: String?
     @State private var showingPhotos = false
     @State private var showingAlbums = false
-    @State private var showingTasks = false
     @State private var showingSearch = false
-    @StateObject private var taskViewModel = TaskProgressViewModel()
 
     var body: some View {
         ScrollView {
@@ -46,28 +44,6 @@ struct HomeView: View {
                     .padding(20)
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
-        }
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    showingTasks = true
-                } label: {
-                    Label("任务", systemImage: "gearshape.2")
-                }
-            }
-        }
-        .sheet(isPresented: $showingTasks) {
-            NavigationStack {
-                TaskProgressView(viewModel: taskViewModel)
-                    .navigationTitle("任务进度")
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .confirmationAction) {
-                            Button("完成") { showingTasks = false }
-                        }
-                    }
-            }
-            .presentationDetents([.medium, .large])
         }
         .sheet(isPresented: $showingPhotos) {
             NavigationStack {
