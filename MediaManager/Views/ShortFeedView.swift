@@ -21,6 +21,9 @@ struct ShortFeedView: View {
     /// 当前正在看的页（scrollPosition 跟踪，滑到哪更新到哪）
     @State private var currentID: Int?
     @State private var currentIndex: Int
+    /// 右滑退出：页面拖动偏移（跟手移动）
+    @State private var dragOffset: CGSize = .zero
+    @State private var isExiting = false
 
     /// 预加载窗口半径：当前页 ±2
     private let windowRadius = 2
@@ -66,17 +69,9 @@ struct ShortFeedView: View {
             .padding(.top, 8)
             .padding(.leading, 16)
         }
-        // 右滑退出：向右水平滑动超过阈值即退出播放器（与上下滑切视频不冲突）
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 20)
-                .onEnded { value in
-                    let dx = value.translation.width
-                    let dy = value.translation.height
-                    if dx > 100, dx > abs(dy) {
-                        dismiss()
-                    }
-                }
-        )
+        // 右滑退出：页面跟手向右移动，松手超过阈值则向下滑出消失（对齐抖音）
+        .offset(dragOffset)
+        .simultaneousGesture(exitDragGesture)
         .statusBar(hidden: true)
         .onChange(of: currentID) {
             guard let id = currentID,
@@ -87,6 +82,36 @@ struct ShortFeedView: View {
                 Task { await viewModel.loadMore() }
             }
         }
+    }
+
+    /// 右滑退出：拖动时页面跟手移动，松手超过阈值就向右下滑出消失
+    private var exitDragGesture: some Gesture {
+        DragGesture(minimumDistance: 20)
+            .onChanged { value in
+                guard !isExiting else { return }
+                if value.translation.width > 0 {
+                    dragOffset = value.translation
+                }
+            }
+            .onEnded { value in
+                guard !isExiting else { return }
+                let dx = value.translation.width
+                let dy = value.translation.height
+                if dx > 100, dx > abs(dy) {
+                    isExiting = true
+                    let screenH = UIScreen.main.bounds.height
+                    withAnimation(.easeIn(duration: 0.3)) {
+                        dragOffset = CGSize(width: dx + 120, height: screenH)
+                    }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.32) {
+                        dismiss()
+                    }
+                } else {
+                    withAnimation(.easeOut(duration: 0.25)) {
+                        dragOffset = .zero
+                    }
+                }
+            }
     }
 }
 
