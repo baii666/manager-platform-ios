@@ -36,6 +36,7 @@ struct ShortsView: View {
                     ForEach(viewModel.items) { v in
                         ShortCard(video: v, client: viewModel.client,
                                   coverHeight: coverHeight,
+                                  titleHeight: titleHeight,
                                   cardHeight: coverHeight + titleHeight) {
                             guard let path = v.filePath, !path.isEmpty else {
                                 playError = "这条记录没有文件路径"
@@ -186,6 +187,7 @@ private struct ShortCard: View {
     let video: ShortVideo
     let client: APIClient?
     let coverHeight: CGFloat
+    let titleHeight: CGFloat
     let cardHeight: CGFloat
     var onTap: () -> Void
 
