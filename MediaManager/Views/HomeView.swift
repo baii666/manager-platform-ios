@@ -82,20 +82,12 @@ struct HomeView: View {
         }
         .sheet(isPresented: $showingSearch) {
             NavigationStack {
-                SearchResultsView(results: viewModel.searchResults) { asset in
-                    showingSearch = false
-                    // 等 sheet 收起再弹播放器，避免两个转场打架
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                        handleAssetTap(asset)
+                SearchView()
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("完成") { showingSearch = false }
+                        }
                     }
-                }
-                .navigationTitle("搜索：\(viewModel.searchText)")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("完成") { showingSearch = false }
-                    }
-                }
             }
         }
         .fullScreenCover(item: $playingAsset) { asset in

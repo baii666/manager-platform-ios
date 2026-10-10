@@ -95,6 +95,10 @@ struct RootView: View {
                     MediaListView(type: "tv")
                 case .photo:
                     AlbumListView()
+                case .shoot:
+                    ShootListView()
+                case .short:
+                    ShortsView()
                 default:
                     PlaceholderView(item: selection ?? .home)
                 }

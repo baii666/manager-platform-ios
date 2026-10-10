@@ -339,6 +339,11 @@ struct Album: Identifiable, Codable, Sendable, Hashable {
         coverOrient = optString(c, .coverOrient)
         releaseDate = optString(c, .releaseDate)
     }
+
+    /// 由搜索结果构造（struct 已有自定义 init(from:)，抑制了成员构造器）
+    init(id: Int) {
+        self.id = id
+    }
 }
 
 // MARK: - 影视条目
@@ -377,6 +382,19 @@ struct MediaItem: Identifiable, Codable, Sendable {
         fanartImageId = optInt(c, .fanartImageId)
         libraryId = optInt(c, .libraryId)
     }
+
+    /// 由搜索结果构造（不依赖成员构造器，struct 已有自定义 init(from:)）
+    init(id: Int, title: String = "", year: Int? = nil, type: String = "",
+         filePath: String? = nil, posterImageId: Int? = nil, fanartImageId: Int? = nil, libraryId: Int? = nil) {
+        self.id = id
+        self.title = title
+        self.year = year
+        self.type = type
+        self.filePath = filePath
+        self.posterImageId = posterImageId
+        self.fanartImageId = fanartImageId
+        self.libraryId = libraryId
+    }
 }
 
 // MARK: - 用户
@@ -392,6 +410,302 @@ struct User: Codable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case id, username, role, enabled
+        case displayName = "display_name"
+    }
+}
+
+// MARK: - 演员
+struct Actor: Identifiable, Codable, Sendable {
+    let id: String
+    let name: String
+    var role: String? = nil
+    var thumbURL: URL? = nil
+
+    var initial: String { String((name.first ?? "?").uppercased()) }
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, role
+        case thumbURL = "thumb"
+    }
+
+    init(name: String, role: String? = nil, thumbURL: URL? = nil) {
+        self.id = name
+        self.name = name
+        self.role = role
+        self.thumbURL = thumbURL
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        name = (try? c.decode(String.self, forKey: .name)) ?? ""
+        id = name
+        role = optString(c, .role)
+        thumbURL = flexURL(c, .thumbURL)
+    }
+}
+
+// MARK: - 影视详情
+// 对应 GET /api/media/:id 返回的 gin.H map
+struct MediaDetail: Identifiable, Decodable, Sendable {
+    let id: Int
+    let type: String           // movie / tv
+    let title: String
+    var originalTitle: String? = nil
+    var year: Int? = nil
+    var plot: String? = nil
+    var runtime: Int? = nil    // 分钟
+    var rating: Double? = nil
+    var genres: [String] = []
+    var releaseDate: String? = nil
+    var director: String? = nil
+    var studio: String? = nil
+    var country: String? = nil
+    var certification: String? = nil
+    var actors: [Actor] = []
+    var posterImageId: Int? = nil
+    var fanartImageId: Int? = nil
+    var filePath: String? = nil
+    var videoFiles: [String] = []
+    var stills: [URL] = []       // 剧照（relative /raw?path=）
+    var folderPath: String? = nil
+    var issues: [String] = []
+
+    var posterURL: URL? = nil     // 客户端拼好
+    var backdropURL: URL? = nil   // 客户端拼好
+
+    var playable: Bool { !(videoFiles.isEmpty) }
+
+    var runtimeText: String? {
+        guard let runtime, runtime > 0 else { return nil }
+        let h = runtime / 60, m = runtime % 60
+        return h > 0 ? "\(h)h \(m)m" : "\(m)m"
+    }
+
+    /// 单条解码：actors 后端可能是 [{name,role,...}] 或 ["name"]，兼容两种
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(Int.self, forKey: .id)
+        type = (try? c.decode(String.self, forKey: .type)) ?? "movie"
+        title = (try? c.decode(String.self, forKey: .title)) ?? ""
+        originalTitle = optString(c, .originalTitle)
+        year = optInt(c, .year)
+        plot = optString(c, .plot)
+        runtime = optInt(c, .runtime)
+        rating = optDouble(c, .rating)
+        releaseDate = optString(c, .releaseDate)
+        director = optString(c, .director)
+        studio = optString(c, .studio)
+        country = optString(c, .country)
+        certification = optString(c, .certification)
+        folderPath = optString(c, .folderPath)
+        genres = (try? c.decode([String].self, forKey: .genres)) ?? []
+
+        // actors：优先对象数组，退化纯字符串数组
+        if let arr = try? c.decode([Actor].self, forKey: .actors) {
+            actors = arr
+        } else if let names = try? c.decode([String].self, forKey: .actors) {
+            actors = names.map { Actor(name: $0) }
+        }
+
+        posterImageId = optInt(c, .posterImageId)
+        fanartImageId = optInt(c, .fanartImageId)
+        filePath = optString(c, .filePath)
+        videoFiles = (try? c.decode([String].self, forKey: .videoFiles)) ?? []
+        if let s = try? c.decode([String].self, forKey: .stills) {
+            stills = s.compactMap { URL(string: $0) }
+        }
+        if let iss = try? c.decode([String].self, forKey: .issues) {
+            issues = iss
+        } else if let issStr = optString(c, .issuesStr) {
+            if let data = issStr.data(using: .utf8),
+               let arr = try? JSONDecoder().decode([String].self, from: data) {
+                issues = arr
+            }
+        }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, type, title
+        case originalTitle = "original_title"
+        case year, plot, runtime, rating, genres
+        case releaseDate = "release_date"
+        case director, studio, country, certification
+        case actors
+        case posterImageId = "poster_image_id"
+        case fanartImageId = "fanart_image_id"
+        case filePath = "file_path"
+        case videoFiles = "video_files"
+        case stills, folderPath = "folder_path"
+        case issues, issuesStr = "issues"
+    }
+}
+
+// MARK: - 拍摄集
+struct Shoot: Identifiable, Codable, Sendable, Hashable {
+    let id: Int
+    var libraryId: Int = 0
+    var folderName: String = ""
+    var displayName: String? = nil
+    var hasCover: Bool = false
+    var videoCount: Int = 0
+    var photoCount: Int = 0
+    var totalSize: Int64 = 0
+    var totalDuration: Int = 0
+    var folderMtime: Int64 = 0
+
+    var title: String { displayName?.isEmpty == false ? displayName! : folderName }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case libraryId = "library_id"
+        case folderName = "folder_name"
+        case displayName = "display_name"
+        case hasCover = "has_cover"
+        case videoCount = "video_count"
+        case photoCount = "photo_count"
+        case totalSize = "total_size"
+        case totalDuration = "total_duration"
+        case folderMtime = "folder_mtime"
+    }
+}
+
+struct ShootFile: Identifiable, Codable, Sendable, Hashable {
+    let id: Int
+    var shootId: Int = 0
+    var libraryId: Int = 0
+    var filename: String = ""
+    var fileSize: Int64 = 0
+    var mediaType: String = "video"  // video / image
+    var width: Int? = nil
+    var height: Int? = nil
+    var duration: Int? = nil
+    var hasThumb: Int = 0
+
+    var isVideo: Bool { mediaType == "video" }
+    var sizeText: String {
+        if fileSize < 1024 { return "\(fileSize) B" }
+        if fileSize < 1024*1024 { return String(format: "%.1f KB", Double(fileSize)/1024) }
+        if fileSize < 1024*1024*1024 { return String(format: "%.1f MB", Double(fileSize)/(1024*1024)) }
+        return String(format: "%.2f GB", Double(fileSize)/(1024*1024*1024))
+    }
+    var durationText: String? {
+        guard let d = duration, d > 0 else { return nil }
+        let h = d/3600, m = (d%3600)/60, s = d%60
+        return h > 0 ? "\(h):\(String(format: "%02d:%02d", m, s))" : "\(m):\(String(format: "%02d", s))"
+    }
+    var dimensionText: String? {
+        guard let w = width, let h = height, w > 0, h > 0 else { return nil }
+        return "\(w)×\(h)"
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case shootId = "shoot_id"
+        case libraryId = "library_id"
+        case filename
+        case fileSize = "file_size"
+        case mediaType = "media_type"
+        case width, height, duration
+        case hasThumb = "has_thumb"
+    }
+}
+
+struct ShootDetail: Decodable, Sendable {
+    let shoot: Shoot
+    let videos: [ShootFile]
+}
+
+// MARK: - 短视频
+struct ShortVideo: Identifiable, Codable, Sendable, Hashable {
+    let id: Int
+    var poolId: Int = 0
+    var fileName: String = ""
+    var title: String? = nil
+    var year: Int? = nil
+    var duration: Int? = nil
+    var fileSize: Int64 = 0
+    var width: Int? = nil
+    var height: Int? = nil
+    var filePath: String? = nil
+    var posterUrl: String? = nil
+    var gifUrl: String? = nil
+    var previewUrl: String? = nil
+    var hasPoster: Bool = false
+    var hasPreview: Bool = false
+
+    var titleText: String { title?.isEmpty == false ? title! : fileName }
+
+    var durationText: String? {
+        guard let d = duration, d > 0 else { return nil }
+        let h = d/3600, m = (d%3600)/60, s = d%60
+        return h > 0 ? "\(h):\(String(format: "%02d:%02d", m, s))" : "\(m):\(String(format: "%02d", s))"
+    }
+    var dimensionText: String? {
+        guard let w = width, let h = height, w > 0, h > 0 else { return nil }
+        return "\(w)×\(h)"
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case poolId = "pool_id"
+        case fileName = "file_name"
+        case title, year, duration, fileSize = "file_size"
+        case filePath = "file_path"
+        case width, height
+        case posterUrl = "posterUrl"
+        case gifUrl = "gifUrl"
+        case previewUrl = "previewUrl"
+        case hasPoster = "hasPoster"
+        case hasPreview = "hasPreview"
+    }
+}
+
+struct ShortPool: Identifiable, Codable, Sendable, Hashable {
+    let id: Int
+    var name: String = ""
+    var itemCount: Int = 0
+    var enabled: Int = 1
+
+    enum CodingKeys: String, CodingKey {
+        case id, name
+        case itemCount = "item_count"
+        case enabled
+    }
+}
+
+// MARK: - 搜索结果项
+// 对应 /api/search 返回的单条；type 区分 movie/series/album/photo/shoot 等
+struct SearchItem: Identifiable, Codable, Sendable {
+    let id: Int
+    var type: String = "movie"
+    var title: String = ""
+    var year: Int? = nil
+    var rating: Double? = nil
+    var libraryId: Int? = nil
+    var libraryName: String? = nil
+    var posterImageId: Int? = nil
+    var coverPhotoId: Int? = nil
+    var hasThumb: Int? = nil
+    var photoCount: Int? = nil
+    var albumId: Int? = nil
+    var folderName: String? = nil
+    var displayName: String? = nil
+
+    var titleText: String {
+        if !title.isEmpty { return title }
+        return displayName?.isEmpty == false ? displayName! : folderName
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, type, title, year, rating
+        case libraryId = "library_id"
+        case libraryName = "library_name"
+        case posterImageId = "poster_image_id"
+        case coverPhotoId = "cover_photo_id"
+        case hasThumb = "has_thumb"
+        case photoCount = "photo_count"
+        case albumId = "album_id"
+        case folderName = "folder_name"
         case displayName = "display_name"
     }
 }

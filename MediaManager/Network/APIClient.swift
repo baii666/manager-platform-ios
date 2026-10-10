@@ -59,6 +59,24 @@ final class APIClient: DataProviding, @unchecked Sendable {
         return try decoder.decode(T.self, from: data)
     }
 
+    /// 带 query items 的请求（自动正确编码）
+    private func request<T: Decodable>(_ path: String, queryItems: [URLQueryItem]) async throws -> T {
+        var comp = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)
+        comp?.path = path
+        comp?.queryItems = queryItems
+        guard let finalURL = comp?.url else { throw DataError.server("URL 构造失败") }
+        var req = URLRequest(url: finalURL)
+        req.httpMethod = "GET"
+        let (data, resp) = try await session.data(for: req)
+        if let http = resp as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+            if let err = try? decoder.decode(ErrorResponse.self, from: data), !err.error.isEmpty {
+                throw DataError.server(err.error)
+            }
+            throw DataError.http(http.statusCode)
+        }
+        return try decoder.decode(T.self, from: data)
+    }
+
     // MARK: - 认证
 
     func login(username: String, password: String) async throws -> User {
@@ -128,6 +146,113 @@ final class APIClient: DataProviding, @unchecked Sendable {
         let resp: SearchResponse = try await request("/api/search?q=\(encoded)&type=all&page=1&size=60")
         return resp.items.compactMap { resolveSearchItem($0) }
     }
+
+    // MARK: - 媒体详情
+
+    func fetchMediaDetail(id: Int) async throws -> MediaDetail {
+        var detail: MediaDetail = try await request("/api/media/\(id)")
+        detail.posterURL = detail.posterImageId.map { makeURL("/media-image", queryItems: [
+            URLQueryItem(name: "id", value: "\($0)"),
+            URLQueryItem(name: "size", value: "600"),
+        ]) } ?? nil
+        detail.backdropURL = detail.fanartImageId.map { makeURL("/media-image", queryItems: [
+            URLQueryItem(name: "id", value: "\($0)"),
+        ]) } ?? nil
+        // 剧照 relative → absolute
+        if !detail.stills.isEmpty {
+            detail.stills = detail.stills.compactMap { resolve($0) }
+        }
+        return detail
+    }
+
+    // MARK: - 拍摄集
+
+    func fetchShoots(libraryId: Int? = nil, page: Int = 1, size: Int = 30,
+                     sort: String = "mtime", search: String? = nil) async throws -> ([Shoot], Int) {
+        var qi: [URLQueryItem] = [
+            URLQueryItem(name: "page", value: "\(page)"),
+            URLQueryItem(name: "limit", value: "\(size)"),
+            URLQueryItem(name: "sort", value: sort),
+        ]
+        if let libraryId, libraryId > 0 { qi.append(URLQueryItem(name: "libraryId", value: "\(libraryId)")) }
+        if let search, !search.isEmpty { qi.append(URLQueryItem(name: "search", value: search)) }
+        let resp: ShootsPageResponse = try await request("/api/shoots", queryItems: qi)
+        return (resp.shoots, resp.total)
+    }
+
+    func fetchShootDetail(id: Int) async throws -> ShootDetail {
+        try await request("/api/shoots/\(id)")
+    }
+
+    func fetchShootPhotos(id: Int, page: Int = 1, size: Int = 50) async throws -> [ShootFile] {
+        let resp: ShootPhotosResponse = try await request(
+            "/api/shoots/\(id)/photos", queryItems: [
+                URLQueryItem(name: "page", value: "\(page)"),
+                URLQueryItem(name: "limit", value: "\(size)"),
+            ]
+        )
+        return resp.photos
+    }
+
+    func shootCoverURL(_ id: Int, size: Int = 600) -> URL? {
+        makeURL("/api/shoots/\(id)/cover", queryItems: [URLQueryItem(name: "size", value: "\(size)")])
+    }
+    func shootFileURL(_ fileId: Int) -> URL? {
+        makeURL("/api/shoot-file/\(fileId)")
+    }
+    /// 拍摄集内照片走统一的 /photo?id= 接口（与网页端一致）
+    func shootPhotoURL(_ id: Int, size: Int? = nil) -> URL? {
+        var qi: [URLQueryItem] = [URLQueryItem(name: "id", value: "\(id)")]
+        if let size { qi.append(URLQueryItem(name: "size", value: "\(size)")) }
+        else { qi.append(URLQueryItem(name: "size", value: "original")) }
+        return makeURL("/photo", queryItems: qi)
+    }
+
+    // MARK: - 短视频
+
+    func fetchShortVideos(poolId: Int? = nil, page: Int = 1, size: Int = 60,
+                          q: String? = nil, cover: String = "all") async throws -> ([ShortVideo], Int) {
+        var qi: [URLQueryItem] = [
+            URLQueryItem(name: "page", value: "\(page)"),
+            URLQueryItem(name: "size", value: "\(size)"),
+        ]
+        if let poolId, poolId > 0 { qi.append(URLQueryItem(name: "pool", value: "\(poolId)")) }
+        if let q, !q.isEmpty { qi.append(URLQueryItem(name: "q", value: q)) }
+        if cover != "all" { qi.append(URLQueryItem(name: "cover", value: cover)) }
+        let resp: ShortVideosResponse = try await request("/api/shorts/videos", queryItems: qi)
+        return (resp.items, resp.total)
+    }
+
+    func fetchShortPools() async throws -> [ShortPool] {
+        let resp: PoolsResponse = try await request("/api/shorts/pools")
+        return resp.pools
+    }
+
+    // MARK: - 搜索（分类）
+
+    /// 按类型分页搜索。type: all/movie/series/album/photo/shoot/short
+    func searchItems(query: String, type: String, page: Int = 1, size: Int = 60) async throws -> ([SearchItem], Int) {
+        let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
+        let resp: SearchResponse = try await request(
+            "/api/search", queryItems: [
+                URLQueryItem(name: "q", value: encoded),
+                URLQueryItem(name: "type", value: type),
+                URLQueryItem(name: "page", value: "\(page)"),
+                URLQueryItem(name: "size", value: "\(size)"),
+            ]
+        )
+        return (resp.items, resp.total)
+    }
+
+    /// 分类计数（用于搜索页 Tab 角标），走独立 /totals 端点
+    func searchTotals(query: String) async throws -> [String: Int] {
+        let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
+        let resp: [String: Int] = try await request("/api/search/totals", queryItems: [
+            URLQueryItem(name: "q", value: encoded)
+        ])
+        return resp
+    }
+
 
     // MARK: - 结果解析（拼完整 URL）
 
@@ -318,6 +443,7 @@ private struct AlbumListResponse: Decodable {
 
 private struct SearchResponse: Decodable {
     let items: [SearchItem]
+    let total: Int
 }
 
 /// /api/actions/status 的响应：states 里每项含 id / favorite / rating / position
@@ -333,20 +459,21 @@ private struct FavoriteResponse: Decodable {
     let favorite: Bool
 }
 
-/// 搜索结果异构字段：不同类型（影视/照片/相册）返回不同列，这里只取需要的
-private struct SearchItem: Decodable {
-    let id: Int
-    let title: String?
-    let fileName: String?
-    let folderName: String?
-    let posterImageId: Int?
-    let hasThumb: Int?
+private struct ShootsPageResponse: Decodable {
+    let shoots: [Shoot]
+    let total: Int
+}
 
-    enum CodingKeys: String, CodingKey {
-        case id, title
-        case fileName = "file_name"
-        case folderName = "folder_name"
-        case posterImageId = "poster_image_id"
-        case hasThumb = "has_thumb"
-    }
+private struct ShootPhotosResponse: Decodable {
+    let photos: [ShootFile]
+    let total: Int
+}
+
+private struct ShortVideosResponse: Decodable {
+    let items: [ShortVideo]
+    let total: Int
+}
+
+private struct PoolsResponse: Decodable {
+    let pools: [ShortPool]
 }

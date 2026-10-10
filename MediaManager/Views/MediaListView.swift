@@ -81,7 +81,7 @@ struct MediaListView: View {
     let type: String
 
     @StateObject private var viewModel: MediaListViewModel
-    @State private var playing: (url: URL, title: String)?
+    @State private var selected: MediaItem?
 
     private let columns = [GridItem(.adaptive(minimum: 150), spacing: 18)]
 
@@ -96,11 +96,8 @@ struct MediaListView: View {
                 ForEach(viewModel.items) { item in
                     let resolved = AppSession.shared.client?.resolveMedia(item)
                     let cover: URL? = resolved?.cover ?? nil
-                    let playback: URL? = resolved?.playback ?? nil
                     MediaCard(item: item, coverURL: cover) {
-                        if let url = playback {
-                            playing = (url, item.title)
-                        }
+                        selected = item
                     }
                     .task {
                         if item.id == viewModel.items.last?.id {
@@ -130,15 +127,8 @@ struct MediaListView: View {
             }
         }
         .task { await viewModel.loadLibraries() }
-        .fullScreenCover(item: Binding(
-            get: { playing.map { PlaybackItem(url: $0.url, title: $0.title) } },
-            set: { newValue in
-                if newValue == nil { playing = nil }
-            }
-        )) { item in
-            NavigationStack {
-                VideoPlayerView(url: item.url, title: item.title)
-            }
+        .navigationDestination(item: $selected) { item in
+            MediaDetailView(media: item)
         }
     }
 
@@ -175,13 +165,6 @@ struct MediaListView: View {
             .foregroundStyle(Theme.brand)
         }
     }
-}
-
-/// fullScreenCover 需要 Identifiable，这里把播放目标包一层
-private struct PlaybackItem: Identifiable, Hashable {
-    let url: URL
-    let title: String
-    var id: String { url.absoluteString }
 }
 
 // MARK: - 影视卡
