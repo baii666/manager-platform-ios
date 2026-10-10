@@ -449,7 +449,8 @@ private struct AirPlayButton: UIViewRepresentable {
 private struct VolumeHijack: UIViewRepresentable {
     func makeUIView(context: Context) -> MPVolumeView {
         let view = MPVolumeView()
-        view.showsRouteButton = false
+        // ⚠️ 别设 showsRouteButton：iOS 13 起已废弃（改用 AVRoutePickerView，本项目
+        // 已用 AVRoutePickerView 做投屏入口）。这个 view 是 1x1 隐藏的，不需要路由按钮。
         SystemVolume.shared.attach(view)
         return view
     }

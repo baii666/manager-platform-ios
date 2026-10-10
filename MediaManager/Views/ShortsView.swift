@@ -87,7 +87,8 @@ struct ShortsView: View {
                 }
             }
         }
-        .onChange(of: viewModel.searchText) { _ in
+        // ⚠️ iOS 17 起 `onChange(of:) { newValue in }`（单参数）已废弃，用零参数闭包
+        .onChange(of: viewModel.searchText) {
             Task {
                 try? await Task.sleep(nanoseconds: 350_000_000)
                 guard !Task.isCancelled else { return }
