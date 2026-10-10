@@ -406,6 +406,18 @@ final class APIClient: DataProviding, @unchecked Sendable {
         )
         return resp.favorite
     }
+
+    // MARK: - 行为层（播放进度）
+
+    /// 上报播放位置。POST /api/actions/progress {type,id,position,duration}
+    /// position <= 0 时后端会清除该资产的进度记录（看完/从头开始）。
+    /// 播放器每 15 秒调一次，关闭时再补一次，失败静默忽略。
+    func reportProgress(type: String, id: Int, position: Double, duration: Double) async throws {
+        let _: ActionAck = try await request(
+            "/api/actions/progress", method: "POST",
+            json: ["type": type, "id": id, "position": position, "duration": duration]
+        )
+    }
 }
 
 // MARK: - 响应 DTO
@@ -416,6 +428,11 @@ private struct LoginResponse: Decodable {
 
 private struct ErrorResponse: Decodable {
     let error: String
+}
+
+/// 行为层写接口的统一回包：{ok:true}
+private struct ActionAck: Decodable {
+    let ok: Bool?
 }
 
 private struct ItemsResponse<T: Decodable>: Decodable {

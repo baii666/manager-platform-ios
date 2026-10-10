@@ -36,7 +36,7 @@ struct MediaDetailView: View {
             if let detail, let path = detail.videoFiles.first,
                let url = client?.makeURL("/stream", queryItems: [URLQueryItem(name: "path", value: path)]) {
                 NavigationStack {
-                    VideoPlayerView(url: url, title: detail.title)
+                    VideoPlayerView(url: url, title: detail.title, assetType: "media", assetID: detail.id)
                         .toolbar { ToolbarItem(placement: .cancellationAction) {
                             Button("关闭") { playing = false }
                         } }

@@ -93,7 +93,13 @@ struct HomeView: View {
         .fullScreenCover(item: $playingAsset) { asset in
             if let url = asset.playbackURL {
                 NavigationStack {
-                    VideoPlayerView(url: url, startPosition: asset.position, title: asset.title)
+                    VideoPlayerView(
+                        url: url,
+                        startPosition: asset.position,
+                        title: asset.title,
+                        assetType: asset.type.rawValue,
+                        assetID: asset.id
+                    )
                 }
             }
         }
