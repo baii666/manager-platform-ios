@@ -216,10 +216,9 @@ struct AlbumListView: View {
             }
         }
         // 隐藏系统导航栏（返回 / 侧边栏按钮都不要，库名已挪进工具行）；
-        // 返回靠系统边缘右滑手势与侧边栏切换
-        .toolbar(.hidden, for: .navigationBar)
-        // 进入库内容列表页：隐藏侧边栏（不可拉出），返回库卡片墙时再恢复
-        .onAppear { SidebarStore.shared.visibility = .detailOnly }
+        // 返回靠系统边缘右滑手势。
+        // ⚠️ 跨库模式（library == nil，首页相册 sheet 入口）要保留导航栏（含「完成」按钮）
+        .toolbar(library == nil ? .automatic : .hidden, for: .navigationBar)
         // ⚠️ iOS 17 起 onChange(of:) 零参闭包
         .onChange(of: viewModel.searchText) {
             Task {

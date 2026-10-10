@@ -34,23 +34,13 @@ struct LibraryPickerView: View {
                 }
             }
         }
-        .navigationTitle(title)
-        .navigationBarTitleDisplayMode(.inline)
+        // 顶 bar 已显示「电影 / 相册 / 拍摄集」，这里隐藏导航栏
+        .toolbar(.hidden, for: .navigationBar)
         .navigationDestination(for: Library.self) { lib in
             contentView(for: lib)
         }
-        .task { await load() }
-        // 库卡片墙是 tab 根页面：回到这里时恢复显示侧边栏
-        .onAppear { SidebarStore.shared.visibility = .all }
-    }
-
-    private var title: String {
-        switch type {
-        case "movie": return "电影"
-        case "photo": return "相册"
-        case "shoot": return "拍摄集"
-        default: return "媒体库"
-        }
+        // ⚠️ 用 task(id: type)：顶 bar 切换分类时重新加载对应类型的媒体库
+        .task(id: type) { await load() }
     }
 
     private var emptyIcon: String {
@@ -70,6 +60,7 @@ struct LibraryPickerView: View {
             return
         }
         isLoading = true
+        libraries = []  // 切换分类时先清空，避免短暂显示上一分类的库
         defer { isLoading = false }
         do {
             libraries = try await client.libraries(ofType: type)

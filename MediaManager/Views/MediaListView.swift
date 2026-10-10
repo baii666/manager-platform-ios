@@ -217,8 +217,6 @@ struct MediaListView: View {
         }
         // 隐藏系统导航栏（返回 / 侧边栏按钮都不要，库名已挪进工具行）
         .toolbar(.hidden, for: .navigationBar)
-        // 进入库内容列表页：隐藏侧边栏（不可拉出），返回库卡片墙时再恢复
-        .onAppear { SidebarStore.shared.visibility = .detailOnly }
         // ⚠️ iOS 17 起 onChange(of:) 零参闭包
         .onChange(of: viewModel.searchText) {
             Task {

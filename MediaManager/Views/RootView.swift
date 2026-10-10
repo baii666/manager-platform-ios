@@ -1,69 +1,15 @@
 import SwiftUI
-import UIKit
 
-// MARK: - UIKit 干预：禁用 SplitView 边缘滑出 sidebar 的手势
-// 列表页（.detailOnly）要求「右滑 = 返回上一页」，而不是滑出 sidebar。
-// NavigationSplitView 底层是 UISplitViewController，默认 presentsWithGesture=true，
-// 会在左缘右滑时临时滑出 sidebar，抢走 NavigationStack 的返回手势。
-// 禁用它，让右滑交还给导航栈的 pop。
-private func disableSplitSwipeGesture() {
-    for scene in UIApplication.shared.connectedScenes {
-        guard let ws = scene as? UIWindowScene else { continue }
-        for window in ws.windows {
-            if let split = findSplitVC(window.rootViewController) {
-                split.presentsWithGesture = false
-            }
-        }
-    }
-}
-
-private func findSplitVC(_ vc: UIViewController?) -> UISplitViewController? {
-    guard let vc else { return nil }
-    if let split = vc as? UISplitViewController { return split }
-    for child in vc.children {
-        if let found = findSplitVC(child) { return found }
-    }
-    return nil
-}
-
-// MARK: - 侧边栏导航项
-enum SidebarSection: String, CaseIterable, Identifiable {
-    case browse
-    case library
+// MARK: - 根 tab（底 bar）
+enum RootTab: String, CaseIterable, Identifiable {
+    case home, library, short
 
     var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .browse: return "浏览"
-        case .library: return "媒体库"
-        }
-    }
-}
-
-enum SidebarItem: String, CaseIterable, Identifiable, Hashable {
-    case home, resume, favorites, recent, discover
-    case movie, photo, shoot, short
-
-    var id: String { rawValue }
-
-    var section: SidebarSection {
-        switch self {
-        case .home, .resume, .favorites, .recent, .discover: return .browse
-        case .movie, .photo, .shoot, .short: return .library
-        }
-    }
 
     var title: String {
         switch self {
         case .home: return "首页"
-        case .resume: return "继续观看"
-        case .favorites: return "我的收藏"
-        case .recent: return "最近入库"
-        case .discover: return "发现"
-        case .movie: return "电影"
-        case .photo: return "相册"
-        case .shoot: return "拍摄集"
+        case .library: return "媒体库"
         case .short: return "短视频"
         }
     }
@@ -71,99 +17,123 @@ enum SidebarItem: String, CaseIterable, Identifiable, Hashable {
     var systemImage: String {
         switch self {
         case .home: return "house.fill"
-        case .resume: return "clock.fill"
-        case .favorites: return "heart.fill"
-        case .recent: return "bolt.fill"
-        case .discover: return "sparkles"
-        case .movie: return "film"
-        case .photo: return "camera"
-        case .shoot: return "photo.on.rectangle.angled"
+        case .library: return "square.grid.2x2.fill"
         case .short: return "play.rectangle.fill"
         }
     }
 }
 
-// MARK: - 侧边栏可见性控制
-// 需求：库卡片墙（tab 根页面）显示侧边栏；push 进「库内容列表页」后隐藏侧边栏且不可拉出。
-// 通过共享 store 让根页面与列表页各自在 onAppear 时设置目标可见性。
-final class SidebarStore: ObservableObject {
-    static let shared = SidebarStore()
-    @Published var visibility: NavigationSplitViewVisibility = .all
-}
-
-// MARK: - 根视图：三栏骨架
+// MARK: - 根视图：底 bar 三 tab 骨架
+// 改版：去掉侧边栏（NavigationSplitView），改常驻底 bar 三个 tab ——
+// 首页 / 媒体库 / 短视频。每个 tab 各自持有一个 NavigationStack，
+// 用 opacity + allowsHitTesting 切换，保留各 tab 的导航栈状态。
 struct RootView: View {
     @StateObject private var viewModel = HomeViewModel()
-    @ObservedObject private var sidebar = SidebarStore.shared
-    @State private var selection: SidebarItem? = .home
+    @State private var tab: RootTab = .home
 
     var body: some View {
-        NavigationSplitView(columnVisibility: $sidebar.visibility) {
-            List(selection: $selection) {
-                ForEach(SidebarSection.allCases) { section in
-                    Section(section.title) {
-                        ForEach(SidebarItem.allCases.filter { $0.section == section }) { item in
-                            Label(item.title, systemImage: item.systemImage)
-                                .tag(item)
-                        }
-                    }
-                }
-                Section {
-                    Button(role: .destructive) {
-                        AppSession.shared.logout()
-                    } label: {
-                        Label("登出", systemImage: "rectangle.portrait.and.arrow.right")
-                    }
-                }
-            }
-            .navigationTitle("媒体库")
-        } detail: {
-            NavigationStack {
-                switch selection {
-                case .home, .none:
-                    HomeView(viewModel: viewModel)
-                case .movie:
-                    LibraryPickerView(type: "movie")
-                case .photo:
-                    LibraryPickerView(type: "photo")
-                case .shoot:
-                    LibraryPickerView(type: "shoot")
-                case .short:
-                    ShortsView()
-                default:
-                    PlaceholderView(item: selection ?? .home)
-                }
-            }
+        ZStack {
+            NavigationStack { HomeView(viewModel: viewModel) }
+                .opacity(tab == .home ? 1 : 0)
+                .allowsHitTesting(tab == .home)
+
+            NavigationStack { LibraryHomeView() }
+                .opacity(tab == .library ? 1 : 0)
+                .allowsHitTesting(tab == .library)
+
+            NavigationStack { ShortsView() }
+                .opacity(tab == .short ? 1 : 0)
+                .allowsHitTesting(tab == .short)
         }
-        // 切换 tab（侧边栏选择变化）时恢复侧边栏显示，覆盖 ShortsView / 占位页等根页面
-        .onChange(of: selection) { _, _ in
-            sidebar.visibility = .all
-        }
-        .onAppear {
-            // NavigationSplitView 的 UISplitViewController 在首帧后才完全就绪，
-            // 延迟一帧再禁用其边缘滑出 sidebar 的手势
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                disableSplitSwipeGesture()
-            }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            BottomTabBar(selection: $tab)
         }
     }
 }
 
-// MARK: - 占位页（后续逐个实现）
-struct PlaceholderView: View {
-    let item: SidebarItem
+// MARK: - 底 bar
+struct BottomTabBar: View {
+    @Binding var selection: RootTab
 
     var body: some View {
-        VStack(spacing: 16) {
-            Image(systemName: item.systemImage)
-                .font(.system(size: 44, weight: .light))
-                .foregroundStyle(.secondary)
-            Text(item.title)
-                .font(.title3.weight(.semibold))
-            Text("该页面将在后续迭代中接入")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+        HStack(spacing: 0) {
+            ForEach(RootTab.allCases) { tab in
+                Button {
+                    selection = tab
+                } label: {
+                    VStack(spacing: 3) {
+                        Image(systemName: tab.systemImage)
+                            .font(.system(size: 22, weight: .semibold))
+                        Text(tab.title)
+                            .font(.caption2.weight(.medium))
+                    }
+                    .foregroundStyle(selection == tab ? Theme.brand : Color.secondary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.horizontal, 16)
+        .background(Color(uiColor: .systemBackground))
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(Color(uiColor: .separator).opacity(0.5))
+                .frame(height: 0.5)
+        }
+    }
+}
+
+// MARK: - 媒体库页（顶 bar 切换电影 / 相册 / 拍摄集）
+struct LibraryHomeView: View {
+    enum Category: String, CaseIterable, Identifiable {
+        case movie, photo, shoot
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .movie: return "电影"
+            case .photo: return "相册"
+            case .shoot: return "拍摄集"
+            }
+        }
+
+        var type: String { rawValue }
+    }
+
+    @State private var category: Category = .movie
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // 顶 bar：电影 / 相册 / 拍摄集
+            HStack(spacing: 6) {
+                ForEach(Category.allCases) { c in
+                    Button {
+                        category = c
+                    } label: {
+                        Text(c.title)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(category == c ? Color.white : Color.primary)
+                            .padding(.horizontal, 18)
+                            .padding(.vertical, 8)
+                            .background(
+                                category == c
+                                    ? Theme.brand
+                                    : Color(uiColor: .secondarySystemBackground),
+                                in: Capsule()
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+
+            // 库卡片墙
+            LibraryPickerView(type: category.type)
+        }
     }
 }
