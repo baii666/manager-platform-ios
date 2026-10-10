@@ -212,7 +212,7 @@ private struct ShortCard: View {
                     .lineLimit(1).truncationMode(.tail)
                     .padding(.horizontal, 8).padding(.vertical, 6)
             }
-            .background(.secondarySystemBackground, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(.separator))
         }
         .buttonStyle(.plain)

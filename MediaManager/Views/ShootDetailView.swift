@@ -125,7 +125,7 @@ final class ShootDetailViewModel: ObservableObject {
 
     @MainActor
     func loadInitial() async {
-        guard let client else { return }
+        guard let client = AppSession.shared.client else { return }
         isLoading = true
         defer { isLoading = false }
         do {
@@ -137,7 +137,7 @@ final class ShootDetailViewModel: ObservableObject {
 
     @MainActor
     func loadMorePhotos() async {
-        guard let client, !isLoading, photoHasMore || photoPage == 1 else { return }
+        guard let client = AppSession.shared.client, !isLoading, photoHasMore || photoPage == 1 else { return }
         isLoading = true
         defer { isLoading = false }
         do {
@@ -184,7 +184,7 @@ private struct ShootVideoRow: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(10)
-            .background(.secondarySystemBackground, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(.separator))
         }
         .buttonStyle(.plain)
