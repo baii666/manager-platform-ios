@@ -31,17 +31,20 @@ final class MediaListViewModel: ObservableObject {
             errorMessage = "未连接服务器"
             return
         }
+        // 库列表和内容并行：库列表只喂顶部筛选菜单，不该阻塞内容首屏。
+        // 之前是串行（先 await 库列表再 reload），库列表里 photo 库的 COUNT 慢时会拖慢整页。
+        async let libsTask = client.mediaLibraries(ofMediaType: type)
+        // 同 AlbumListView：从详情返回本页时 .task 可能重跑，此时 reload 会清空 items
+        // 让 ScrollView 弹回顶部。已有数据就跳过，保住滚动位置。
+        if items.isEmpty {
+            await reload()
+        }
         do {
-            libraries = try await client.mediaLibraries(ofMediaType: type)
+            libraries = try await libsTask
         } catch {
             // 库列表拉不到不阻塞内容加载，退化成「全部」
             libraries = []
         }
-        // 同 AlbumListView：从详情返回本页时 .task 可能重跑，此时 reload 会清空 items
-        // 让 ScrollView 弹回顶部。已有数据就跳过，保住滚动位置。
-        // 切换媒体库仍由 selectLibrary 直接调 reload()，不受影响。
-        guard items.isEmpty else { return }
-        await reload()
     }
 
     @MainActor
