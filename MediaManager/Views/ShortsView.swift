@@ -6,6 +6,8 @@ struct ShortsView: View {
     @StateObject private var viewModel = ShortsViewModel()
     @State private var playing = false
     @State private var playingURL: URL?
+    /// 播放地址构造失败时给出明确原因，而不是静默什么都不发生
+    @State private var playError: String?
 
     private let gridSpacing: CGFloat = 12
     private let minCardWidth: CGFloat = 150
@@ -31,10 +33,18 @@ struct ShortsView: View {
                         ForEach(viewModel.items) { v in
                             ShortCard(video: v, client: viewModel.client,
                                       mediaHeight: metrics.cardWidth * 4.0 / 3.0) {
-                                if let path = v.filePath,
-                                   let url = viewModel.client?.makeURL("/stream", queryItems: [URLQueryItem(name: "path", value: path)]) {
-                                    playingURL = url; playing = true
+                                guard let path = v.filePath, !path.isEmpty else {
+                                    playError = "这条记录没有文件路径"
+                                    return
                                 }
+                                guard let url = viewModel.client?.makeURL(
+                                    "/stream",
+                                    queryItems: [URLQueryItem(name: "path", value: path)]) else {
+                                    playError = "播放地址构造失败\n\(path)"
+                                    return
+                                }
+                                playingURL = url
+                                playing = true
                             }
                             .task {
                                 if v.id == viewModel.items.last?.id { await viewModel.loadMore() }
@@ -83,14 +93,32 @@ struct ShortsView: View {
         }
         .task { await viewModel.loadInitial() }
         .fullScreenCover(isPresented: $playing) {
-            if let playingURL {
-                NavigationStack {
+            // ⚠️ NavigationStack 里不能是空的 —— 空栈就是一片系统白底，
+            // 任何「地址没构造出来」的情况都会表现成白屏且无从判断。
+            NavigationStack {
+                if let playingURL {
                     VideoPlayerView(url: playingURL, title: "短视频")
                         .toolbar { ToolbarItem(placement: .cancellationAction) {
                             Button("关闭") { playing = false }
                         } }
+                } else {
+                    VStack(spacing: 12) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 32))
+                            .foregroundStyle(.orange)
+                        Text("没有可播放的视频")
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
+        }
+        .alert("无法播放", isPresented: Binding(
+            get: { playError != nil },
+            set: { if !$0 { playError = nil } }
+        )) {
+            Button("好", role: .cancel) { playError = nil }
+        } message: {
+            Text(playError ?? "")
         }
     }
 }

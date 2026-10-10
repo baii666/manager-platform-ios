@@ -18,6 +18,8 @@ final class PlayerEngine: ObservableObject {
     @Published private(set) var loadedRange: Double = 0
     @Published private(set) var isReady = false
     @Published private(set) var rate: Float = 1.0
+    /// 播放失败原因。之前播放器没有任何错误状态，任何失败都是「静默白屏」，无法定位
+    @Published private(set) var failure: String? = nil
 
     /// 用户正在拖动进度条 / 快进手势中。为 true 时屏蔽时间回调，避免进度条回跳。
     var isScrubbing = false
@@ -35,6 +37,8 @@ final class PlayerEngine: ObservableObject {
 
     /// 续播位置。需要等 item ready 才能 seek，故先存起来。
     private var pendingStart: Double?
+    /// 当前装载的 URL，供 retry 使用
+    private var currentURL: URL?
 
     // MARK: 画中画
     // 放弃 AVPlayerViewController 后系统 PiP 按钮也没了，必须自己接回来，
@@ -65,6 +69,9 @@ final class PlayerEngine: ObservableObject {
 
     func load(url: URL, startAt: Double?) {
         teardown()
+        currentURL = url
+        failure = nil
+        isReady = false
         let item = AVPlayerItem(url: url)
         player.replaceCurrentItem(with: item)
         pendingStart = (startAt ?? 0) > 0 ? startAt : nil
@@ -72,6 +79,12 @@ final class PlayerEngine: ObservableObject {
         bindPlayer()
         startTicking()
         player.play()
+    }
+
+    /// 失败后重试：默认从断点续播
+    func retry() {
+        guard let url = currentURL else { return }
+        load(url: url, startAt: currentTime > 1 ? currentTime : nil)
     }
 
     func teardown() {
@@ -99,6 +112,9 @@ final class PlayerEngine: ObservableObject {
                         self.pendingStart = nil
                         self.seek(to: start)
                     }
+                } else if item.status == .failed {
+                    let desc = item.error?.localizedDescription ?? "未知错误"
+                    self.failure = desc
                 }
             }
         }

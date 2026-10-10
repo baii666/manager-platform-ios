@@ -68,6 +68,19 @@ struct VideoPlayerView: View {
                     .padding(.vertical, 10)
                     .background(Capsule().fill(Color.black.opacity(0.65)))
             }
+
+            // 加载指示：没 ready 且没失败时给个转圈，别让人以为卡死
+            if !engine.isReady, engine.failure == nil {
+                ProgressView()
+                    .controlSize(.large)
+                    .tint(.white)
+            }
+
+            // 失败一定要看得见。之前没有任何错误状态，
+            // URL 错 / 404 / 编解码不支持全都表现成「无声无画面」。
+            if let failure = engine.failure {
+                errorPanel(failure)
+            }
         }
         .ignoresSafeArea()
         .navigationTitle(title ?? "播放")
@@ -76,6 +89,41 @@ struct VideoPlayerView: View {
         .statusBar(hidden: true)
         .onAppear { setup() }
         .onDisappear { teardown() }
+    }
+
+    /// 失败面板：把原因和完整 URL 都摆出来，方便一眼判断是地址错、404 还是格式不支持
+    private func errorPanel(_ message: String) -> some View {
+        VStack(spacing: 12) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 32))
+                .foregroundStyle(.orange)
+            Text("无法播放")
+                .font(.headline)
+            Text(message)
+                .font(.subheadline)
+                .foregroundStyle(.white.opacity(0.8))
+                .multilineTextAlignment(.center)
+            Text(url.absoluteString)
+                .font(.caption2.monospaced())
+                .foregroundStyle(.white.opacity(0.5))
+                .lineLimit(4)
+                .multilineTextAlignment(.center)
+                .textSelection(.enabled)
+            Button {
+                engine.retry()
+                scheduleHide()
+            } label: {
+                Text("重试")
+                    .font(.subheadline.weight(.semibold))
+                    .padding(.horizontal, 22)
+                    .padding(.vertical, 8)
+                    .background(Capsule().fill(Color.white.opacity(0.18)))
+            }
+            .buttonStyle(.plain)
+        }
+        .foregroundStyle(.white)
+        .padding(24)
+        .frame(maxWidth: 440)
     }
 
     // MARK: 手势层
