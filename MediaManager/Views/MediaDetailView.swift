@@ -123,7 +123,7 @@ struct MediaDetailView: View {
                             .font(.subheadline.weight(.medium))
                             .foregroundStyle(isFavorite ? Color.red : .primary)
                             .padding(.horizontal, 18).padding(.vertical, 10)
-                            .background(Capsule().fill(Color.secondarySystemBackground))
+                            .background(Capsule().fill(Color(uiColor: .secondarySystemBackground)))
                     }
                     .disabled(favLoading)
                 }
@@ -133,7 +133,7 @@ struct MediaDetailView: View {
                         ForEach(d.genres, id: \.self) { g in
                             Text(g).font(.footnote)
                                 .padding(.horizontal, 12).padding(.vertical, 5)
-                                .background(Capsule().fill(Color.secondarySystemBackground))
+                                .background(Capsule().fill(Color(uiColor: .secondarySystemBackground)))
                         }
                     }
                 }
