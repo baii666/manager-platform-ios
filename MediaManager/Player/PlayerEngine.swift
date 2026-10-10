@@ -18,6 +18,8 @@ final class PlayerEngine: ObservableObject {
     @Published private(set) var loadedRange: Double = 0
     @Published private(set) var isReady = false
     @Published private(set) var rate: Float = 1.0
+    /// 是否正在「长按倍速」中。供播放器显示角标。
+    @Published private(set) var isSpeedHolding = false
     /// 播放失败原因。之前播放器没有任何错误状态，任何失败都是「静默白屏」，无法定位
     @Published private(set) var failure: String? = nil
     /// 视频轨存在但被 AVPlayer 禁用 —— 画面解不出来，声音照常。
@@ -36,6 +38,10 @@ final class PlayerEngine: ObservableObject {
 
     /// 倍速档位。上限 2.0：再高 AVPlayer 会静音，且部分格式 seek 不稳。
     static let rates: [Float] = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0]
+    /// 长按加速的档位（抖音式「按住倍速」）
+    static let holdRate: Float = 2.0
+    /// 长按加速前的原始倍速，松手要恢复它
+    private var holdBaseRate: Float = 1.0
 
     private var timeObserver: Any?
     private var playStateObservation: NSKeyValueObservation?
@@ -84,6 +90,7 @@ final class PlayerEngine: ObservableObject {
         teardown()
         currentURL = url
         self.loop = loop
+        isSpeedHolding = false
         failure = nil
         videoTrackDisabled = false
         trackCheckWork?.cancel()
@@ -235,6 +242,23 @@ final class PlayerEngine: ObservableObject {
         rate = newRate
         guard isPlaying else { return }
         player.rate = newRate
+    }
+
+    /// 长按开始：记下当前倍速、切到 holdRate。只在播放中生效。
+    func beginSpeedHold() {
+        guard isPlaying, !isSpeedHolding else { return }
+        holdBaseRate = rate
+        rate = Self.holdRate
+        player.rate = Self.holdRate
+        isSpeedHolding = true
+    }
+
+    /// 长按结束：恢复原倍速。若这期间用户暂停了，只恢复记录值、不强行改播放状态。
+    func endSpeedHold() {
+        guard isSpeedHolding else { return }
+        rate = holdBaseRate
+        if isPlaying { player.rate = holdBaseRate }
+        isSpeedHolding = false
     }
 
     func seek(to seconds: Double) {

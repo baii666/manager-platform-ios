@@ -124,6 +124,19 @@ struct VideoPlayerView: View {
                     .background(Capsule().fill(Color.black.opacity(0.65)))
             }
 
+            // 长按加速角标：让人一眼看到「正在 2x」
+            if engine.isSpeedHolding {
+                Text("2x")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Capsule().fill(Color.black.opacity(0.6)))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                    .padding(28)
+                    .allowsHitTesting(false)
+            }
+
             // 等待层：没 ready（首帧缓冲 / 降级换源）时给反馈。
             // ⚠️ 降级提示和通用缓冲走**同一个**视图，否则 engine.load 复位 isReady 的
             // 一瞬间两个 if 会叠成双转圈。
@@ -204,9 +217,25 @@ struct VideoPlayerView: View {
             .contentShape(Rectangle())
             // iOS 17 的 gesture(_:isEnabled:)：刷流里关掉，垂直滑动才不跟 ScrollView 抢
             .gesture(dragGesture, isEnabled: dragGesturesEnabled)
+            // 长按倍速独立于拖拽手势：刷流里拖拽关了，长按加速照样要能用
+            .simultaneousGesture(speedHoldGesture)
             // 双击优先于单击，故先声明
             .onTapGesture(count: 2) { engine.togglePlay() }
             .onTapGesture { toggleControls() }
+    }
+
+    /// 长按倍速：按住 0.35s 开始加速到 holdRate，松手恢复原速。不区分左右侧。
+    ///
+    /// 时序上靠 `onEnded`（长按成功）开始加速、`onChanged(false)`（松手）恢复：
+    /// 普通点击在 0.35s 内就松手，onEnded 不触发，不会误加速。
+    private var speedHoldGesture: some Gesture {
+        LongPressGesture(minimumDuration: 0.35)
+            .onChanged { pressing in
+                if !pressing { engine.endSpeedHold() }
+            }
+            .onEnded { _ in
+                engine.beginSpeedHold()
+            }
     }
 
     private var dragGesture: some Gesture {
