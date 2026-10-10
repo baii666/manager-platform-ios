@@ -66,6 +66,17 @@ struct ShortFeedView: View {
             .padding(.top, 8)
             .padding(.leading, 16)
         }
+        // 右滑退出：向右水平滑动超过阈值即退出播放器（与上下滑切视频不冲突）
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 20)
+                .onEnded { value in
+                    let dx = value.translation.width
+                    let dy = value.translation.height
+                    if dx > 100, dx > abs(dy) {
+                        dismiss()
+                    }
+                }
+        )
         .statusBar(hidden: true)
         .onChange(of: currentID) {
             guard let id = currentID,
