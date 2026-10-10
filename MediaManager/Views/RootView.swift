@@ -133,8 +133,14 @@ struct LibraryHomeView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
 
-            // 库卡片墙
-            LibraryPickerView(type: category.type)
+            // 三个分类可左右滑动切换（顶 bar 点击与滑动双向同步）
+            TabView(selection: $category) {
+                ForEach(Category.allCases) { c in
+                    LibraryPickerView(type: c.type)
+                        .tag(c)
+                }
+            }
+            .tabViewStyle(.page(indexDisplayMode: .never))
         }
     }
 }
