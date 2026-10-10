@@ -21,6 +21,9 @@ struct ShortFeedView: View {
     /// 当前正在看的页（scrollPosition 跟踪，滑到哪更新到哪）
     @State private var currentID: Int?
     @State private var currentIndex: Int
+    /// 右滑退出：页面向右的拖动偏移（只向右、严格水平）
+    @State private var dragOffsetX: CGFloat = 0
+    @State private var isExiting = false
 
     /// 预加载窗口半径：当前页 ±2
     private let windowRadius = 2
@@ -66,18 +69,9 @@ struct ShortFeedView: View {
             .padding(.top, 8)
             .padding(.leading, 16)
         }
-        // 右滑退出：向右水平滑动超过阈值即退出（回到列表页）。
-        // 只判水平方向，上下滑切视频不受影响。
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 20)
-                .onEnded { value in
-                    let dx = value.translation.width
-                    let dy = value.translation.height
-                    if dx > 100, dx > abs(dy) {
-                        dismiss()
-                    }
-                }
-        )
+        // 右滑退出：页面跟手向右移动，松手超过阈值向右滑出屏幕（不是默认的向下收起）
+        .offset(x: dragOffsetX)
+        .simultaneousGesture(exitDragGesture)
         .statusBar(hidden: true)
         .onChange(of: currentID) {
             guard let id = currentID,
@@ -88,6 +82,39 @@ struct ShortFeedView: View {
                 Task { await viewModel.loadMore() }
             }
         }
+    }
+
+    /// 右滑退出：只响应严格水平的向右拖动（dx>0 且 dx>abs(dy)），页面跟手右移；
+    /// 松手超阈值 → 向右滑出屏幕并退出；否则弹回。上下滑切视频完全不飘。
+    private var exitDragGesture: some Gesture {
+        DragGesture(minimumDistance: 20)
+            .onChanged { value in
+                guard !isExiting else { return }
+                let dx = value.translation.width
+                let dy = value.translation.height
+                if dx > 0, dx > abs(dy) {
+                    dragOffsetX = dx
+                }
+            }
+            .onEnded { value in
+                guard !isExiting else { return }
+                let dx = value.translation.width
+                let dy = value.translation.height
+                if dx > 100, dx > abs(dy) {
+                    isExiting = true
+                    let screenW = UIScreen.main.bounds.width
+                    withAnimation(.easeIn(duration: 0.28)) {
+                        dragOffsetX = screenW + 40
+                    }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        dismiss()
+                    }
+                } else {
+                    withAnimation(.easeOut(duration: 0.25)) {
+                        dragOffsetX = 0
+                    }
+                }
+            }
     }
 }
 
