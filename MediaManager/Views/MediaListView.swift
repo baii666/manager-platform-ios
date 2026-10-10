@@ -310,46 +310,70 @@ struct MediaCard: View {
     var landscape: Bool = false
     var onTap: () -> Void = {}
 
+    private var coverHeight: CGFloat { width * (landscape ? 9.0 / 16.0 : 3.0 / 2.0) }
+    /// 对齐相册竖版：卡片 <150px 时下方不显示标题，标题叠在封面底部渐变条上
+    private var showInfo: Bool { width >= 150 }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            ZStack(alignment: .topTrailing) {
-                RemoteImage(
-                    url: coverURL,
-                    fallbackIcon: item.type == "tv" ? "tv" : "film",
-                    fallbackColors: Theme.placeholderGradient(for: .media)
-                )
-                .imageFilled()
-                .frame(width: width, height: width * (landscape ? 9.0 / 16.0 : 3.0 / 2.0))
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            ZStack(alignment: .bottom) {
+                ZStack(alignment: .topTrailing) {
+                    RemoteImage(
+                        url: coverURL,
+                        fallbackIcon: item.type == "tv" ? "tv" : "film",
+                        fallbackColors: Theme.placeholderGradient(for: .media)
+                    )
+                    .imageFilled()
+                    .frame(width: width, height: coverHeight)
+                    .clipShape(RoundedRectangle(cornerRadius: showInfo ? 10 : 8, style: .continuous))
 
-                // 横版右上角评分徽章（对齐网页版 MediaCard 的 ★ rating）
-                if landscape, let r = item.rating, r > 0 {
-                    Text(String(format: "★ %.1f", r))
-                        .font(.caption2.weight(.semibold))
-                        .monospacedDigit()
+                    // 横版右上角评分徽章（对齐网页版 MediaCard 的 ★ rating）
+                    if landscape, let r = item.rating, r > 0 {
+                        Text(String(format: "★ %.1f", r))
+                            .font(.caption2.weight(.semibold))
+                            .monospacedDigit()
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background(.black.opacity(0.6), in: Capsule())
+                            .padding(6)
+                    }
+                }
+
+                // 小卡片：底部渐变条 + 标题（iOS 无 hover 故常驻）
+                if !showInfo {
+                    LinearGradient(colors: [.clear, .black.opacity(0.72)], startPoint: .top, endPoint: .bottom)
+                        .frame(height: coverHeight * 0.55)
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .allowsHitTesting(false)
+                    Text(item.title)
+                        .font(.caption2.weight(.medium))
                         .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                         .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
-                        .background(.black.opacity(0.6), in: Capsule())
-                        .padding(6)
+                        .padding(.bottom, 5)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(item.title)
-                    .font(.subheadline.weight(.semibold))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                if !item.subtitle.isEmpty {
-                    Text(item.subtitle)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+            if showInfo {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(item.title)
+                        .font(.subheadline.weight(.semibold))
                         .lineLimit(1)
+                        .truncationMode(.tail)
+                    if !item.subtitle.isEmpty {
+                        Text(item.subtitle)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                 }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 9)
+                .frame(width: width, alignment: .leading)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 9)
-            .frame(width: width, alignment: .leading)
         }
         .frame(width: width)
         .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
