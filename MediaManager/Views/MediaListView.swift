@@ -152,7 +152,7 @@ struct MediaListView: View {
         _layout = StateObject(wrappedValue: CardLayoutController(
             baseKey: "mediaList", libID: library?.id,
             portraitDefault: 150, landscapeDefault: 240,
-            portraitRange: 100...260, landscapeRange: 160...400
+            portraitRange: 100...260, landscapeRange: 130...400
         ))
     }
 
@@ -188,7 +188,7 @@ struct MediaListView: View {
                         ForEach(viewModel.items) { item in
                             let cover = AppSession.shared.client?.mediaCoverURL(item, landscape: layout.landscape)
                             MediaCard(item: item, coverURL: cover, width: grid.itemWidth, landscape: layout.landscape,
-                                      showInfo: layout.cardWidth >= 150) {
+                                      showInfo: layout.cardWidth >= CardLayoutController.compactThreshold) {
                                 selected = item
                             }
                             .task {

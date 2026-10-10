@@ -136,6 +136,10 @@ enum CardSizePrefs {
 /// 卡片布局控制器：方向（竖/横）+ 分方向卡片尺寸 + 记忆 + 捏合缩放
 /// 电影、相册列表页各持有一个实例，逻辑完全一致。
 final class CardLayoutController: ObservableObject {
+    /// 卡片宽度低于该值时进入「小卡片」模式（只显示封面、标题叠进封面底部渐变）。
+    /// ⚠️ 所有方向的 range 下限都必须低于此值，否则缩到最小也进不了小卡片。
+    static let compactThreshold: CGFloat = 150
+
     /// UserDefaults key 前缀（如 "mediaList" / "albumList"）
     private let baseKey: String
     /// 记忆粒度：固定库模式用库 id，跨库模式 nil（退化成「全部」一份）

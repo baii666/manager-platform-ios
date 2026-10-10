@@ -151,7 +151,7 @@ struct AlbumListView: View {
         _layout = StateObject(wrappedValue: CardLayoutController(
             baseKey: "albumList", libID: library?.id,
             portraitDefault: 140, landscapeDefault: 210,
-            portraitRange: 90...300, landscapeRange: 140...480
+            portraitRange: 90...300, landscapeRange: 130...480
         ))
     }
 
@@ -187,7 +187,7 @@ struct AlbumListView: View {
                             NavigationLink(value: album) {
                                 AlbumCard(album: album, coverURL: coverURL(for: album, landscape: layout.landscape),
                                           width: grid.itemWidth, landscape: layout.landscape,
-                                          showInfo: layout.cardWidth >= 150)
+                                          showInfo: layout.cardWidth >= CardLayoutController.compactThreshold)
                             }
                             .buttonStyle(.plain)
                             .task {
