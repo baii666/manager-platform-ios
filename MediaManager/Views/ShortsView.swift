@@ -42,9 +42,8 @@ struct ShortsView: View {
                                 playError = "这条记录没有文件路径"
                                 return
                             }
-                            guard let url = viewModel.client?.makeURL(
-                                "/stream",
-                                queryItems: [URLQueryItem(name: "path", value: path)]) else {
+                            // streamURL 会按容器分流：mp4/mov 直连，avi/mkv 等走 remux
+                            guard let url = viewModel.client?.streamURL(path: path) else {
                                 playError = "播放地址构造失败\n\(path)"
                                 return
                             }

@@ -8,6 +8,8 @@ struct HomeView: View {
     @ObservedObject var viewModel: HomeViewModel
 
     @State private var playingAsset: UnifiedAsset?
+    /// 点开却拿不到播放地址时给出明确原因，而不是「点了没反应」
+    @State private var playError: String?
     @State private var showingPhotos = false
     @State private var showingAlbums = false
     @State private var showingTasks = false
@@ -90,12 +92,22 @@ struct HomeView: View {
                     }
             }
         }
+        .alert("无法播放", isPresented: Binding(
+            get: { playError != nil },
+            set: { if !$0 { playError = nil } }
+        )) {
+            Button("好", role: .cancel) { playError = nil }
+        } message: {
+            Text(playError ?? "")
+        }
         .fullScreenCover(item: $playingAsset) { asset in
             if let url = asset.playbackURL {
                 NavigationStack {
                     VideoPlayerView(
                         url: url,
-                        startPosition: asset.position,
+                        // ⚠️ remux 是 chunked 流、没有 Range，客户端 seek 不了 ——
+                        // 起始位置已经由 &startTime= 让服务端 -ss 偏移掉了，这里不能再 seek
+                        startPosition: url.path.hasPrefix("/stream/remux") ? 0 : asset.position,
                         title: asset.title,
                         assetType: asset.type.rawValue,
                         assetID: asset.id
@@ -183,7 +195,11 @@ struct HomeView: View {
             horizontalRow {
                 ForEach(viewModel.resume) { asset in
                     ResumeCard(asset: asset) {
-                        if asset.playbackURL != nil { playingAsset = asset }
+                        if asset.playbackURL != nil {
+                            playingAsset = asset
+                        } else {
+                            playError = "《\(asset.title)》没有可播放的文件路径"
+                        }
                     }
                 }
             }
@@ -241,6 +257,8 @@ struct HomeView: View {
             playingAsset = asset
         } else if asset.type == .photo {
             showingPhotos = true
+        } else {
+            playError = "《\(asset.title)》没有可播放的文件路径"
         }
     }
 

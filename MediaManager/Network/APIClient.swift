@@ -40,6 +40,32 @@ final class APIClient: DataProviding, @unchecked Sendable {
         return URL(string: url.absoluteString, relativeTo: baseURL)
     }
 
+    // MARK: - 播放地址
+
+    /// AVPlayer 能直接吃的容器。其余一律走 remux。
+    /// ⚠️ MKV / AVI 这类 AVPlayer **不认容器**（不是编码问题，iPad 硬解 HEVC 毫无压力），
+    /// 直接直连 /stream 会秒失败、播放器只显示「无法播放」。
+    private static let directPlayExts: Set<String> = ["mp4", "m4v", "mov"]
+
+    /// 构造播放地址：直连优先，容器不认就走 /stream/remux（FFmpeg 重新封装成 MP4，-c:v copy 无损）。
+    ///
+    /// - 直连 `/stream`：完整支持 Range（206），可随意拖动
+    /// - remux `/stream/remux`：chunked 输出**没有 Range**，拖动受限，所以续播场景要把
+    ///   `startAt` 传进去（服务端 `-ss` 从断点开始吐流）
+    /// - 别用 `/transcode`（libx264 重编码）和 HLS —— 那是给浏览器兜底的，白烧 CPU
+    func streamURL(path: String, startAt: Double? = nil) -> URL? {
+        guard !path.isEmpty else { return nil }
+        let ext = (path as NSString).pathExtension.lowercased()
+        if Self.directPlayExts.contains(ext) {
+            return makeURL("/stream", queryItems: [URLQueryItem(name: "path", value: path)])
+        }
+        var items = [URLQueryItem(name: "path", value: path)]
+        if let s = startAt, s.isFinite, s > 1 {
+            items.append(URLQueryItem(name: "startTime", value: String(format: "%.3f", s)))
+        }
+        return makeURL("/stream/remux", queryItems: items)
+    }
+
     // MARK: - 请求辅助
 
     private func request<T: Decodable>(_ path: String, method: String = "GET", json: [String: Any]? = nil) async throws -> T {
@@ -263,9 +289,12 @@ final class APIClient: DataProviding, @unchecked Sendable {
         var asset = a
         asset.coverURL = resolve(a.coverURL)
         asset.backdropURL = resolve(a.backdropURL)
-        // 播放地址：影视/短视频有文件路径，直接用 /stream 直连（AVPlayer 支持 Range + H264/HEVC）
-        if let path = a.path, !path.isEmpty, a.type == .media || a.type == .short {
-            asset.playbackURL = makeURL("/stream", queryItems: [URLQueryItem(name: "path", value: path)])
+        // 播放地址：影视/短视频有文件路径，播放地址按容器分流（MKV 等要 remux）
+        // ⚠️ 条件必须写成 (a.type == .media || a.type == .short) 加括号：
+        // && 优先级高于 ||，不加括号会被解析成 "(path 非空 && media) || short"，
+        // 于是短视频即使 path 为空也会拼出一个 path= 的空地址
+        if let path = a.path, !path.isEmpty, (a.type == .media || a.type == .short) {
+            asset.playbackURL = streamURL(path: path, startAt: a.position)
         }
         return asset
     }
@@ -391,7 +420,7 @@ final class APIClient: DataProviding, @unchecked Sendable {
         }
         var playback: URL?
         if let path = m.filePath, !path.isEmpty {
-            playback = makeURL("/stream", queryItems: [URLQueryItem(name: "path", value: path)])
+            playback = streamURL(path: path)
         }
         return (cover, playback)
     }

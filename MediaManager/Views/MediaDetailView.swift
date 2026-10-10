@@ -34,7 +34,7 @@ struct MediaDetailView: View {
         .task { await load() }
         .fullScreenCover(isPresented: $playing) {
             if let detail, let path = detail.videoFiles.first,
-               let url = client?.makeURL("/stream", queryItems: [URLQueryItem(name: "path", value: path)]) {
+               let url = client?.streamURL(path: path) {
                 NavigationStack {
                     VideoPlayerView(url: url, title: detail.title, assetType: "media", assetID: detail.id)
                         .toolbar { ToolbarItem(placement: .cancellationAction) {
