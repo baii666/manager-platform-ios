@@ -38,7 +38,9 @@ jobs:
 
       - name: 暴露编译错误（临时）
         if: failure()
-        run: grep -E ': error:' build.log | sed 's/^/::error::/' || true
+        run: |
+          # ⚠️ 必须写成块标量：plain scalar 里的 ": " （': error:'）会被 YAML 当成键值分隔符
+          grep -E ': error:' build.log | sed 's/^/::error::/' || true
 
       # 模拟器的安装阶段才会报 missing CFBundleExecutable / missing bundle id，
       # 编译阶段发现不了，所以这里提前校验产物 plist 的关键键都已解析出真值
