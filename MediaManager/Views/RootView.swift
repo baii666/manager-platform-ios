@@ -1,4 +1,30 @@
 import SwiftUI
+import UIKit
+
+// MARK: - UIKit 干预：禁用 SplitView 边缘滑出 sidebar 的手势
+// 列表页（.detailOnly）要求「右滑 = 返回上一页」，而不是滑出 sidebar。
+// NavigationSplitView 底层是 UISplitViewController，默认 presentsWithGesture=true，
+// 会在左缘右滑时临时滑出 sidebar，抢走 NavigationStack 的返回手势。
+// 禁用它，让右滑交还给导航栈的 pop。
+private func disableSplitSwipeGesture() {
+    for scene in UIApplication.shared.connectedScenes {
+        guard let ws = scene as? UIWindowScene else { continue }
+        for window in ws.windows {
+            if let split = findSplitVC(window.rootViewController) {
+                split.presentsWithGesture = false
+            }
+        }
+    }
+}
+
+private func findSplitVC(_ vc: UIViewController?) -> UISplitViewController? {
+    guard let vc else { return nil }
+    if let split = vc as? UISplitViewController { return split }
+    for child in vc.children {
+        if let found = findSplitVC(child) { return found }
+    }
+    return nil
+}
 
 // MARK: - 侧边栏导航项
 enum SidebarSection: String, CaseIterable, Identifiable {
@@ -112,6 +138,13 @@ struct RootView: View {
         // 切换 tab（侧边栏选择变化）时恢复侧边栏显示，覆盖 ShortsView / 占位页等根页面
         .onChange(of: selection) { _, _ in
             sidebar.visibility = .all
+        }
+        .onAppear {
+            // NavigationSplitView 的 UISplitViewController 在首帧后才完全就绪，
+            // 延迟一帧再禁用其边缘滑出 sidebar 的手势
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                disableSplitSwipeGesture()
+            }
         }
     }
 }
