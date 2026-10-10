@@ -32,6 +32,9 @@ final class MediaListViewModel: ObservableObject {
     @Published var libraries: [Library] = []
     @Published var selectedLibID: Int?
     @Published var sort: Sort = .updated
+    @Published var searchText = ""
+    /// 视图方向：false = 竖版海报，true = 横版封面（fanart）
+    @Published var landscape = false
     @Published var totalCount = 0
     @Published var isLoading = false
     @Published var errorMessage: String?
@@ -104,7 +107,7 @@ final class MediaListViewModel: ObservableObject {
         isLoading = true
         defer { isLoading = false }
         do {
-            let (batch, total) = try await client.fetchMedia(type: type, libID: selectedLibID, page: page, size: pageSize, sort: sort.rawValue)
+            let (batch, total) = try await client.fetchMedia(type: type, libID: selectedLibID, page: page, size: pageSize, sort: sort.rawValue, q: searchText.isEmpty ? nil : searchText)
             totalCount = total
             items.append(contentsOf: batch)
             page += 1
@@ -126,8 +129,12 @@ struct MediaListView: View {
 
     @StateObject private var viewModel: MediaListViewModel
     @State private var selected: MediaItem?
+    /// 卡片最小宽度（尺寸档位：小 120 / 中 150 / 大 190）
+    @State private var cardWidth: CGFloat = 150
 
-    private let columns = [GridItem(.adaptive(minimum: 150), spacing: 18)]
+    private var columns: [GridItem] {
+        [GridItem(.adaptive(minimum: cardWidth), spacing: 18)]
+    }
 
     init(type: String, library: Library? = nil) {
         self.type = type
@@ -136,25 +143,46 @@ struct MediaListView: View {
     }
 
     var body: some View {
-        ScrollView {
-            LazyVGrid(columns: columns, spacing: 18) {
-                ForEach(viewModel.items) { item in
-                    let resolved = AppSession.shared.client?.resolveMedia(item)
-                    // resolved?.cover 是 URL??（cover 本身就是可选），flatMap 压平
-                    let cover: URL? = resolved.flatMap { $0.cover }
-                    MediaCard(item: item, coverURL: cover) {
-                        selected = item
+        VStack(spacing: 0) {
+            // 顶部状态栏（独立、美观）
+            VStack(spacing: 10) {
+                ListSearchBar(text: $viewModel.searchText, placeholder: "搜索标题、演员、类型…")
+                HStack(spacing: 8) {
+                    sortMenu
+                    ToolChip(label: viewModel.landscape ? "横版" : "竖版",
+                             icon: viewModel.landscape ? "rectangle" : "rectangle.portrait",
+                             highlighted: viewModel.landscape) {
+                        viewModel.landscape.toggle()
                     }
-                    .task {
-                        if item.id == viewModel.items.last?.id {
-                            await viewModel.loadMore()
+                    sizeMenu
+                    Spacer()
+                    Text("\(viewModel.items.count) / \(viewModel.totalCount)")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 10)
+            .padding(.bottom, 4)
+
+            ScrollView {
+                LazyVGrid(columns: columns, spacing: 18) {
+                    ForEach(viewModel.items) { item in
+                        let cover = AppSession.shared.client?.mediaCoverURL(item, landscape: viewModel.landscape)
+                        MediaCard(item: item, coverURL: cover, landscape: viewModel.landscape) {
+                            selected = item
+                        }
+                        .task {
+                            if item.id == viewModel.items.last?.id {
+                                await viewModel.loadMore()
+                            }
                         }
                     }
                 }
-            }
-            .padding(24)
-            if viewModel.isLoading {
-                ProgressView().frame(maxWidth: .infinity).padding()
+                .padding(16)
+                if viewModel.isLoading {
+                    ProgressView().frame(maxWidth: .infinity).padding()
+                }
             }
         }
         .navigationTitle(library?.name ?? (type == "tv" ? "剧集" : "电影"))
@@ -164,8 +192,13 @@ struct MediaListView: View {
                 // 固定库模式不显示库筛选（只有一个库）
                 if library == nil && !viewModel.libraries.isEmpty { libraryMenu }
             }
-            ToolbarItem(placement: .topBarTrailing) {
-                sortMenu
+        }
+        // ⚠️ iOS 17 起 onChange(of:) 零参闭包
+        .onChange(of: viewModel.searchText) {
+            Task {
+                try? await Task.sleep(nanoseconds: 350_000_000)
+                guard !Task.isCancelled else { return }
+                await viewModel.reload()
             }
         }
         .overlay {
@@ -184,7 +217,7 @@ struct MediaListView: View {
 
     /// 排序选择（对齐网页版列表页顶部状态栏）
     private var sortMenu: some View {
-        Menu {
+        ToolMenuChip(label: viewModel.sort.label, icon: "arrow.up.arrow.down") {
             ForEach(MediaListViewModel.Sort.allCases, id: \.self) { s in
                 Button {
                     Task { await viewModel.setSort(s) }
@@ -193,9 +226,23 @@ struct MediaListView: View {
                     else { Text(s.label) }
                 }
             }
-        } label: {
-            Image(systemName: "arrow.up.arrow.down")
-                .foregroundStyle(Theme.brand)
+        }
+    }
+
+    /// 尺寸档位
+    private var sizeMenu: some View {
+        ToolMenuChip(label: sizeLabel, icon: "arrow.up.left.and.arrow.down.right") {
+            Button { cardWidth = 120 } label: { Label("小", systemImage: cardWidth == 120 ? "checkmark" : "square") }
+            Button { cardWidth = 150 } label: { Label("中", systemImage: cardWidth == 150 ? "checkmark" : "square") }
+            Button { cardWidth = 190 } label: { Label("大", systemImage: cardWidth == 190 ? "checkmark" : "square") }
+        }
+    }
+
+    private var sizeLabel: String {
+        switch cardWidth {
+        case 120: return "小"
+        case 190: return "大"
+        default: return "中"
         }
     }
 
@@ -239,6 +286,8 @@ struct MediaCard: View {
     let item: MediaItem
     var coverURL: URL?
     var width: CGFloat = 150
+    /// 横版封面（16:9）还是竖版海报（2:3）
+    var landscape: Bool = false
     var onTap: () -> Void = {}
 
     var body: some View {
@@ -249,7 +298,7 @@ struct MediaCard: View {
                 fallbackColors: Theme.placeholderGradient(for: .media)
             )
             .imageFilled()
-            .frame(width: width, height: width * 3.0 / 2.0)
+            .frame(width: width, height: width * (landscape ? 9.0 / 16.0 : 3.0 / 2.0))
             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
 
             VStack(alignment: .leading, spacing: 3) {

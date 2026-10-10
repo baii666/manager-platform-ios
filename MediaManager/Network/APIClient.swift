@@ -492,10 +492,13 @@ final class APIClient: DataProviding, @unchecked Sendable {
 
     /// 相册列表。GET /api/photos?lib=x&page=1&size=60（返回 folders 数组）
     /// sort：updated_desc / updated_asc / release_desc / release_asc / name_asc / name_desc / random
-    func fetchAlbums(libID: Int, page: Int = 1, size: Int = 60, sort: String = "updated_desc") async throws -> (items: [Album], total: Int) {
-        let resp: AlbumListResponse = try await request(
-            "/api/photos?lib=\(libID)&page=\(page)&size=\(size)&sort=\(sort)"
-        )
+    func fetchAlbums(libID: Int, page: Int = 1, size: Int = 60, sort: String = "updated_desc", q: String? = nil) async throws -> (items: [Album], total: Int) {
+        var path = "/api/photos?lib=\(libID)&page=\(page)&size=\(size)&sort=\(sort)"
+        if let q, !q.isEmpty {
+            let encoded = q.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? q
+            path += "&q=\(encoded)"
+        }
+        let resp: AlbumListResponse = try await request(path)
         return (resp.folders, resp.total)
     }
 
@@ -511,9 +514,13 @@ final class APIClient: DataProviding, @unchecked Sendable {
 
     /// 影视列表。type: movie / tv；libID 为 nil 时后端返回用户可见媒体库的全集
     /// sort：title / title_desc / year_desc / year_asc / rating_desc / updated_desc / premiered_desc 等
-    func fetchMedia(type: String, libID: Int? = nil, page: Int = 1, size: Int = 60, sort: String = "updated_desc") async throws -> (items: [MediaItem], total: Int) {
+    func fetchMedia(type: String, libID: Int? = nil, page: Int = 1, size: Int = 60, sort: String = "updated_desc", q: String? = nil) async throws -> (items: [MediaItem], total: Int) {
         var path = "/api/media?type=\(type)&page=\(page)&size=\(size)&sort=\(sort)"
         if let libID { path += "&lib=\(libID)" }
+        if let q, !q.isEmpty {
+            let encoded = q.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? q
+            path += "&q=\(encoded)"
+        }
         let resp: MediaListResponse = try await request(path)
         return (resp.items, resp.total)
     }
@@ -550,6 +557,16 @@ final class APIClient: DataProviding, @unchecked Sendable {
             playback = streamURL(path: path)
         }
         return (cover, playback)
+    }
+
+    /// 影视条目封面，按方向选（竖版海报 poster / 横版 fanart）
+    func mediaCoverURL(_ m: MediaItem, landscape: Bool = false) -> URL? {
+        let id = landscape ? (m.fanartImageId ?? m.posterImageId) : m.posterImageId
+        guard let id else { return nil }
+        return makeURL("/media-image", queryItems: [
+            URLQueryItem(name: "id", value: "\(id)"),
+            URLQueryItem(name: "size", value: "600"),
+        ])
     }
 
     // MARK: - 行为层（收藏）

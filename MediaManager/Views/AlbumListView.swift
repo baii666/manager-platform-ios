@@ -32,6 +32,9 @@ final class AlbumListViewModel: ObservableObject {
     @Published var libraries: [Library] = []
     @Published var selectedLibID: Int?
     @Published var sort: Sort = .updatedDesc
+    @Published var searchText = ""
+    /// 封面方向：false = 竖版，true = 横版
+    @Published var landscape = false
     @Published var totalCount = 0
     @Published var isLoading = false
     @Published var errorMessage: String?
@@ -108,7 +111,7 @@ final class AlbumListViewModel: ObservableObject {
         isLoading = true
         defer { isLoading = false }
         do {
-            let (items, total) = try await client.fetchAlbums(libID: libID, page: page, size: pageSize, sort: sort.rawValue)
+            let (items, total) = try await client.fetchAlbums(libID: libID, page: page, size: pageSize, sort: sort.rawValue, q: searchText.isEmpty ? nil : searchText)
             totalCount = total
             albums.append(contentsOf: items)
             page += 1
@@ -129,8 +132,12 @@ struct AlbumListView: View {
     let library: Library?
 
     @StateObject private var viewModel: AlbumListViewModel
+    /// 卡片最小宽度（尺寸档位：小 130 / 中 170 / 大 210）
+    @State private var cardWidth: CGFloat = 170
 
-    private let columns = [GridItem(.adaptive(minimum: 170), spacing: 18)]
+    private var columns: [GridItem] {
+        [GridItem(.adaptive(minimum: cardWidth), spacing: 18)]
+    }
 
     init(library: Library? = nil) {
         self.library = library
@@ -138,12 +145,33 @@ struct AlbumListView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+        VStack(spacing: 0) {
+            // 顶部状态栏（独立、美观）
+            VStack(spacing: 10) {
+                ListSearchBar(text: $viewModel.searchText, placeholder: "搜索相册名…")
+                HStack(spacing: 8) {
+                    sortMenu
+                    ToolChip(label: viewModel.landscape ? "横版" : "竖版",
+                             icon: viewModel.landscape ? "rectangle" : "rectangle.portrait",
+                             highlighted: viewModel.landscape) {
+                        viewModel.landscape.toggle()
+                    }
+                    sizeMenu
+                    Spacer()
+                    Text("\(viewModel.albums.count) / \(viewModel.totalCount)")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 10)
+            .padding(.bottom, 4)
+
+            ScrollView {
                 LazyVGrid(columns: columns, spacing: 18) {
                     ForEach(viewModel.albums) { album in
                         NavigationLink(value: album) {
-                            AlbumCard(album: album, coverURL: coverURL(for: album))
+                            AlbumCard(album: album, coverURL: coverURL(for: album), landscape: viewModel.landscape)
                         }
                         .buttonStyle(.plain)
                         .task {
@@ -154,11 +182,11 @@ struct AlbumListView: View {
                         }
                     }
                 }
+                .padding(16)
                 if viewModel.isLoading {
                     ProgressView().frame(maxWidth: .infinity).padding()
                 }
             }
-            .padding(24)
         }
         .navigationTitle(library?.name ?? "相册")
         .navigationBarTitleDisplayMode(.inline)
@@ -167,8 +195,13 @@ struct AlbumListView: View {
                 // 固定库模式不显示库筛选
                 if library == nil && viewModel.libraries.count > 1 { libraryMenu }
             }
-            ToolbarItem(placement: .topBarTrailing) {
-                sortMenu
+        }
+        // ⚠️ iOS 17 起 onChange(of:) 零参闭包
+        .onChange(of: viewModel.searchText) {
+            Task {
+                try? await Task.sleep(nanoseconds: 350_000_000)
+                guard !Task.isCancelled else { return }
+                await viewModel.reload()
             }
         }
         .navigationDestination(for: Album.self) { album in
@@ -187,7 +220,7 @@ struct AlbumListView: View {
 
     /// 排序选择（对齐网页版列表页顶部状态栏）
     private var sortMenu: some View {
-        Menu {
+        ToolMenuChip(label: viewModel.sort.label, icon: "arrow.up.arrow.down") {
             ForEach(AlbumListViewModel.Sort.allCases, id: \.self) { s in
                 Button {
                     Task { await viewModel.setSort(s) }
@@ -196,9 +229,23 @@ struct AlbumListView: View {
                     else { Text(s.label) }
                 }
             }
-        } label: {
-            Image(systemName: "arrow.up.arrow.down")
-                .foregroundStyle(Theme.brand)
+        }
+    }
+
+    /// 尺寸档位
+    private var sizeMenu: some View {
+        ToolMenuChip(label: sizeLabel, icon: "arrow.up.left.and.arrow.down.right") {
+            Button { cardWidth = 130 } label: { Label("小", systemImage: cardWidth == 130 ? "checkmark" : "square") }
+            Button { cardWidth = 170 } label: { Label("中", systemImage: cardWidth == 170 ? "checkmark" : "square") }
+            Button { cardWidth = 210 } label: { Label("大", systemImage: cardWidth == 210 ? "checkmark" : "square") }
+        }
+    }
+
+    private var sizeLabel: String {
+        switch cardWidth {
+        case 130: return "小"
+        case 210: return "大"
+        default: return "中"
         }
     }
 
@@ -227,8 +274,10 @@ struct AlbumListView: View {
         }
     }
 
-    private func coverURL(for album: Album) -> URL? {
-        guard let id = album.preferredCoverId else { return nil }
+    private func coverURL(for album: Album, landscape: Bool = false) -> URL? {
+        // 横版用横封面，竖版用竖封面（缺哪个就退回另一个）
+        let id = landscape ? (album.coverPhotoId ?? album.coverPhotoIdPortrait) : album.preferredCoverId
+        guard let id else { return nil }
         return AppSession.shared.client?.makeURL("/photo", queryItems: [
             URLQueryItem(name: "id", value: "\(id)"),
             URLQueryItem(name: "size", value: "600"),
@@ -241,13 +290,15 @@ struct AlbumCard: View {
     let album: Album
     var coverURL: URL?
     var width: CGFloat = 170
+    /// 横版封面（16:9）还是竖版（2:3）
+    var landscape: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             ZStack(alignment: .bottomTrailing) {
                 RemoteImage(url: coverURL, fallbackIcon: "photo.on.rectangle")
                     .imageFilled()
-                    .frame(width: width, height: width * 3.0 / 2.0)
+                    .frame(width: width, height: width * (landscape ? 9.0 / 16.0 : 3.0 / 2.0))
                     .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                 Text("\(album.count)")
                     .font(.caption2.weight(.semibold))
