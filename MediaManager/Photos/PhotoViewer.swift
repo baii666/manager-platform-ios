@@ -59,17 +59,21 @@ struct PhotoViewerView: View {
         GeometryReader { geo in
             // ignoresSafeArea 后 geo.size = 整块屏幕；UI 元素用 safeAreaInsets 避让
             let safe = geo.safeAreaInsets
+            // 缩略图条展开时，顶部让出「顶部栏区(52) + 缩略图条(68)」的高度，
+            // 图片在其下方完整显示、不再被缩略图条盖住。
+            let topReserve: CGFloat = showThumbs ? (52 + 68 + safe.top) : 0
+            let imageSize = CGSize(width: geo.size.width, height: geo.size.height - topReserve)
+
             ZStack {
                 Color.black.opacity(backgroundOpacity)
 
-                imageLayer(size: geo.size)
+                imageLayer(size: imageSize)
+                    .offset(y: topReserve)
 
-                // 缩略图条：贴顶，且让开顶部栏那一行
-                //
-                // ⚠️ 这里的 frame 不能省。内层 ZStack(alignment:.top) 只决定「它自己的子视图」
-                // 怎么对齐，它本身在外层 ZStack 里仍按默认 .center 摆放 —— 不显式撑满并贴顶，
-                // 整条缩略图会浮在画面正中：既盖住图片，又会吃掉 imageLayer 的点击
-                // （toggleUI）和下拉关闭手势，表现成「挡住图且退不出去」。
+                // 缩略图条：贴顶，且让开顶部栏那一行。
+                // ⚠️ 内层 ZStack(alignment:.top) 只决定「它自己的子视图」怎么对齐，本身在外层
+                // ZStack 里仍按 .center 摆放 —— 不显式撑满并贴顶，整条缩略图会浮在画面正中，
+                // 盖住图片又吃掉点击/下拉手势。
                 ZStack(alignment: .top) {
                     if showThumbs { thumbStrip }
                 }
@@ -82,8 +86,8 @@ struct PhotoViewerView: View {
                 if let tip { toast(tip) }
             }
             .frame(width: geo.size.width, height: geo.size.height)
-            .onAppear { containerSize = geo.size }
-            .onChange(of: geo.size) { _, new in containerSize = new }
+            .onAppear { containerSize = imageSize }
+            .onChange(of: imageSize) { _, new in containerSize = new }
         }
         // ⚠️ 底部黑边根因：GeometryReader 默认遵守 safe area，图片层只画到
         // home indicator 上沿，底下露出黑色背景。ignore 后 geo.size = 全屏，
