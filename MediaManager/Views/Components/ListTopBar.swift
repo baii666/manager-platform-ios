@@ -217,9 +217,9 @@ struct ToolSlider: View {
     }
 }
 
-// MARK: - 左缘右滑返回
+// MARK: - 右滑返回
 // 列表页为了「搜索框贴顶」隐藏了导航栏，系统右滑返回手势会随之失效。
-// 这里用自定义手势补齐：从屏幕左缘右滑（水平为主、位移够大）触发 dismiss 返回上一级。
+// 这里用自定义手势补齐：任意位置向右滑（水平为主、位移够大）触发 dismiss 返回上一级。
 struct EdgePopGestureModifier: ViewModifier {
     var enabled: Bool = true
     @Environment(\.dismiss) private var dismiss
@@ -230,7 +230,6 @@ struct EdgePopGestureModifier: ViewModifier {
                 DragGesture(minimumDistance: 12)
                     .onEnded { value in
                         guard enabled,
-                              value.startLocation.x < 32,
                               value.translation.width > 110,
                               value.translation.width > abs(value.translation.height) else { return }
                         dismiss()
@@ -240,7 +239,7 @@ struct EdgePopGestureModifier: ViewModifier {
 }
 
 extension View {
-    /// 左缘右滑返回（配合隐藏导航栏的列表页使用）
+    /// 向右滑返回（配合隐藏导航栏的列表页使用）
     func edgePopGesture(enabled: Bool = true) -> some View {
         modifier(EdgePopGestureModifier(enabled: enabled))
     }

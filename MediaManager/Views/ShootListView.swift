@@ -62,7 +62,7 @@ struct ShootListView: View {
         }
         // 隐藏系统导航栏（返回 / 侧边栏按钮都不要，库名已挪进工具行）
         .toolbar(.hidden, for: .navigationBar)
-        // 隐藏导航栏后系统右滑返回失效，用自定义左缘右滑手势补齐
+        // 隐藏导航栏后系统右滑返回失效，用自定义右滑手势补齐
         .edgePopGesture()
         // ⚠️ iOS 17 起 `onChange(of:) { newValue in }`（单参数）已废弃，用零参数闭包
         .onChange(of: viewModel.searchText) {
