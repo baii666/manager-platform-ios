@@ -64,7 +64,8 @@ struct MediaDetailView: View {
                             colors: [.black.opacity(0.1), .black.opacity(0.85)],
                             startPoint: .top, endPoint: .bottom))
                 } else {
-                    Rectangle().fill(Theme.placeholderGradient(for: .media)).frame(height: 230)
+                    Rectangle().fill(LinearGradient(colors: Theme.placeholderGradient(for: .media),
+                                                   startPoint: .top, endPoint: .bottom)).frame(height: 230)
                 }
 
                 HStack(alignment: .bottom, spacing: 16) {
@@ -305,6 +306,7 @@ private struct InfoRow: View {
 // MARK: - 流式布局（类型标签）
 private struct FlowLayout: Layout {
     var spacing: CGFloat = 8
+    static var layoutProperties: LayoutProperties { LayoutProperties() }
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         let rows = arrange(proposal.width ?? 0, subviews)
         let height = rows.reduce(0) { $0 + ($1.last?.size.height ?? 0) } + spacing * CGFloat(max(rows.count - 1, 0))

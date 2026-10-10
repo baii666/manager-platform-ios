@@ -52,7 +52,7 @@ struct ShootDetailView: View {
                             }
                             showViewer = true
                         }) {
-                            await viewModel.loadMorePhotos()
+                            Task { await viewModel.loadMorePhotos() }
                         }
                         .padding(.horizontal, 16)
                     }
@@ -161,7 +161,8 @@ private struct ShootVideoRow: View {
             HStack(spacing: 12) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(Theme.placeholderGradient(for: .shoot))
+                        .fill(LinearGradient(colors: Theme.placeholderGradient(for: .shoot),
+                                             startPoint: .top, endPoint: .bottom))
                         .frame(width: 56, height: 56)
                     Image(systemName: "play.fill")
                         .font(.system(size: 20)).foregroundStyle(.white)

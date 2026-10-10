@@ -348,7 +348,7 @@ struct Album: Identifiable, Codable, Sendable, Hashable {
 
 // MARK: - 影视条目
 // 对应 /api/media?type=movie|tv 返回的 items 项
-struct MediaItem: Identifiable, Codable, Sendable {
+struct MediaItem: Identifiable, Codable, Sendable, Hashable {
     let id: Int
     var title: String = ""
     var year: Int? = nil
