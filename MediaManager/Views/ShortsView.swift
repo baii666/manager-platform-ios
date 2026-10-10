@@ -7,31 +7,44 @@ struct ShortsView: View {
     @State private var playing = false
     @State private var playingURL: URL?
 
-    private let columns = [GridItem(.adaptive(minimum: 150), spacing: 12)]
+    private let gridSpacing: CGFloat = 12
+    private let minCardWidth: CGFloat = 150
+    private let edgePadding: CGFloat = 16
 
     var body: some View {
-        ScrollView {
-            if viewModel.items.isEmpty && !viewModel.isLoading {
-                ContentUnavailableView(viewModel.errorMessage ?? "暂无短视频",
-                                       systemImage: viewModel.errorMessage == nil ? "play.rectangle.fill" : "exclamationmark.triangle")
-                    .frame(maxWidth: .infinity, minHeight: 400)
-            } else {
-                LazyVGrid(columns: columns, spacing: 12) {
-                    ForEach(viewModel.items) { v in
-                        ShortCard(video: v, client: viewModel.client) {
-                            if let path = v.filePath,
-                               let url = viewModel.client?.makeURL("/stream", queryItems: [URLQueryItem(name: "path", value: path)]) {
-                                playingURL = url; playing = true
+        // ⚠️ 封面高度必须显式算出来，不能交给 .aspectRatio 让 SwiftUI 自己推。
+        // aspectRatio 在「高度未指定」时拿子视图的 ideal size 兜底，而 AsyncImage
+        // 加载中（占位图标 ~26pt）/ 加载完（原图像素 3000×4000，且每张封面还不一样）
+        // 的 ideal size 天差地别 —— 同一列卡片高度各不相同，整墙看起来就是错位的。
+        GeometryReader { geo in
+            let metrics = shortsGridMetrics(width: geo.size.width,
+                                            spacing: gridSpacing,
+                                            minCard: minCardWidth,
+                                            edge: edgePadding)
+            ScrollView {
+                if viewModel.items.isEmpty && !viewModel.isLoading {
+                    ContentUnavailableView(viewModel.errorMessage ?? "暂无短视频",
+                                           systemImage: viewModel.errorMessage == nil ? "play.rectangle.fill" : "exclamationmark.triangle")
+                        .frame(maxWidth: .infinity, minHeight: 400)
+                } else {
+                    LazyVGrid(columns: metrics.columns, spacing: gridSpacing) {
+                        ForEach(viewModel.items) { v in
+                            ShortCard(video: v, client: viewModel.client,
+                                      mediaHeight: metrics.cardWidth * 4.0 / 3.0) {
+                                if let path = v.filePath,
+                                   let url = viewModel.client?.makeURL("/stream", queryItems: [URLQueryItem(name: "path", value: path)]) {
+                                    playingURL = url; playing = true
+                                }
+                            }
+                            .task {
+                                if v.id == viewModel.items.last?.id { await viewModel.loadMore() }
                             }
                         }
-                        .task {
-                            if v.id == viewModel.items.last?.id { await viewModel.loadMore() }
-                        }
                     }
-                }
-                .padding(16)
-                if viewModel.isLoading {
-                    ProgressView().frame(maxWidth: .infinity).padding()
+                    .padding(edgePadding)
+                    if viewModel.isLoading {
+                        ProgressView().frame(maxWidth: .infinity).padding()
+                    }
                 }
             }
         }
@@ -80,6 +93,16 @@ struct ShortsView: View {
             }
         }
     }
+}
+
+/// 按可用宽度算出「刚好铺满」的列数与列宽。
+/// 用 .fixed 而不是 .adaptive，是为了拿到确定的列宽 —— 封面高度要由它反推。
+private func shortsGridMetrics(width: CGFloat, spacing: CGFloat, minCard: CGFloat, edge: CGFloat)
+    -> (columns: [GridItem], cardWidth: CGFloat) {
+    let available = max(width - edge * 2, minCard)
+    let count = max(2, Int(floor((available + spacing) / (minCard + spacing))))
+    let cardWidth = floor((available - spacing * CGFloat(count - 1)) / CGFloat(count))
+    return (Array(repeating: GridItem(.fixed(cardWidth), spacing: spacing), count: count), cardWidth)
 }
 
 // MARK: - 短视频 VM
@@ -150,10 +173,11 @@ final class ShortsViewModel: ObservableObject {
     }
 }
 
-// MARK: - 短视频封面卡（3:4）
+// MARK: - 短视频封面卡（封面固定 3:4，高度由列宽反推）
 private struct ShortCard: View {
     let video: ShortVideo
     let client: APIClient?
+    let mediaHeight: CGFloat
     var onTap: () -> Void
 
     private var poster: URL? {
@@ -167,7 +191,9 @@ private struct ShortCard: View {
                 ZStack(alignment: .bottomLeading) {
                     RemoteImage(url: poster, fallbackIcon: "play.rectangle.fill",
                                 fallbackColors: Theme.placeholderGradient(for: .short))
-                        .aspectRatio(3.0 / 4.0, contentMode: .fill)
+                        // 同拍摄集卡：高度写死，宽度撑满列宽，超出部分裁掉
+                        .frame(height: mediaHeight)
+                        .frame(maxWidth: .infinity)
                         .clipped()
                     LinearGradient(colors: [.clear, .black.opacity(0.75)],
                                   startPoint: .top, endPoint: .bottom)
