@@ -106,6 +106,10 @@ final class ShortsViewModel: ObservableObject {
     func loadInitial() async {
         guard let client else { errorMessage = "未连接服务器"; return }
         do { pools = try await client.fetchShortPools() } catch { pools = [] }
+        // 同 AlbumListView：从详情返回本页时 .task 可能重跑，此时 reload 会清空 items
+        // 让 ScrollView 弹回顶部。已有数据就跳过，保住滚动位置。
+        // 搜索 / 切换合集仍各自直接调 reload()，不受影响。
+        guard items.isEmpty else { return }
         await reload()
     }
 

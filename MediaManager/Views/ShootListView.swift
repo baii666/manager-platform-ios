@@ -117,6 +117,10 @@ final class ShootListViewModel: ObservableObject {
     @MainActor
     func loadInitial() async {
         await loadLibraries()
+        // 同 AlbumListView：从详情返回本页时 .task 可能重跑，此时 reload 会清空 items
+        // 让 ScrollView 弹回顶部。已有数据就跳过，保住滚动位置。
+        // 搜索 / 换库 / 换排序仍各自直接调 reload()，不受影响。
+        guard items.isEmpty else { return }
         await reload()
     }
 

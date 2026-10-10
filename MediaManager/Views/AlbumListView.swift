@@ -28,6 +28,14 @@ final class AlbumListViewModel: ObservableObject {
             let libs = try await client.photoLibraries()
             libraries = libs
             if selectedLibID == nil { selectedLibID = libs.first?.id }
+
+            // ⚠️ 从相册详情返回本页时，SwiftUI 可能再次触发本页的 .task。
+            // 若此时走 reload()，会先把 albums 清空 —— ScrollView 内容变空后弹回顶部，
+            // 等新数据回来滚动位置已经丢了，表现就是「返回闪一下、跳回列表顶部」。
+            // 所以已有数据时直接跳过，保留列表内容与滚动位置，做到「从哪进的返回还在哪」。
+            // 真正需要重置列表的场景（切换媒体库）仍由 selectLibrary 显式调 reload。
+            guard albums.isEmpty else { return }
+
             await reload()
         } catch {
             errorMessage = "加载媒体库失败 · \(describe(error))"

@@ -33,12 +33,15 @@ final class MediaListViewModel: ObservableObject {
         }
         do {
             libraries = try await client.mediaLibraries(ofMediaType: type)
-            await reload()
         } catch {
             // 库列表拉不到不阻塞内容加载，退化成「全部」
             libraries = []
-            await reload()
         }
+        // 同 AlbumListView：从详情返回本页时 .task 可能重跑，此时 reload 会清空 items
+        // 让 ScrollView 弹回顶部。已有数据就跳过，保住滚动位置。
+        // 切换媒体库仍由 selectLibrary 直接调 reload()，不受影响。
+        guard items.isEmpty else { return }
+        await reload()
     }
 
     @MainActor
