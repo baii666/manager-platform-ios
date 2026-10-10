@@ -161,10 +161,12 @@ struct PhotoViewerView: View {
                     lastOffset = offset
                     return
                 }
-                let dx = value.translation.width
+                // 用预测位移判翻页：快速甩动时即使实际滑动距离短，也会预测出长位移 → 更灵敏；
+                // 阈值从 15% 屏宽降到 8%，缩短「要滑多远才翻页」的触程。
+                let dx = value.predictedEndTranslation.width
                 let dy = value.translation.height
                 if abs(dx) * 1.2 >= abs(dy) {
-                    if abs(dx) > width * 0.15 {
+                    if abs(dx) > width * 0.08 {
                         go(dx < 0 ? 1 : -1)
                     } else {
                         withAnimation(.easeOut(duration: 0.28)) { trackOffset = 0 }
