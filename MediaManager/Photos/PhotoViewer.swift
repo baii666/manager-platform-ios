@@ -100,17 +100,17 @@ struct PhotoViewerView: View {
     private func imageLayer(size: CGSize) -> some View {
         ZStack {
             if let photo {
-                ViewerImageView(
-                    photo: photo,
-                    containerSize: size,
-                    rotated: Int(rotation) % 180 != 0,
-                    onLoaded: { imagePixelSize = $0 }
-                )
-                .scaleEffect(scale)
-                .rotationEffect(.degrees(rotation))
-                .offset(x: offset.width + trackOffset, y: offset.height + dismissY)
-                // 换图即重建，缩放 / 平移状态随图重置
-                .id(photo.id)
+                singleImage(photo, size: size, extraOffsetX: trackOffset)
+
+                // 连续翻页：横向拖动时把相邻那张也挂出来跟手一起滑，
+                // 松手后两张一起滑到位，而不是「旧图瞬间换新图」的生硬切换。
+                if scale <= 1.01 {
+                    if trackOffset < 0, index + 1 < photos.count {
+                        singleImage(photos[index + 1], size: size, extraOffsetX: trackOffset + size.width)
+                    } else if trackOffset > 0, index - 1 >= 0 {
+                        singleImage(photos[index - 1], size: size, extraOffsetX: trackOffset - size.width)
+                    }
+                }
             }
         }
         .frame(width: size.width, height: size.height)
@@ -120,6 +120,21 @@ struct PhotoViewerView: View {
         .simultaneousGesture(magnifyGesture)
         .onTapGesture(count: 2) { toggleZoom() }
         .onTapGesture { toggleUI() }
+    }
+
+    /// 单张图（含缩放 / 旋转 / 平移）。extraOffsetX 用于连续翻页时把相邻图放到屏幕外。
+    private func singleImage(_ p: Photo, size: CGSize, extraOffsetX: CGFloat) -> some View {
+        ViewerImageView(
+            photo: p,
+            containerSize: size,
+            rotated: Int(rotation) % 180 != 0,
+            // 只有当前主图才回填像素尺寸（供 1:1 计算），相邻图的加载别污染它
+            onLoaded: { if p.id == photo?.id { imagePixelSize = $0 } }
+        )
+        .scaleEffect(scale)
+        .rotationEffect(.degrees(rotation))
+        .offset(x: offset.width + extraOffsetX, y: offset.height + dismissY)
+        .id(p.id)
     }
 
     private func dragGesture(width: CGFloat) -> some Gesture {
@@ -228,12 +243,16 @@ struct PhotoViewerView: View {
             withAnimation(.easeOut(duration: 0.28)) { trackOffset = 0 }
             return
         }
-        withAnimation(.easeOut(duration: 0.28)) {
+        // 两图连续翻页：先把当前图连同相邻图一起滑到目标位置，动画结束后再切 index
+        let width = containerSize.width
+        let target = delta > 0 ? -width : width
+        withAnimation(.easeOut(duration: 0.28)) { trackOffset = target }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.29) {
             trackOffset = 0
             index = next
+            resetTransform()
+            imagePixelSize = nil
         }
-        resetTransform()
-        imagePixelSize = nil
     }
 
     private func close(after dy: CGFloat = 0) {
@@ -263,7 +282,7 @@ struct PhotoViewerView: View {
         for delta in 1...3 {
             for i in [idx - delta, idx + delta] where list.indices.contains(i) {
                 guard let url = list[i].fullURL else { continue }
-                Task.detached(priority: .utility) {
+                Task.detached(priority: .userInitiated) {
                     _ = await ImageCache.shared.load(from: url, cacheToDisk: false)
                 }
             }
