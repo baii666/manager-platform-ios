@@ -36,7 +36,8 @@ struct RemoteImage: View {
     @MainActor
     private func load(_ url: URL) async {
         guard image == nil else { return }
-        if let img = await ImageCache.shared.image(for: url) {
+        // 复用项目已有的 ImageCache（Photos/ImageCache.swift，内存 NSCache + 磁盘）
+        if let img = await ImageCache.shared.load(from: url) {
             // 视图可能已随滚动消失，直接赋值无害（@State 仍有效）
             image = img
         } else {
