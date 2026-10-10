@@ -64,6 +64,8 @@ struct ShootListView: View {
         .toolbar(.hidden, for: .navigationBar)
         // 隐藏导航栏后系统右滑返回失效，用自定义右滑手势补齐
         .edgePopGesture()
+        // 下拉刷新
+        .refreshable { await viewModel.refresh() }
         // ⚠️ iOS 17 起 `onChange(of:) { newValue in }`（单参数）已废弃，用零参数闭包
         .onChange(of: viewModel.searchText) {
             Task {
@@ -192,8 +194,16 @@ final class ShootListViewModel: ObservableObject {
         await loadMore()
     }
 
+    /// 下拉刷新：保留旧列表，加载第一页后替换（避免闪空）
     @MainActor
-    func loadMore() async {
+    func refresh() async {
+        page = 1
+        hasMore = true
+        await loadMore(replacing: true)
+    }
+
+    @MainActor
+    func loadMore(replacing: Bool = false) async {
         guard let client, !isLoading, hasMore else { return }
         isLoading = true
         defer { isLoading = false }
@@ -202,7 +212,11 @@ final class ShootListViewModel: ObservableObject {
                 libraryId: selectedLibID, page: page, size: pageSize,
                 sort: sort.rawValue, search: searchText.isEmpty ? nil : searchText)
             totalCount = total
-            items.append(contentsOf: batch)
+            if replacing {
+                items = batch
+            } else {
+                items.append(contentsOf: batch)
+            }
             page += 1
             hasMore = !batch.isEmpty && items.count < total
         } catch {

@@ -58,6 +58,8 @@ struct ShortsView: View {
         }
         .navigationTitle("短视频")
         .navigationBarTitleDisplayMode(.inline)
+        // 下拉刷新
+        .refreshable { await viewModel.reload() }
         .searchable(text: $viewModel.searchText, prompt: "搜索文件名…")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {

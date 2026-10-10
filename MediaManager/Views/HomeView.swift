@@ -33,6 +33,8 @@ struct HomeView: View {
         .background(Color(uiColor: .systemBackground))
         .navigationTitle("首页")
         .navigationBarTitleDisplayMode(.inline)
+        // 下拉刷新
+        .refreshable { await viewModel.load() }
         .task {
             if viewModel.stats.libraryCount == 0 {
                 await viewModel.load()

@@ -103,15 +103,27 @@ final class AlbumListViewModel: ObservableObject {
         await loadMore()
     }
 
+    /// 下拉刷新：保留旧列表，加载第一页后替换（避免闪空）
     @MainActor
-    func loadMore() async {
+    func refresh() async {
+        page = 1
+        hasMore = true
+        await loadMore(replacing: true)
+    }
+
+    @MainActor
+    func loadMore(replacing: Bool = false) async {
         guard let client, let libID = selectedLibID, !isLoading, hasMore else { return }
         isLoading = true
         defer { isLoading = false }
         do {
             let (items, total) = try await client.fetchAlbums(libID: libID, page: page, size: pageSize, sort: sort.rawValue, q: searchText.isEmpty ? nil : searchText)
             totalCount = total
-            albums.append(contentsOf: items)
+            if replacing {
+                albums = items
+            } else {
+                albums.append(contentsOf: items)
+            }
             page += 1
             hasMore = !items.isEmpty && albums.count < total
         } catch {
@@ -222,6 +234,8 @@ struct AlbumListView: View {
         // 固定库模式下隐藏导航栏，系统右滑返回失效，用自定义右滑手势补齐；
         // 跨库模式（sheet 里，导航栏保留）不需要
         .edgePopGesture(enabled: library != nil)
+        // 下拉刷新
+        .refreshable { await viewModel.refresh() }
         // ⚠️ iOS 17 起 onChange(of:) 零参闭包
         .onChange(of: viewModel.searchText) {
             Task {
