@@ -4,6 +4,16 @@ import AVKit
 import MediaPlayer
 import UIKit
 
+// MARK: - 播放目标
+// ⚠️ 必须用 .fullScreenCover(item:) 而不是 isPresented + 另一个 @State URL。
+// isPresented 版的内容闭包有时读到的是状态更新「之前」的值（nil），
+// 表现成「封面弹出来了但没有地址」—— 白屏 / 空页面，且无从判断。
+// 用 item: 则地址是参数直接传进闭包，不存在读写不同步的可能。
+struct PlayerTarget: Identifiable {
+    let id = UUID()
+    let url: URL
+}
+
 // MARK: - 视频播放器
 // 引擎仍是 AVPlayer（VideoToolbox 硬件解码，iPad 播放天花板），
 // 但画面层与控制层全部自绘 —— 这是拿到 B 站式手势与倍速等交互的前提：

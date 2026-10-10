@@ -6,8 +6,8 @@ struct ShootDetailView: View {
     let shoot: Shoot
 
     @StateObject private var viewModel: ShootDetailViewModel
-    @State private var playing = false
-    @State private var playingURL: URL?
+    /// 同 ShortsView：地址挂 item 上，不用 isPresented + 分离 URL 状态
+    @State private var playTarget: PlayerTarget?
     @State private var showViewer = false
     @State private var viewerIndex = 0
 
@@ -35,7 +35,7 @@ struct ShootDetailView: View {
                             ForEach(viewModel.videos) { file in
                                 ShootVideoRow(file: file) {
                                     if let url = client?.shootFileURL(file.id) {
-                                        playingURL = url; playing = true
+                                        playTarget = PlayerTarget(url: url)
                                     }
                                 }
                             }
@@ -70,14 +70,12 @@ struct ShootDetailView: View {
         .navigationTitle(shoot.title)
         .navigationBarTitleDisplayMode(.inline)
         .task { await viewModel.loadInitial() }
-        .fullScreenCover(isPresented: $playing) {
-            if let playingURL {
-                NavigationStack {
-                    VideoPlayerView(url: playingURL, title: shoot.title)
-                        .toolbar { ToolbarItem(placement: .cancellationAction) {
-                            Button("关闭") { playing = false }
-                        } }
-                }
+        .fullScreenCover(item: $playTarget) { target in
+            NavigationStack {
+                VideoPlayerView(url: target.url, title: shoot.title)
+                    .toolbar { ToolbarItem(placement: .cancellationAction) {
+                        Button("关闭") { playTarget = nil }
+                    } }
             }
         }
         .fullScreenCover(isPresented: $showViewer) {

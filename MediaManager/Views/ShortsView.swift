@@ -4,8 +4,8 @@ import SwiftUI
 // 对齐网页端 ShortsPage（消费侧）：池筛选 + 搜索 + 封面墙 + 点开播放
 struct ShortsView: View {
     @StateObject private var viewModel = ShortsViewModel()
-    @State private var playing = false
-    @State private var playingURL: URL?
+    /// 播放目标。地址直接挂在 item 上，避免 isPresented + 分离 URL 状态不同步
+    @State private var playTarget: PlayerTarget?
     /// 播放地址构造失败时给出明确原因，而不是静默什么都不发生
     @State private var playError: String?
 
@@ -43,8 +43,7 @@ struct ShortsView: View {
                                     playError = "播放地址构造失败\n\(path)"
                                     return
                                 }
-                                playingURL = url
-                                playing = true
+                                playTarget = PlayerTarget(url: url)
                             }
                             .task {
                                 if v.id == viewModel.items.last?.id { await viewModel.loadMore() }
@@ -92,24 +91,12 @@ struct ShortsView: View {
             }
         }
         .task { await viewModel.loadInitial() }
-        .fullScreenCover(isPresented: $playing) {
-            // ⚠️ NavigationStack 里不能是空的 —— 空栈就是一片系统白底，
-            // 任何「地址没构造出来」的情况都会表现成白屏且无从判断。
+        .fullScreenCover(item: $playTarget) { target in
             NavigationStack {
-                if let playingURL {
-                    VideoPlayerView(url: playingURL, title: "短视频")
-                        .toolbar { ToolbarItem(placement: .cancellationAction) {
-                            Button("关闭") { playing = false }
-                        } }
-                } else {
-                    VStack(spacing: 12) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.system(size: 32))
-                            .foregroundStyle(.orange)
-                        Text("没有可播放的视频")
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
+                VideoPlayerView(url: target.url, title: "短视频")
+                    .toolbar { ToolbarItem(placement: .cancellationAction) {
+                        Button("关闭") { playTarget = nil }
+                    } }
             }
         }
         .alert("无法播放", isPresented: Binding(
