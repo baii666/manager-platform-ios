@@ -71,6 +71,8 @@ struct ShortFeedView: View {
         }
         // 右滑退出：页面跟手向右移动，松手超过阈值向右滑出屏幕（不是默认的向下收起）
         .offset(x: dragOffsetX)
+        // 底衬黑色：页面右移时露出的是黑底，而不是 fullScreenCover 底层的系统白底
+        .background(Color.black.ignoresSafeArea())
         .simultaneousGesture(exitDragGesture)
         .statusBar(hidden: true)
         .onChange(of: currentID) {
