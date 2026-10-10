@@ -38,6 +38,8 @@ struct LibraryPickerView: View {
         .toolbar(.hidden, for: .navigationBar)
         // ⚠️ 用 task(id: type)：顶 bar 切换分类时重新加载对应类型的媒体库
         .task(id: type) { await load() }
+        // 下拉刷新：保留旧数据，加载完替换（避免闪空）
+        .refreshable { await load(clear: false) }
     }
 
     private var emptyIcon: String {
@@ -50,15 +52,20 @@ struct LibraryPickerView: View {
     }
 
     @MainActor
-    private func load() async {
+    private func load(clear: Bool = true) async {
         guard let client = AppSession.shared.client else {
             errorMessage = "未连接服务器"
             isLoading = false
             return
         }
-        isLoading = true
-        libraries = []  // 切换分类时清空，避免短暂显示上一分类的库
-        defer { isLoading = false }
+        // 切换分类/首次加载才显示加载指示；下拉刷新（clear=false）用系统转圈，
+        // ⚠️ 下拉刷新不碰 isLoading：isLoading 触发 body 重算会让 .refreshable 的
+        // 刷新 Task 被取消（请求取消）。
+        if clear {
+            isLoading = true
+            libraries = []  // 切换分类时清空，避免短暂显示上一分类的库
+        }
+        defer { if clear { isLoading = false } }
         do {
             libraries = try await client.libraries(ofType: type)
         } catch {
