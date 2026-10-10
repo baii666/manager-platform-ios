@@ -7,9 +7,11 @@ import UIKit
 struct HomeView: View {
     @ObservedObject var viewModel: HomeViewModel
 
-    @State private var playingAsset: UnifiedAsset?
+    @State private var playing: PlaybackTarget?
     /// 点开却拿不到播放地址时给出明确原因，而不是「点了没反应」
     @State private var playError: String?
+    /// 非 MP4 容器要发两次请求（探测编码 + 开 HLS 会话）才拿得到地址，这期间得有反馈
+    @State private var preparing = false
     @State private var showingPhotos = false
     @State private var showingAlbums = false
     @State private var showingTasks = false
@@ -40,6 +42,11 @@ struct HomeView: View {
         .overlay {
             if viewModel.isLoading {
                 ProgressView("加载中…")
+                    .padding(20)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            } else if preparing {
+                // 不给反馈的话，MKV 点下去会有 1~2 秒完全没反应，像是卡了
+                ProgressView("准备播放…")
                     .padding(20)
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
@@ -100,19 +107,17 @@ struct HomeView: View {
         } message: {
             Text(playError ?? "")
         }
-        .fullScreenCover(item: $playingAsset) { asset in
-            if let url = asset.playbackURL {
-                NavigationStack {
-                    VideoPlayerView(
-                        url: url,
-                        // ⚠️ remux 是 chunked 流、没有 Range，客户端 seek 不了 ——
-                        // 起始位置已经由 &startTime= 让服务端 -ss 偏移掉了，这里不能再 seek
-                        startPosition: url.path.hasPrefix("/stream/remux") ? 0 : asset.position,
-                        title: asset.title,
-                        assetType: asset.type.rawValue,
-                        assetID: asset.id
-                    )
-                }
+        .fullScreenCover(item: $playing) { target in
+            NavigationStack {
+                VideoPlayerView(
+                    url: target.url,
+                    startPosition: target.startAt,
+                    timeOffset: target.timeOffset,
+                    knownDuration: target.knownDuration,
+                    title: target.title,
+                    assetType: target.assetType,
+                    assetID: target.assetID
+                )
             }
         }
     }
@@ -195,11 +200,7 @@ struct HomeView: View {
             horizontalRow {
                 ForEach(viewModel.resume) { asset in
                     ResumeCard(asset: asset) {
-                        if asset.playbackURL != nil {
-                            playingAsset = asset
-                        } else {
-                            playError = "《\(asset.title)》没有可播放的文件路径"
-                        }
+                        handleAssetTap(asset)
                     }
                 }
             }
@@ -253,12 +254,45 @@ struct HomeView: View {
     // MARK: 交互
 
     private func handleAssetTap(_ asset: UnifiedAsset) {
-        if asset.playbackURL != nil {
-            playingAsset = asset
-        } else if asset.type == .photo {
-            showingPhotos = true
-        } else {
-            playError = "《\(asset.title)》没有可播放的文件路径"
+        guard let path = asset.playablePath else {
+            if asset.type == .photo {
+                showingPhotos = true
+            } else {
+                playError = "《\(asset.title)》没有可播放的文件路径"
+            }
+            return
+        }
+        openPlayback(path: path,
+                     startAt: asset.position,
+                     title: asset.title,
+                     assetType: asset.type.rawValue,
+                     assetID: asset.id,
+                     knownDuration: asset.duration)
+    }
+
+    /// 拿播放地址是个异步过程（非 MP4 容器要服务端开 HLS 会话），所以不能像以前那样
+    /// 在点击的瞬间就拼个 URL 出来。失败一定要弹出来，别静默吞掉。
+    private func openPlayback(path: String, startAt: Double?,
+                              title: String, assetType: String, assetID: Int,
+                              knownDuration: Double? = nil) {
+        guard let client = AppSession.shared.client else {
+            playError = "还没连接到服务器，请重新登录"
+            return
+        }
+        guard !preparing else { return }
+        preparing = true
+        Task {
+            do {
+                let target = try await client.resolvePlayback(
+                    path: path, startAt: startAt,
+                    title: title, assetType: assetType, assetID: assetID,
+                    knownDuration: knownDuration)
+                preparing = false
+                playing = target
+            } catch {
+                preparing = false
+                playError = "《\(title)》准备播放失败：\(error.localizedDescription)"
+            }
         }
     }
 

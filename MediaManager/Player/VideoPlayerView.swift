@@ -26,6 +26,12 @@ struct PlayerTarget: Identifiable {
 struct VideoPlayerView: View {
     let url: URL
     var startPosition: Double? = nil
+    /// 时间轴基准偏移。HLS 走服务端 `-ss` 从断点切片时，AVPlayer 的时间轴是从 0 重新开始的，
+    /// 上报进度必须加回这个偏移，否则 2 小时的电影从第 30 分钟续播，会被记成「看了 5 分钟」。
+    var timeOffset: Double = 0
+    /// 服务端已知的总时长。HLS 在 FFmpeg 跑完之前没有 `#EXT-X-ENDLIST`，
+    /// AVPlayer 的 duration 是 indefinite（0），进度条和续播上报会一起失灵 —— 用它兜底。
+    var knownDuration: Double? = nil
     var title: String? = nil
     /// 传了才会上报播放进度（对接统一行为层 POST /api/actions/progress）
     var assetType: String? = nil
@@ -51,6 +57,17 @@ struct VideoPlayerView: View {
 
     /// 横向滑满一屏对应的快进秒数
     private let seekSpan: Double = 120
+
+    /// 进度条与上报用的总时长（绝对时间轴）
+    private var displayDuration: Double {
+        if engine.duration > 0 { return engine.duration + timeOffset }
+        return knownDuration ?? 0
+    }
+
+    /// 进度条显示的当前位置（绝对时间轴）
+    private var displayPosition: Double {
+        pendingSeek ?? (engine.currentTime + timeOffset)
+    }
 
     var body: some View {
         ZStack {
@@ -154,7 +171,7 @@ struct VideoPlayerView: View {
                     axis = abs(value.translation.width) > abs(value.translation.height)
                         ? .horizontal : .vertical
                     startOnLeft = value.startLocation.x < UIScreen.main.bounds.width / 2
-                    seekBase = engine.currentTime
+                    seekBase = engine.currentTime + timeOffset
                     brightnessBase = UIScreen.main.brightness
                     volumeBase = SystemVolume.shared.value
                 }
@@ -163,7 +180,7 @@ struct VideoPlayerView: View {
             }
             .onEnded { _ in
                 if axis == .horizontal, let target = pendingSeek {
-                    engine.seek(to: target)
+                    engine.seek(to: max(0, target - timeOffset))
                 }
                 engine.isScrubbing = false
                 axis = .none
@@ -180,9 +197,9 @@ struct VideoPlayerView: View {
         case .horizontal:
             let width = Double(max(bounds.width, 1))
             let delta = Double(t.width) / width * seekSpan
-            let target = min(max(seekBase + delta, 0), max(engine.duration, 0))
+            let target = min(max(seekBase + delta, 0), max(displayDuration, 0))
             pendingSeek = target
-            hud = PlayerTimeFormatter.string(target) + " / " + PlayerTimeFormatter.string(engine.duration)
+            hud = PlayerTimeFormatter.string(target) + " / " + PlayerTimeFormatter.string(displayDuration)
         case .vertical:
             let height = max(bounds.height, 1)
             if startOnLeft {
@@ -245,21 +262,21 @@ struct VideoPlayerView: View {
 
     private var bottomBar: some View {
         VStack(spacing: 10) {
-            let display = pendingSeek ?? engine.currentTime
+            let display = displayPosition
             ScrubberView(
-                duration: engine.duration,
+                duration: displayDuration,
                 current: display,
                 loaded: engine.loadedRange,
                 onStart: { engine.isScrubbing = true },
                 onChange: { value in
                     pendingSeek = value
-                    hud = PlayerTimeFormatter.string(value) + " / " + PlayerTimeFormatter.string(engine.duration)
+                    hud = PlayerTimeFormatter.string(value) + " / " + PlayerTimeFormatter.string(displayDuration)
                 },
                 onEnd: { value in
                     engine.isScrubbing = false
                     pendingSeek = nil
                     hud = nil
-                    engine.seek(to: value)
+                    engine.seek(to: max(0, value - timeOffset))
                     scheduleHide()
                 }
             )
@@ -272,7 +289,7 @@ struct VideoPlayerView: View {
                 Text(PlayerTimeFormatter.string(display))
                     .font(.system(size: 13, weight: .medium))
                     .monospacedDigit()
-                Text("/ " + PlayerTimeFormatter.string(engine.duration))
+                Text("/ " + PlayerTimeFormatter.string(displayDuration))
                     .font(.system(size: 13))
                     .foregroundStyle(.white.opacity(0.7))
                     .monospacedDigit()
@@ -336,8 +353,9 @@ struct VideoPlayerView: View {
         hideWork = nil
         reportTask?.cancel()
         reportTask = nil
-        let pos = engine.currentTime
-        let dur = engine.duration
+        let pos = engine.currentTime + timeOffset
+        // HLS 没跑完时 engine.duration 是 0，退回服务端已知的时长，否则这次观看根本不会记录
+        let dur = engine.duration > 0 ? engine.duration + timeOffset : (knownDuration ?? 0)
         let type = assetType
         let id = assetID
         if let type, let id, dur > 0 {
@@ -355,13 +373,16 @@ struct VideoPlayerView: View {
         guard let type = assetType, let id = assetID else { return }
         // 用局部常量进 capture list：capture list 里直接写 self 的属性不稳妥
         let engineRef = engine
+        let offset = timeOffset
+        let fallback = knownDuration
         reportTask = Task { [weak engineRef] in
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 15_000_000_000)
                 if Task.isCancelled { break }
-                guard let engine = engineRef, engine.duration > 0 else { continue }
-                let pos = engine.currentTime
-                let dur = engine.duration
+                guard let engine = engineRef else { continue }
+                let dur = engine.duration > 0 ? engine.duration + offset : (fallback ?? 0)
+                guard dur > 0 else { continue }
+                let pos = engine.currentTime + offset
                 if let client = AppSession.shared.client {
                     try? await client.reportProgress(type: type, id: id, position: pos, duration: dur)
                 }

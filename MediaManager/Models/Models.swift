@@ -99,6 +99,37 @@ struct UnifiedAsset: Identifiable, Codable, Sendable {
         position = optDouble(c, .position)
         duration = optDouble(c, .duration)
     }
+
+    /// 可播放的文件路径。只有影视 / 短视频是「一个文件」，写真 / 拍摄集是目录。
+    /// ⚠️ 别再用 playbackURL 是否为空来判断能不能播 —— 非直连容器（MKV/AVI/WMV）
+    /// 的播放地址要问服务端要，拿不到同步地址 ≠ 不能播。
+    var playablePath: String? {
+        guard type == .media || type == .short else { return nil }
+        guard let p = path, !p.isEmpty else { return nil }
+        return p
+    }
+}
+
+// MARK: - 播放目标
+// 播放地址不再是一行代码能拼出来的：非 MP4 容器要先找服务端开一个 HLS 会话，
+// 所以「地址 + 起始位置 + 时间轴偏移」打包成一个值，配合 .fullScreenCover(item:) 使用。
+// ⚠️ 必须用 item: 把数据传进内容闭包。写成 isPresented + 另一个 @State，
+// 闭包可能读到更新前的值（URL 还是 nil）→ 弹层出来了但没画面，且无从判断。
+struct PlaybackTarget: Identifiable, Sendable {
+    let id = UUID()
+    let url: URL
+    let title: String
+    /// 传了才会上报播放进度（对接统一行为层 POST /api/actions/progress）
+    let assetType: String?
+    let assetID: Int?
+    /// 交给 AVPlayer 的起始秒
+    let startAt: Double
+    /// 上报进度要叠加的时间轴基准。
+    /// HLS 走服务端 `-ss` 从断点切片时，播放器自己的时间轴是从 0 开始的，
+    /// 直接上报会把 2 小时的电影记成 30 分钟。
+    let timeOffset: Double
+    /// 服务端已知的总时长。HLS 会话没跑完时 AVPlayer 拿不到 duration，用它兜底
+    let knownDuration: Double?
 }
 
 // decodeIfPresent 再包 try? 会产生 String?? / Double??（双层可选），

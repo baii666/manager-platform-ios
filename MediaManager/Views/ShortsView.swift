@@ -5,9 +5,11 @@ import SwiftUI
 struct ShortsView: View {
     @StateObject private var viewModel = ShortsViewModel()
     /// 播放目标。地址直接挂在 item 上，避免 isPresented + 分离 URL 状态不同步
-    @State private var playTarget: PlayerTarget?
+    @State private var playTarget: PlaybackTarget?
     /// 播放地址构造失败时给出明确原因，而不是静默什么都不发生
     @State private var playError: String?
+    /// 非 MP4 容器要先找服务端开 HLS 会话，这期间给个转圈
+    @State private var preparing = false
 
     private let gridSpacing: CGFloat = 12
     private let edgePadding: CGFloat = 16
@@ -42,12 +44,7 @@ struct ShortsView: View {
                                 playError = "这条记录没有文件路径"
                                 return
                             }
-                            // streamURL 会按容器分流：mp4/mov 直连，avi/mkv 等走 remux
-                            guard let url = viewModel.client?.streamURL(path: path) else {
-                                playError = "播放地址构造失败\n\(path)"
-                                return
-                            }
-                            playTarget = PlayerTarget(url: url)
+                            openPlayback(path: path, title: v.title, knownDuration: v.duration)
                         }
                         .task {
                             if v.id == viewModel.items.last?.id { await viewModel.loadMore() }
@@ -97,10 +94,21 @@ struct ShortsView: View {
         .task { await viewModel.loadInitial() }
         .fullScreenCover(item: $playTarget) { target in
             NavigationStack {
-                VideoPlayerView(url: target.url, title: "短视频")
+                VideoPlayerView(url: target.url,
+                                startPosition: target.startAt,
+                                timeOffset: target.timeOffset,
+                                knownDuration: target.knownDuration,
+                                title: target.title)
                     .toolbar { ToolbarItem(placement: .cancellationAction) {
                         Button("关闭") { playTarget = nil }
                     } }
+            }
+        }
+        .overlay {
+            if preparing {
+                ProgressView("准备播放…")
+                    .padding(20)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
         }
         .alert("无法播放", isPresented: Binding(
@@ -110,6 +118,30 @@ struct ShortsView: View {
             Button("好", role: .cancel) { playError = nil }
         } message: {
             Text(playError ?? "")
+        }
+    }
+
+    /// 播放。非 MP4 容器要先找服务端开 HLS 会话，拿不到地址就明确报错，别静默。
+    private func openPlayback(path: String, title: String?, knownDuration: Double? = nil) {
+        guard let client = viewModel.client else {
+            playError = "还没连接到服务器，请重新登录"
+            return
+        }
+        guard !preparing else { return }
+        preparing = true
+        let name = (title?.isEmpty == false) ? title! : (path as NSString).lastPathComponent
+        Task {
+            do {
+                let target = try await client.resolvePlayback(
+                    path: path, startAt: nil,
+                    title: name, assetType: nil, assetID: nil,
+                    knownDuration: knownDuration)
+                preparing = false
+                playTarget = target
+            } catch {
+                preparing = false
+                playError = "准备播放失败：\(error.localizedDescription)\n\(path)"
+            }
         }
     }
 }

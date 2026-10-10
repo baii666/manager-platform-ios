@@ -11,7 +11,9 @@ struct MediaDetailView: View {
     @State private var isLoading = true
     @State private var errorMessage: String?
     @State private var overviewExpanded = false
-    @State private var playing = false
+    @State private var playTarget: PlaybackTarget?
+    @State private var preparing = false
+    @State private var playError: String?
     @State private var showViewer = false
     @State private var viewerIndex = 0
     @State private var isFavorite = false
@@ -32,16 +34,34 @@ struct MediaDetailView: View {
         .navigationTitle(detail?.title ?? media.title)
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
-        .fullScreenCover(isPresented: $playing) {
-            if let detail, let path = detail.videoFiles.first,
-               let url = client?.streamURL(path: path) {
-                NavigationStack {
-                    VideoPlayerView(url: url, title: detail.title, assetType: "media", assetID: detail.id)
-                        .toolbar { ToolbarItem(placement: .cancellationAction) {
-                            Button("关闭") { playing = false }
-                        } }
-                }
+        .fullScreenCover(item: $playTarget) { target in
+            NavigationStack {
+                VideoPlayerView(url: target.url,
+                                startPosition: target.startAt,
+                                timeOffset: target.timeOffset,
+                                knownDuration: target.knownDuration,
+                                title: target.title,
+                                assetType: target.assetType,
+                                assetID: target.assetID)
+                    .toolbar { ToolbarItem(placement: .cancellationAction) {
+                        Button("关闭") { playTarget = nil }
+                    } }
             }
+        }
+        .overlay {
+            if preparing {
+                ProgressView("准备播放…")
+                    .padding(20)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+        }
+        .alert("无法播放", isPresented: Binding(
+            get: { playError != nil },
+            set: { if !$0 { playError = nil } }
+        )) {
+            Button("好", role: .cancel) { playError = nil }
+        } message: {
+            Text(playError ?? "")
         }
         .fullScreenCover(isPresented: $showViewer) {
             if !stillsPhotos.isEmpty {
@@ -109,7 +129,7 @@ struct MediaDetailView: View {
                 HStack(spacing: 10) {
                     if d.playable {
                         Button {
-                            playing = true
+                            startPlayback(d)
                         } label: {
                             Label("播放", systemImage: "play.fill")
                                 .font(.headline)
@@ -274,6 +294,29 @@ struct MediaDetailView: View {
                 isFavorite = try await client.setFavorite(type: "media", id: media.id, on: target)
             } catch {}
             favLoading = false
+        }
+    }
+
+    /// 播放。地址不是同步拼出来的：非 MP4 容器要服务端开 HLS 会话，所以这里先转圈再弹层。
+    private func startPlayback(_ d: MediaDetail) {
+        guard let client else { playError = "还没连接到服务器，请重新登录"; return }
+        guard let path = d.videoFiles.first, !path.isEmpty else {
+            playError = "《\(d.title)》没有可播放的文件"
+            return
+        }
+        guard !preparing else { return }
+        preparing = true
+        Task {
+            do {
+                let target = try await client.resolvePlayback(
+                    path: path, startAt: nil,
+                    title: d.title, assetType: "media", assetID: d.id)
+                preparing = false
+                playTarget = target
+            } catch {
+                preparing = false
+                playError = "《\(d.title)》准备播放失败：\(error.localizedDescription)"
+            }
         }
     }
 }

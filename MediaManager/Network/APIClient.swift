@@ -41,29 +41,106 @@ final class APIClient: DataProviding, @unchecked Sendable {
     }
 
     // MARK: - 播放地址
+    //
+    // 三档，按「AVPlayer 到底认什么」来分：
+    //   1. MP4/M4V/MOV → 直连 /stream。服务端支持 Range（206），随便拖。
+    //   2. 其余容器（MKV / AVI / WMV…）→ HLS。
+    //      ⚠️ 之前这里走 /stream/remux（chunked fMP4），实测 iPad 上播不了：
+    //      它用 -movflags empty_moov 边转边吐，响应是 chunked、没有 Content-Length
+    //      也没有 Accept-Ranges，AVPlayer 拿不到时长也 seek 不了，直接
+    //      “The operation could not be completed”。HLS 才是 AVPlayer 的原生格式：
+    //      每个分片都是独立请求、有确定长度，可 seek。
+    //   3. 编码是 iPad 硬解吃不下的时候（VC-1 / MPEG-2 的老 WMV、AVI）→ HLS 重编码。
+    //      这一档白烧 CPU，但库里 200 多个 WMV 只有这条路能出画面。
 
-    /// AVPlayer 能直接吃的容器。其余一律走 remux。
-    /// ⚠️ MKV / AVI 这类 AVPlayer **不认容器**（不是编码问题，iPad 硬解 HEVC 毫无压力），
-    /// 直接直连 /stream 会秒失败、播放器只显示「无法播放」。
+    /// AVPlayer 能直接吃的容器
     private static let directPlayExts: Set<String> = ["mp4", "m4v", "mov"]
 
-    /// 构造播放地址：直连优先，容器不认就走 /stream/remux（FFmpeg 重新封装成 MP4，-c:v copy 无损）。
-    ///
-    /// - 直连 `/stream`：完整支持 Range（206），可随意拖动
-    /// - remux `/stream/remux`：chunked 输出**没有 Range**，拖动受限，所以续播场景要把
-    ///   `startAt` 传进去（服务端 `-ss` 从断点开始吐流）
-    /// - 别用 `/transcode`（libx264 重编码）和 HLS —— 那是给浏览器兜底的，白烧 CPU
-    func streamURL(path: String, startAt: Double? = nil) -> URL? {
+    /// iPad 硬解吃得下的视频编码。命中就走 HLS 的 -c:v copy（只换封装，画质无损、CPU 几乎不动）
+    private static let nativeVideoCodecs: Set<String> = [
+        "h264", "avc1", "avc3", "hevc", "hvc1", "hev1", "av01", "av1c"
+    ]
+
+    /// GET /api/playback/info 的返回（服务端用 FFmpeg 探出容器与编码）
+    struct PlaybackInfo: Decodable {
+        let container: String?
+        let videoCodec: String?
+        let audioCodec: String?
+    }
+
+    func fetchPlaybackInfo(path: String) async throws -> PlaybackInfo {
+        guard let u = makeURL("/api/playback/info", queryItems: [
+            URLQueryItem(name: "path", value: path)
+        ]) else { throw DataError.server("播放地址拼接失败") }
+        let (data, resp) = try await session.data(for: URLRequest(url: u))
+        if let http = resp as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+            throw DataError.http(http.statusCode)
+        }
+        return try decoder.decode(PlaybackInfo.self, from: data)
+    }
+
+    /// 直连地址。⚠️ 只对 MP4/M4V/MOV 有意义 —— 别的容器 AVPlayer 不认，
+    /// 这里直接返回 nil，免得谁拿它去播 MKV 又得到一个「能拼出来但播不了」的地址。
+    /// 非直连容器一律走 `resolvePlayback(path:startAt:...)`。
+    func streamURL(path: String) -> URL? {
         guard !path.isEmpty else { return nil }
         let ext = (path as NSString).pathExtension.lowercased()
-        if Self.directPlayExts.contains(ext) {
-            return makeURL("/stream", queryItems: [URLQueryItem(name: "path", value: path)])
-        }
+        guard Self.directPlayExts.contains(ext) else { return nil }
+        return makeURL("/stream", queryItems: [URLQueryItem(name: "path", value: path)])
+    }
+
+    /// 开一个 HLS 会话拿 m3u8 地址。
+    /// 两步：GET /hls 返回 {"sessionId","m3u8Url":"/hls/<id>/index.m3u8"}，
+    /// m3u8Url 是**相对路径**，必须拼到 baseURL 上再交给 AVPlayer。
+    private func hlsURL(path: String, startAt: Double?, copyVideo: Bool) async throws -> URL {
         var items = [URLQueryItem(name: "path", value: path)]
+        if copyVideo { items.append(URLQueryItem(name: "copyVideo", value: "1")) }
         if let s = startAt, s.isFinite, s > 1 {
             items.append(URLQueryItem(name: "startTime", value: String(format: "%.3f", s)))
         }
-        return makeURL("/stream/remux", queryItems: items)
+        guard let u = makeURL("/hls", queryItems: items) else {
+            throw DataError.server("HLS 地址拼接失败")
+        }
+        let (data, resp) = try await session.data(for: URLRequest(url: u))
+        if let http = resp as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+            throw DataError.http(http.statusCode)
+        }
+        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let rel = obj["m3u8Url"] as? String, !rel.isEmpty,
+              let url = URL(string: rel, relativeTo: baseURL) else {
+            throw DataError.server("服务端没有返回 HLS 播放列表")
+        }
+        return url
+    }
+
+    /// 决定播放方式并给出最终地址。非直连容器要发两次请求（探测 + 开会话），所以是 async。
+    func resolvePlayback(path: String,
+                         startAt: Double?,
+                         title: String,
+                         assetType: String?,
+                         assetID: Int?,
+                         knownDuration: Double? = nil) async throws -> PlaybackTarget {
+        let ext = (path as NSString).pathExtension.lowercased()
+
+        if Self.directPlayExts.contains(ext) {
+            guard let url = streamURL(path: path) else {
+                throw DataError.server("播放地址拼接失败")
+            }
+            return PlaybackTarget(url: url, title: title, assetType: assetType, assetID: assetID,
+                                  startAt: startAt ?? 0, timeOffset: 0,
+                                  knownDuration: knownDuration)
+        }
+
+        // 探不到编码时按「能 copy」乐观处理。反过来的兜底是灾难性的：
+        // 猜成「要重编码」会把 4K 片源丢给 libx264，几帧一秒，那才真的播不动。
+        let codec = (try? await fetchPlaybackInfo(path: path))?.videoCodec?.lowercased() ?? ""
+        let copyVideo = codec.isEmpty || Self.nativeVideoCodecs.contains(codec)
+        let url = try await hlsURL(path: path, startAt: startAt, copyVideo: copyVideo)
+
+        // HLS 的时间轴是从 -ss 那个点重新开始的，上报进度要加回基准
+        let offset = (startAt ?? 0) > 1 ? (startAt ?? 0) : 0
+        return PlaybackTarget(url: url, title: title, assetType: assetType, assetID: assetID,
+                              startAt: 0, timeOffset: offset, knownDuration: knownDuration)
     }
 
     // MARK: - 请求辅助
@@ -289,12 +366,13 @@ final class APIClient: DataProviding, @unchecked Sendable {
         var asset = a
         asset.coverURL = resolve(a.coverURL)
         asset.backdropURL = resolve(a.backdropURL)
-        // 播放地址：影视/短视频有文件路径，播放地址按容器分流（MKV 等要 remux）
+        // 播放地址：只有直连容器（MP4/M4V/MOV）能同步拼出来。
+        // MKV / AVI / WMV 要先找服务端开 HLS 会话，播的时候再走 resolvePlayback 异步拿。
         // ⚠️ 条件必须写成 (a.type == .media || a.type == .short) 加括号：
         // && 优先级高于 ||，不加括号会被解析成 "(path 非空 && media) || short"，
         // 于是短视频即使 path 为空也会拼出一个 path= 的空地址
-        if let path = a.path, !path.isEmpty, (a.type == .media || a.type == .short) {
-            asset.playbackURL = streamURL(path: path, startAt: a.position)
+        if let path = a.playablePath {
+            asset.playbackURL = streamURL(path: path)
         }
         return asset
     }
