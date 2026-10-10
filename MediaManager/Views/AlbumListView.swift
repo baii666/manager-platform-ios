@@ -33,8 +33,6 @@ final class AlbumListViewModel: ObservableObject {
     @Published var selectedLibID: Int?
     @Published var sort: Sort = .updatedDesc
     @Published var searchText = ""
-    /// 封面方向：false = 竖版，true = 横版
-    @Published var landscape = false
     @Published var totalCount = 0
     @Published var isLoading = false
     @Published var errorMessage: String?
@@ -132,16 +130,22 @@ struct AlbumListView: View {
     let library: Library?
 
     @StateObject private var viewModel: AlbumListViewModel
-    /// 卡片最小宽度（尺寸档位：小 130 / 中 170 / 大 210）
-    @State private var cardWidth: CGFloat = 170
+    @StateObject private var layout: CardLayoutController
+    /// 捏合手势起始宽度
+    @State private var pinchStartWidth: CGFloat = 0
 
     private var columns: [GridItem] {
-        [GridItem(.adaptive(minimum: cardWidth), spacing: 18)]
+        [GridItem(.adaptive(minimum: layout.cardWidth), spacing: 18)]
     }
 
     init(library: Library? = nil) {
         self.library = library
         _viewModel = StateObject(wrappedValue: AlbumListViewModel(library: library))
+        _layout = StateObject(wrappedValue: CardLayoutController(
+            baseKey: "albumList", libID: library?.id,
+            portraitDefault: 140, landscapeDefault: 210,
+            portraitRange: 90...300, landscapeRange: 140...480
+        ))
     }
 
     var body: some View {
@@ -151,12 +155,12 @@ struct AlbumListView: View {
                 ListSearchBar(text: $viewModel.searchText, placeholder: "搜索相册名…")
                 HStack(spacing: 8) {
                     sortMenu
-                    ToolChip(label: viewModel.landscape ? "横版" : "竖版",
-                             icon: viewModel.landscape ? "rectangle" : "rectangle.portrait",
-                             highlighted: viewModel.landscape) {
-                        viewModel.landscape.toggle()
+                    ToolChip(label: layout.landscape ? "横版" : "竖版",
+                             icon: layout.landscape ? "rectangle" : "rectangle.portrait",
+                             highlighted: layout.landscape) {
+                        layout.toggleOrientation()
                     }
-                    sizeMenu
+                    ToolSlider(icon: "arrow.up.left.and.arrow.down.right", layout: layout)
                     Spacer()
                     Text("\(viewModel.albums.count) / \(viewModel.totalCount)")
                         .font(.caption.monospacedDigit())
@@ -171,7 +175,8 @@ struct AlbumListView: View {
                 LazyVGrid(columns: columns, spacing: 18) {
                     ForEach(viewModel.albums) { album in
                         NavigationLink(value: album) {
-                            AlbumCard(album: album, coverURL: coverURL(for: album), landscape: viewModel.landscape)
+                            AlbumCard(album: album, coverURL: coverURL(for: album, landscape: layout.landscape),
+                                      width: layout.cardWidth, landscape: layout.landscape)
                         }
                         .buttonStyle(.plain)
                         .task {
@@ -187,6 +192,8 @@ struct AlbumListView: View {
                     ProgressView().frame(maxWidth: .infinity).padding()
                 }
             }
+            // 双指捏合缩放卡片大小（对齐网页版 usePinchToResize）
+            .simultaneousGesture(pinchGesture)
         }
         .navigationTitle(library?.name ?? "相册")
         .navigationBarTitleDisplayMode(.inline)
@@ -232,21 +239,16 @@ struct AlbumListView: View {
         }
     }
 
-    /// 尺寸档位
-    private var sizeMenu: some View {
-        ToolMenuChip(label: sizeLabel, icon: "arrow.up.left.and.arrow.down.right") {
-            Button { cardWidth = 130 } label: { Label("小", systemImage: cardWidth == 130 ? "checkmark" : "square") }
-            Button { cardWidth = 170 } label: { Label("中", systemImage: cardWidth == 170 ? "checkmark" : "square") }
-            Button { cardWidth = 210 } label: { Label("大", systemImage: cardWidth == 210 ? "checkmark" : "square") }
-        }
-    }
-
-    private var sizeLabel: String {
-        switch cardWidth {
-        case 130: return "小"
-        case 210: return "大"
-        default: return "中"
-        }
+    /// 双指捏合缩放卡片大小
+    private var pinchGesture: some Gesture {
+        MagnificationGesture()
+            .onChanged { scale in
+                if pinchStartWidth == 0 { pinchStartWidth = layout.cardWidth }
+                layout.resize(to: pinchStartWidth * scale)
+            }
+            .onEnded { _ in
+                pinchStartWidth = 0
+            }
     }
 
     /// 库选择放导航栏下拉菜单（iOS 常见样式），不再挤在顶部占一整行
@@ -293,35 +295,69 @@ struct AlbumCard: View {
     /// 横版封面（16:9）还是竖版（2:3）
     var landscape: Bool = false
 
+    private var coverHeight: CGFloat { width * (landscape ? 9.0 / 16.0 : 3.0 / 2.0) }
+    /// 对齐网页版 AlbumListPage：卡片 <150px 时下方不显示标题，只在封面底部叠渐变标题
+    private var showInfo: Bool { width >= 150 }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            ZStack(alignment: .bottomTrailing) {
-                RemoteImage(url: coverURL, fallbackIcon: "photo.on.rectangle")
-                    .imageFilled()
-                    .frame(width: width, height: width * (landscape ? 9.0 / 16.0 : 3.0 / 2.0))
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                Text("\(album.count)")
-                    .font(.caption2.weight(.semibold))
-                    .monospacedDigit()
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 3)
-                    .background(.black.opacity(0.55), in: Capsule())
-                    .padding(7)
+            ZStack(alignment: .bottom) {
+                // 封面 + 右下张数角标
+                ZStack(alignment: .bottomTrailing) {
+                    RemoteImage(url: coverURL, fallbackIcon: "photo.on.rectangle")
+                        .imageFilled()
+                        .frame(width: width, height: coverHeight)
+                        .clipShape(RoundedRectangle(cornerRadius: showInfo ? 10 : 8, style: .continuous))
+                    if showInfo {
+                        Text("\(album.count)")
+                            .font(.caption2.weight(.semibold))
+                            .monospacedDigit()
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background(.black.opacity(0.55), in: Capsule())
+                            .padding(7)
+                    }
+                }
+
+                // 小卡片：底部渐变条 + 标题（对齐网页版 <150px 的悬浮渐变标题，iOS 无 hover 故常驻）
+                if !showInfo {
+                    LinearGradient(colors: [.clear, .black.opacity(0.72)], startPoint: .top, endPoint: .bottom)
+                        .frame(height: coverHeight * 0.55)
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .allowsHitTesting(false)
+                    Text(album.title)
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .padding(.horizontal, 6)
+                        .padding(.bottom, 5)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
-            VStack(alignment: .leading, spacing: 3) {
-                Text(album.title)
-                    .font(.subheadline.weight(.semibold))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                Text("\(album.count) 张")
+
+            if showInfo {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(album.title)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    HStack(spacing: 4) {
+                        if let d = album.releaseDate, !d.isEmpty {
+                            Text(d)
+                            Text("·")
+                        }
+                        Text("\(album.count) 张")
+                    }
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 9)
+                .frame(width: width, alignment: .leading)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 9)
-            .frame(width: width, alignment: .leading)
         }
         .frame(width: width)
         .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))

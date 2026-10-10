@@ -33,8 +33,6 @@ final class MediaListViewModel: ObservableObject {
     @Published var selectedLibID: Int?
     @Published var sort: Sort = .updated
     @Published var searchText = ""
-    /// 视图方向：false = 竖版海报，true = 横版封面（fanart）
-    @Published var landscape = false
     @Published var totalCount = 0
     @Published var isLoading = false
     @Published var errorMessage: String?
@@ -128,18 +126,24 @@ struct MediaListView: View {
     let library: Library?
 
     @StateObject private var viewModel: MediaListViewModel
+    @StateObject private var layout: CardLayoutController
     @State private var selected: MediaItem?
-    /// 卡片最小宽度（尺寸档位：小 120 / 中 150 / 大 190）
-    @State private var cardWidth: CGFloat = 150
+    /// 捏合手势起始宽度（MagnificationGesture 的 scale 相对手势开始，需记下起始值）
+    @State private var pinchStartWidth: CGFloat = 0
 
     private var columns: [GridItem] {
-        [GridItem(.adaptive(minimum: cardWidth), spacing: 18)]
+        [GridItem(.adaptive(minimum: layout.cardWidth), spacing: 18)]
     }
 
     init(type: String, library: Library? = nil) {
         self.type = type
         self.library = library
         _viewModel = StateObject(wrappedValue: MediaListViewModel(type: type, library: library))
+        _layout = StateObject(wrappedValue: CardLayoutController(
+            baseKey: "mediaList", libID: library?.id,
+            portraitDefault: 150, landscapeDefault: 240,
+            portraitRange: 100...260, landscapeRange: 160...400
+        ))
     }
 
     var body: some View {
@@ -149,12 +153,12 @@ struct MediaListView: View {
                 ListSearchBar(text: $viewModel.searchText, placeholder: "搜索标题、演员、类型…")
                 HStack(spacing: 8) {
                     sortMenu
-                    ToolChip(label: viewModel.landscape ? "横版" : "竖版",
-                             icon: viewModel.landscape ? "rectangle" : "rectangle.portrait",
-                             highlighted: viewModel.landscape) {
-                        viewModel.landscape.toggle()
+                    ToolChip(label: layout.landscape ? "横版" : "竖版",
+                             icon: layout.landscape ? "rectangle" : "rectangle.portrait",
+                             highlighted: layout.landscape) {
+                        layout.toggleOrientation()
                     }
-                    sizeMenu
+                    ToolSlider(icon: "arrow.up.left.and.arrow.down.right", layout: layout)
                     Spacer()
                     Text("\(viewModel.items.count) / \(viewModel.totalCount)")
                         .font(.caption.monospacedDigit())
@@ -168,8 +172,8 @@ struct MediaListView: View {
             ScrollView {
                 LazyVGrid(columns: columns, spacing: 18) {
                     ForEach(viewModel.items) { item in
-                        let cover = AppSession.shared.client?.mediaCoverURL(item, landscape: viewModel.landscape)
-                        MediaCard(item: item, coverURL: cover, landscape: viewModel.landscape) {
+                        let cover = AppSession.shared.client?.mediaCoverURL(item, landscape: layout.landscape)
+                        MediaCard(item: item, coverURL: cover, width: layout.cardWidth, landscape: layout.landscape) {
                             selected = item
                         }
                         .task {
@@ -184,6 +188,8 @@ struct MediaListView: View {
                     ProgressView().frame(maxWidth: .infinity).padding()
                 }
             }
+            // 双指捏合缩放卡片大小（对齐网页版 usePinchToResize）
+            .simultaneousGesture(pinchGesture)
         }
         .navigationTitle(library?.name ?? (type == "tv" ? "剧集" : "电影"))
         .navigationBarTitleDisplayMode(.inline)
@@ -229,21 +235,17 @@ struct MediaListView: View {
         }
     }
 
-    /// 尺寸档位
-    private var sizeMenu: some View {
-        ToolMenuChip(label: sizeLabel, icon: "arrow.up.left.and.arrow.down.right") {
-            Button { cardWidth = 120 } label: { Label("小", systemImage: cardWidth == 120 ? "checkmark" : "square") }
-            Button { cardWidth = 150 } label: { Label("中", systemImage: cardWidth == 150 ? "checkmark" : "square") }
-            Button { cardWidth = 190 } label: { Label("大", systemImage: cardWidth == 190 ? "checkmark" : "square") }
-        }
-    }
-
-    private var sizeLabel: String {
-        switch cardWidth {
-        case 120: return "小"
-        case 190: return "大"
-        default: return "中"
-        }
+    /// 双指捏合缩放卡片大小。scale 相对手势开始，所以记下起始宽度再乘比例，
+    /// 松手即落盘（resize 内部会 clamp 到范围）。
+    private var pinchGesture: some Gesture {
+        MagnificationGesture()
+            .onChanged { scale in
+                if pinchStartWidth == 0 { pinchStartWidth = layout.cardWidth }
+                layout.resize(to: pinchStartWidth * scale)
+            }
+            .onEnded { _ in
+                pinchStartWidth = 0
+            }
     }
 
     /// 库选择放导航栏下拉菜单（iOS 常见样式），不再挤在顶部占一整行
@@ -292,14 +294,28 @@ struct MediaCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            RemoteImage(
-                url: coverURL,
-                fallbackIcon: item.type == "tv" ? "tv" : "film",
-                fallbackColors: Theme.placeholderGradient(for: .media)
-            )
-            .imageFilled()
-            .frame(width: width, height: width * (landscape ? 9.0 / 16.0 : 3.0 / 2.0))
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            ZStack(alignment: .topTrailing) {
+                RemoteImage(
+                    url: coverURL,
+                    fallbackIcon: item.type == "tv" ? "tv" : "film",
+                    fallbackColors: Theme.placeholderGradient(for: .media)
+                )
+                .imageFilled()
+                .frame(width: width, height: width * (landscape ? 9.0 / 16.0 : 3.0 / 2.0))
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+                // 横版右上角评分徽章（对齐网页版 MediaCard 的 ★ rating）
+                if landscape, let r = item.rating, r > 0 {
+                    Text(String(format: "★ %.1f", r))
+                        .font(.caption2.weight(.semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(.black.opacity(0.6), in: Capsule())
+                        .padding(6)
+                }
+            }
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(item.title)

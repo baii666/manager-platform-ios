@@ -390,6 +390,8 @@ struct MediaItem: Identifiable, Codable, Sendable, Hashable {
     var posterImageId: Int? = nil
     var fanartImageId: Int? = nil
     var libraryId: Int? = nil
+    /// 评分（后端 /api/media 返回，横版卡片右上角徽章用）
+    var rating: Double? = nil
 
     var subtitle: String {
         if let year, year > 0 { return String(year) }
@@ -397,7 +399,7 @@ struct MediaItem: Identifiable, Codable, Sendable, Hashable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, title, year, type
+        case id, title, year, type, rating
         case filePath = "file_path"
         case posterImageId = "poster_image_id"
         case fanartImageId = "fanart_image_id"
@@ -414,11 +416,13 @@ struct MediaItem: Identifiable, Codable, Sendable, Hashable {
         posterImageId = optInt(c, .posterImageId)
         fanartImageId = optInt(c, .fanartImageId)
         libraryId = optInt(c, .libraryId)
+        rating = optDouble(c, .rating)
     }
 
     /// 由搜索结果构造（不依赖成员构造器，struct 已有自定义 init(from:)）
     init(id: Int, title: String = "", year: Int? = nil, type: String = "",
-         filePath: String? = nil, posterImageId: Int? = nil, fanartImageId: Int? = nil, libraryId: Int? = nil) {
+         filePath: String? = nil, posterImageId: Int? = nil, fanartImageId: Int? = nil, libraryId: Int? = nil,
+         rating: Double? = nil) {
         self.id = id
         self.title = title
         self.year = year
@@ -427,6 +431,7 @@ struct MediaItem: Identifiable, Codable, Sendable, Hashable {
         self.posterImageId = posterImageId
         self.fanartImageId = fanartImageId
         self.libraryId = libraryId
+        self.rating = rating
     }
 }
 
