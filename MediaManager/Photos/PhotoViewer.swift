@@ -70,22 +70,20 @@ struct PhotoViewerView: View {
                 imageLayer(size: imageSize)
                     .offset(y: topReserve)
 
-                // 缩略图条：贴顶，且让开顶部栏那一行。
-                // ⚠️ 内层 ZStack(alignment:.top) 只决定「它自己的子视图」怎么对齐，本身在外层
-                // ZStack 里仍按 .center 摆放 —— 不显式撑满并贴顶，整条缩略图会浮在画面正中，
-                // 盖住图片又吃掉点击/下拉手势。
-                ZStack(alignment: .top) {
-                    if showThumbs { thumbStrip }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                .padding(.top, 52 + safe.top)
-
                 topBar(topInset: safe.top)
                 if showInfo, let photo { infoPanel(photo, topInset: safe.top) }
                 bottomBar(bottomInset: safe.bottom)
                 if let tip { toast(tip) }
             }
             .frame(width: geo.size.width, height: geo.size.height)
+            // 缩略图条用 overlay 明确贴顶。之前放 ZStack 里、用 frame 撑满 + 外部 padding，
+            // padding 落在撑满视图之外会导致整条缩略图超出布局、被 ZStack 居中，浮在画面正中。
+            .overlay(alignment: .top) {
+                if showThumbs {
+                    thumbStrip
+                        .padding(.top, 52 + safe.top)
+                }
+            }
             .onAppear { containerSize = imageSize }
             .onChange(of: imageSize) { _, new in containerSize = new }
         }
@@ -516,7 +514,7 @@ struct PhotoViewerView: View {
                 .padding(.vertical, 8)
             }
             .frame(maxWidth: .infinity)
-            .background(.black.opacity(0.55))
+            .background(Color.black)  // 纯黑不透明，避免半透明蒙层透出底图
             .onAppear { scrollStrip(proxy) }
             .onChange(of: index) { _, _ in scrollStrip(proxy) }
         }
