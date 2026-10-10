@@ -79,10 +79,11 @@ final class APIClient: DataProviding, @unchecked Sendable {
 
     // MARK: - 认证
 
-    func login(username: String, password: String) async throws -> User {
+    /// remember=true → 后端 session cookie 给 30 天（否则 24h）
+    func login(username: String, password: String, remember: Bool = true) async throws -> User {
         let resp: LoginResponse = try await request(
             "/api/auth/login", method: "POST",
-            json: ["username": username, "password": password]
+            json: ["username": username, "password": password, "remember": remember]
         )
         return resp.user
     }
