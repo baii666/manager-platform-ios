@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // MARK: - 影视详情页
 // 对齐网页端 MediaDetailPage：backdrop + 海报 + 标题/年份/评分/类型 + 简介（可展开）
@@ -307,12 +308,12 @@ private struct InfoRow: View {
 private struct FlowLayout: Layout {
     var spacing: CGFloat = 8
     static var layoutProperties: LayoutProperties { LayoutProperties() }
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+    func sizeThatFits(proposal: ProposedViewSize, subviews: LayoutSubviews, cache: inout ()) -> CGSize {
         let rows = arrange(proposal.width ?? 0, subviews)
         let height = rows.reduce(0) { $0 + ($1.last?.size.height ?? 0) } + spacing * CGFloat(max(rows.count - 1, 0))
         return CGSize(width: proposal.width ?? 0, height: height)
     }
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: LayoutSubviews, cache: inout ()) {
         var x = bounds.minX
         var y = bounds.minY
         var rowHeight: CGFloat = 0
@@ -326,7 +327,7 @@ private struct FlowLayout: Layout {
             y += rowHeight + spacing
         }
     }
-    private func arrange(_ maxWidth: CGFloat, _ subviews: Subviews) -> [[LayoutSubviews.Element]] {
+    private func arrange(_ maxWidth: CGFloat, _ subviews: LayoutSubviews) -> [[LayoutSubviews.Element]] {
         var rows: [[LayoutSubviews.Element]] = []
         var current: [LayoutSubviews.Element] = []
         var x: CGFloat = 0
