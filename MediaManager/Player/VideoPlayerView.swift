@@ -217,25 +217,18 @@ struct VideoPlayerView: View {
             .contentShape(Rectangle())
             // iOS 17 的 gesture(_:isEnabled:)：刷流里关掉，垂直滑动才不跟 ScrollView 抢
             .gesture(dragGesture, isEnabled: dragGesturesEnabled)
-            // 长按倍速独立于拖拽手势：刷流里拖拽关了，长按加速照样要能用
-            .simultaneousGesture(speedHoldGesture)
+            // 长按倍速：perform 在长按成功时触发（开始加速），onPressingChanged(false) 在松手时触发（恢复）。
+            // ⚠️ 必须用 onLongPressGesture 的 onPressingChanged 来感知松手，不能靠
+            // LongPressGesture.onChanged：后者在长按成功后手势即结束，之后松手不再有任何回调，
+            // 会卡成「加速了却松手不恢复」（实测踩过）。
+            .onLongPressGesture(minimumDuration: 0.35) {
+                engine.beginSpeedHold()
+            } onPressingChanged: { pressing in
+                if !pressing { engine.endSpeedHold() }
+            }
             // 双击优先于单击，故先声明
             .onTapGesture(count: 2) { engine.togglePlay() }
             .onTapGesture { toggleControls() }
-    }
-
-    /// 长按倍速：按住 0.35s 开始加速到 holdRate，松手恢复原速。不区分左右侧。
-    ///
-    /// 时序上靠 `onEnded`（长按成功）开始加速、`onChanged(false)`（松手）恢复：
-    /// 普通点击在 0.35s 内就松手，onEnded 不触发，不会误加速。
-    private var speedHoldGesture: some Gesture {
-        LongPressGesture(minimumDuration: 0.35)
-            .onChanged { pressing in
-                if !pressing { engine.endSpeedHold() }
-            }
-            .onEnded { _ in
-                engine.beginSpeedHold()
-            }
     }
 
     private var dragGesture: some Gesture {
