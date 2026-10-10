@@ -131,8 +131,18 @@ struct MediaListView: View {
     /// 捏合手势起始宽度（MagnificationGesture 的 scale 相对手势开始，需记下起始值）
     @State private var pinchStartWidth: CGFloat = 0
 
-    private var columns: [GridItem] {
-        [GridItem(.adaptive(minimum: layout.cardWidth), spacing: 18)]
+    /// 根据容器宽算列布局：列数 + 每列宽。
+    /// 对齐网页版 `grid-template-columns: repeat(auto-fill, minmax(size, 1fr))`：
+    /// 列宽 = 均分（≥ cardWidth），卡片填满整列，不留空隙。之前用
+    /// adaptive(minimum:) 时列宽可能大于卡片固定宽，卡片居中留白导致「间隙太大」。
+    private func gridLayout(containerWidth: CGFloat) -> (columns: [GridItem], itemWidth: CGFloat) {
+        let spacing: CGFloat = 18
+        let padding: CGFloat = 16
+        let gridW = max(containerWidth - padding * 2, 0)
+        let n = max(1, Int((gridW + spacing) / (layout.cardWidth + spacing)))
+        let itemW = (gridW - spacing * CGFloat(n - 1)) / CGFloat(n)
+        let cols = Array(repeating: GridItem(.flexible(), spacing: spacing), count: n)
+        return (cols, itemW)
     }
 
     init(type: String, library: Library? = nil) {
@@ -169,27 +179,32 @@ struct MediaListView: View {
             .padding(.top, 10)
             .padding(.bottom, 4)
 
-            ScrollView {
-                LazyVGrid(columns: columns, spacing: 18) {
-                    ForEach(viewModel.items) { item in
-                        let cover = AppSession.shared.client?.mediaCoverURL(item, landscape: layout.landscape)
-                        MediaCard(item: item, coverURL: cover, width: layout.cardWidth, landscape: layout.landscape) {
-                            selected = item
-                        }
-                        .task {
-                            if item.id == viewModel.items.last?.id {
-                                await viewModel.loadMore()
+            // 网格：用 GeometryReader 测容器宽（稳定值，非 cell 高度），
+            // 自己算列数让卡片填满列宽，捏合时列数跳变但卡片始终铺满、无间隙。
+            GeometryReader { geo in
+                let grid = gridLayout(containerWidth: geo.size.width)
+                ScrollView {
+                    LazyVGrid(columns: grid.columns, spacing: 18) {
+                        ForEach(viewModel.items) { item in
+                            let cover = AppSession.shared.client?.mediaCoverURL(item, landscape: layout.landscape)
+                            MediaCard(item: item, coverURL: cover, width: grid.itemWidth, landscape: layout.landscape) {
+                                selected = item
+                            }
+                            .task {
+                                if item.id == viewModel.items.last?.id {
+                                    await viewModel.loadMore()
+                                }
                             }
                         }
                     }
+                    .padding(16)
+                    if viewModel.isLoading {
+                        ProgressView().frame(maxWidth: .infinity).padding()
+                    }
                 }
-                .padding(16)
-                if viewModel.isLoading {
-                    ProgressView().frame(maxWidth: .infinity).padding()
-                }
+                // 双指捏合缩放卡片大小（对齐网页版 usePinchToResize）
+                .simultaneousGesture(pinchGesture)
             }
-            // 双指捏合缩放卡片大小（对齐网页版 usePinchToResize）
-            .simultaneousGesture(pinchGesture)
         }
         .navigationTitle(library?.name ?? (type == "tv" ? "剧集" : "电影"))
         .navigationBarTitleDisplayMode(.inline)

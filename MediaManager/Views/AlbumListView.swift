@@ -134,8 +134,15 @@ struct AlbumListView: View {
     /// 捏合手势起始宽度
     @State private var pinchStartWidth: CGFloat = 0
 
-    private var columns: [GridItem] {
-        [GridItem(.adaptive(minimum: layout.cardWidth), spacing: 18)]
+    /// 根据容器宽算列布局（对齐网页版 minmax(size,1fr)：卡片填满整列不留空隙）
+    private func gridLayout(containerWidth: CGFloat) -> (columns: [GridItem], itemWidth: CGFloat) {
+        let spacing: CGFloat = 18
+        let padding: CGFloat = 16
+        let gridW = max(containerWidth - padding * 2, 0)
+        let n = max(1, Int((gridW + spacing) / (layout.cardWidth + spacing)))
+        let itemW = (gridW - spacing * CGFloat(n - 1)) / CGFloat(n)
+        let cols = Array(repeating: GridItem(.flexible(), spacing: spacing), count: n)
+        return (cols, itemW)
     }
 
     init(library: Library? = nil) {
@@ -171,29 +178,33 @@ struct AlbumListView: View {
             .padding(.top, 10)
             .padding(.bottom, 4)
 
-            ScrollView {
-                LazyVGrid(columns: columns, spacing: 18) {
-                    ForEach(viewModel.albums) { album in
-                        NavigationLink(value: album) {
-                            AlbumCard(album: album, coverURL: coverURL(for: album, landscape: layout.landscape),
-                                      width: layout.cardWidth, landscape: layout.landscape)
-                        }
-                        .buttonStyle(.plain)
-                        .task {
-                            // 滚到末尾前预取
-                            if album.id == viewModel.albums.last?.id {
-                                await viewModel.loadMore()
+            // 网格：GeometryReader 测容器宽，卡片填满列宽（对齐网页版 minmax(size,1fr)）
+            GeometryReader { geo in
+                let grid = gridLayout(containerWidth: geo.size.width)
+                ScrollView {
+                    LazyVGrid(columns: grid.columns, spacing: 18) {
+                        ForEach(viewModel.albums) { album in
+                            NavigationLink(value: album) {
+                                AlbumCard(album: album, coverURL: coverURL(for: album, landscape: layout.landscape),
+                                          width: grid.itemWidth, landscape: layout.landscape)
+                            }
+                            .buttonStyle(.plain)
+                            .task {
+                                // 滚到末尾前预取
+                                if album.id == viewModel.albums.last?.id {
+                                    await viewModel.loadMore()
+                                }
                             }
                         }
                     }
+                    .padding(16)
+                    if viewModel.isLoading {
+                        ProgressView().frame(maxWidth: .infinity).padding()
+                    }
                 }
-                .padding(16)
-                if viewModel.isLoading {
-                    ProgressView().frame(maxWidth: .infinity).padding()
-                }
+                // 双指捏合缩放卡片大小（对齐网页版 usePinchToResize）
+                .simultaneousGesture(pinchGesture)
             }
-            // 双指捏合缩放卡片大小（对齐网页版 usePinchToResize）
-            .simultaneousGesture(pinchGesture)
         }
         .navigationTitle(library?.name ?? "相册")
         .navigationBarTitleDisplayMode(.inline)

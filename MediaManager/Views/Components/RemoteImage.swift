@@ -24,21 +24,31 @@ struct RemoteImage: View {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFill()
-            } else if let url, !failed {
+            } else if url != nil, !failed {
                 placeholder
-                    .onAppear { Task { await load(url) } }
             } else {
                 placeholder
             }
         }
+        // ⚠️ 用 task(id: url) 而非 onAppear：url 变化（竖版海报 → 横版 fanart）时
+        // task 会取消旧任务并重新加载。之前用 onAppear + `guard image == nil`，
+        // url 变了但 image 已非 nil，永远不加载新封面 —— 这就是「横版封面没生效」的根因。
+        .task(id: url) {
+            await load(url)
+        }
     }
 
     @MainActor
-    private func load(_ url: URL) async {
-        guard image == nil else { return }
-        // 复用项目已有的 ImageCache（Photos/ImageCache.swift，内存 NSCache + 磁盘）
+    private func load(_ url: URL?) async {
+        guard let url else {
+            image = nil
+            failed = false
+            return
+        }
+        // 切源时先清掉旧图，避免旧海报在新比例框里被裁着显示一瞬
+        if image != nil { image = nil }
+        failed = false
         if let img = await ImageCache.shared.load(from: url) {
-            // 视图可能已随滚动消失，直接赋值无害（@State 仍有效）
             image = img
         } else {
             failed = true
