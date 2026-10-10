@@ -57,10 +57,10 @@ struct VideoPlayerView: View {
     @State private var hideWork: DispatchWorkItem?
     @State private var reportTask: Task<Void, Never>?
 
-    /// 降级后的播放目标（服务侧重编码）。nil 表示还在用原地址
+    /// 降级后的播放目标（服务端重新封装 / 转码）。nil 表示还在用原地址
     @State private var fallback: PlaybackTarget? = nil
-    /// 只自动降级一次，避免解不出来时反复起转码会话
-    @State private var usedFallback = false
+    /// 已尝试的降级档位：0 未降级 / 1 已试换封装 / 2 已试重编码。最多到 2，避免反复起转码会话
+    @State private var fallbackLevel = 0
     /// 降级过程的提示文案（转码要等几秒）
     @State private var fallbackNotice: String? = nil
     /// 连兼容模式都起不来时的错误
@@ -380,31 +380,38 @@ struct VideoPlayerView: View {
         startProgressReporting()
     }
 
-    /// 兜底：视频轨解不出来（有声音没画面）时，让服务端把这个片源实时转成 H.264 再播。
+    /// 兜底：视频轨解不出来（有声音没画面）时，让服务端重新封一遍再播。
+    /// 分两级，先便宜后昂贵：
+    ///   1. `-c:v copy` 只换封装 —— 修容器层面的问题，最典型是 MP4 里 HEVC 用了 `hev1`
+    ///      sample entry tag（AVFoundation 只认 `hvc1`，碰上 `hev1` 直接禁用视频轨）
+    ///   2. 转 H.264 —— 编码本身解不出时才用（VC-1、MPEG-2、设备不支持的 HEVC 规格）
     ///
     /// ⚠️ 这种情况 `item.status` 仍然是 `.readyToPlay`，不会走 `.failed`，
-    /// 所以只能靠主动检测视频轨的启用状态来发现。最典型是 10-bit HEVC（Main 10）：
-    /// 老一点的 iPad 硬解只到 8-bit，AVFoundation 悄悄把视频轨 disable 掉，界面就是黑屏 + 声音。
+    /// 所以只能靠主动检测视频轨的启用状态来发现，界面表现就是黑屏 + 声音。
     private func startFallback() {
-        guard !usedFallback, fallback == nil else { return }
+        guard fallbackLevel < 2 else { return }
         guard let path = sourcePath, !path.isEmpty else { return }
         guard let client = AppSession.shared.client else { return }
-        usedFallback = true
-        // 降级前看到的绝对位置，转码后接着从这里播
+        let level = fallbackLevel + 1
+        fallbackLevel = level
+        // 降级前看到的绝对位置，转封装后接着从这里播
         let at = activeOffset + engine.currentTime
         let name = title ?? (path as NSString).lastPathComponent
         let type = assetType
         let id = assetID
         let kd = knownDuration
-        fallbackNotice = "本机解不出这个视频编码，正在让服务端实时转码…"
+        let copy = (level == 1)
+        fallbackNotice = copy
+            ? "这个文件的封装格式本机读不了，正在重新封装…"
+            : "本机解不出这个视频编码，正在让服务端实时转码…"
         Task {
             do {
-                let target = try await client.compatiblePlayback(
-                    path: path, startAt: at > 1 ? at : nil,
+                let target = try await client.fallbackPlayback(
+                    path: path, startAt: at > 1 ? at : nil, copyVideo: copy,
                     title: name, assetType: type, assetID: id, knownDuration: kd)
                 fallback = target
                 fallbackNotice = nil
-                // load 会把 videoTrackDisabled 复位，且 usedFallback 已置位，不会二次触发
+                // load 会把 videoTrackDisabled 复位；若还是解不出会再触发一次，档位已 +1
                 engine.load(url: target.url, startAt: target.startAt)
             } catch {
                 fallbackNotice = nil

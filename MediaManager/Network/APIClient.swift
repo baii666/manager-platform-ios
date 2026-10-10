@@ -65,6 +65,8 @@ final class APIClient: DataProviding, @unchecked Sendable {
     struct PlaybackInfo: Decodable {
         let container: String?
         let videoCodec: String?
+        /// 视频轨的 sample entry tag（hvc1 / hev1 / avc1 …）。服务端没升级时这个字段不存在
+        let videoTag: String?
         let audioCodec: String?
     }
 
@@ -113,18 +115,25 @@ final class APIClient: DataProviding, @unchecked Sendable {
         return url
     }
 
-    /// 兼容模式：强制 HLS 重编码（不带 copyVideo）。
+    /// 兜底播放：绕开直接播放，让服务端重新封一遍。
     ///
-    /// 只在「本机真的解不出来」时才用 —— 服务端转成 H.264 后一定能播，
-    /// 代价是烧 CPU。典型触发源：10-bit HEVC（Main 10）、VC-1、MPEG-2。
-    /// ⚠️ 不要拿它做默认路径：4K 片源丢给 libx264 会卡成幻灯片。
-    func compatiblePlayback(path: String,
-                            startAt: Double?,
-                            title: String,
-                            assetType: String?,
-                            assetID: Int?,
-                            knownDuration: Double? = nil) async throws -> PlaybackTarget {
-        let url = try await hlsURL(path: path, startAt: startAt, copyVideo: false)
+    /// - `copyVideo = true`：只换封装（`-c:v copy`），CPU 几乎不动。
+    ///   修的是**容器层面**的问题 —— 最典型的是 MP4 里的 HEVC 用了 `hev1` 这个
+    ///   sample entry tag：AVFoundation 只认 `hvc1`，碰到 `hev1` 会把视频轨禁用，
+    ///   表现就是「只有声音没有画面」。转成 HLS 分片后 tag 问题自然消失。
+    /// - `copyVideo = false`：转 H.264。修的是**编码本身**解不出（VC-1、MPEG-2，
+    ///   或设备不支持的 HEVC 规格）。代价是烧 CPU。
+    ///
+    /// ⚠️ 所以降级要分两级：先试便宜的换封装，还不行再重编码。
+    ///   直接上重编码的话，4K 片源丢给 libx264 会卡成幻灯片。
+    func fallbackPlayback(path: String,
+                          startAt: Double?,
+                          copyVideo: Bool,
+                          title: String,
+                          assetType: String?,
+                          assetID: Int?,
+                          knownDuration: Double? = nil) async throws -> PlaybackTarget {
+        let url = try await hlsURL(path: path, startAt: startAt, copyVideo: copyVideo)
         let offset = (startAt ?? 0) > 1 ? (startAt ?? 0) : 0
         return PlaybackTarget(url: url, title: title, assetType: assetType, assetID: assetID,
                               startAt: 0, timeOffset: offset,
@@ -140,7 +149,16 @@ final class APIClient: DataProviding, @unchecked Sendable {
                          knownDuration: Double? = nil) async throws -> PlaybackTarget {
         let ext = (path as NSString).pathExtension.lowercased()
 
-        if Self.directPlayExts.contains(ext) {
+        let info = try? await fetchPlaybackInfo(path: path)
+        let codec = info?.videoCodec?.lowercased() ?? ""
+        let tag = info?.videoTag?.lowercased() ?? ""
+
+        // MP4 里装 HEVC 有两种 sample entry：`hvc1` 才是 Apple 要的那种。
+        // ffmpeg / 部分封装工具写出来的是 `hev1`，AVFoundation 碰上会**直接禁用视频轨** ——
+        // 不报错、status 照样 readyToPlay，表现就是「只有声音没有画面」。
+        // 所以 tag 是 hev1 时不能直连，得先让服务端重新封装一遍。
+        // （库里 x265 的 MP4 基本全是 hev1，抽 120 部无一例外。）
+        if Self.directPlayExts.contains(ext), tag != "hev1" {
             guard let url = streamURL(path: path) else {
                 throw DataError.server("播放地址拼接失败")
             }
@@ -151,7 +169,6 @@ final class APIClient: DataProviding, @unchecked Sendable {
 
         // 探不到编码时按「能 copy」乐观处理。反过来的兜底是灾难性的：
         // 猜成「要重编码」会把 4K 片源丢给 libx264，几帧一秒，那才真的播不动。
-        let codec = (try? await fetchPlaybackInfo(path: path))?.videoCodec?.lowercased() ?? ""
         let copyVideo = codec.isEmpty || Self.nativeVideoCodecs.contains(codec)
         let url = try await hlsURL(path: path, startAt: startAt, copyVideo: copyVideo)
 
