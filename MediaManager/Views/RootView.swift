@@ -68,24 +68,25 @@ struct BottomTabBar: View {
                             .font(.caption2.weight(.medium))
                     }
                     .foregroundStyle(selection == tab ? Theme.brand : Color.secondary)
-                    .frame(minWidth: 60)
+                    .frame(minWidth: 60, maxHeight: .infinity, alignment: .center)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }
         }
         .frame(maxWidth: .infinity)
-        .frame(height: 70)  // 覆盖「内容区 + home indicator 留白」整体，按钮在整体内垂直居中
+        .frame(height: 52)  // 标准 tab bar 高度，不厚
         .padding(.horizontal, 16)
-        .background(Color(uiColor: .systemBackground))
+        .background(
+            // 只让背景色延伸到屏幕底覆盖 home indicator 区域，bar 本身保持 52pt 不增高
+            Color(uiColor: .systemBackground)
+                .ignoresSafeArea(edges: .bottom)
+        )
         .overlay(alignment: .top) {
             Rectangle()
                 .fill(Color(uiColor: .separator).opacity(0.5))
                 .frame(height: 0.5)
         }
-        // 整个 bar（含按钮）延伸到屏幕底：按钮才会落在 home indicator 留白的中间，
-        // 而不是悬在留白上方（之前只有背景延伸、按钮没跟着下移，所以一直偏上）
-        .ignoresSafeArea(edges: .bottom)
     }
 }
 
