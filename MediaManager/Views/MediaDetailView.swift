@@ -39,8 +39,8 @@ struct MediaDetailView: View {
                 VideoPlayerView(url: target.url,
                                 startPosition: target.startAt,
                                 timeOffset: target.timeOffset,
-                                knownDuration: target.knownDuration,
                                 sourcePath: target.sourcePath,
+                                knownDuration: target.knownDuration,
                                 title: target.title,
                                 assetType: target.assetType,
                                 assetID: target.assetID)
