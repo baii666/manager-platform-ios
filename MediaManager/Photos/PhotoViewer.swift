@@ -62,10 +62,17 @@ struct PhotoViewerView: View {
 
                 imageLayer(size: geo.size)
 
-                // 缩略图条（顶部）
+                // 缩略图条：贴顶，且让开顶部栏那一行
+                //
+                // ⚠️ 这里的 frame 不能省。内层 ZStack(alignment:.top) 只决定「它自己的子视图」
+                // 怎么对齐，它本身在外层 ZStack 里仍按默认 .center 摆放 —— 不显式撑满并贴顶，
+                // 整条缩略图会浮在画面正中：既盖住图片，又会吃掉 imageLayer 的点击
+                // （toggleUI）和下拉关闭手势，表现成「挡住图且退不出去」。
                 ZStack(alignment: .top) {
                     if showThumbs { thumbStrip }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .padding(.top, 52)
 
                 topBar
                 if showInfo, let photo { infoPanel(photo) }
@@ -402,6 +409,9 @@ struct PhotoViewerView: View {
                 divider
                 toolButton("square.grid.3x3.fill", active: showThumbs) {
                     withAnimation { showThumbs.toggle() }
+                    // 保险：开关缩略图条时确保工具栏在，关闭入口随时可见
+                    showUI = true
+                    scheduleIdleHide()
                 }
                 toolButton("info.circle", active: showInfo) {
                     withAnimation { showInfo.toggle() }
