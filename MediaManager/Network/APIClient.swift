@@ -298,9 +298,9 @@ final class APIClient: DataProviding, @unchecked Sendable {
     }
 
     private func resolveSearchItem(_ item: SearchItem) -> UnifiedAsset? {
-        let isPhoto = item.fileName != nil || item.hasThumb != nil || item.folderName != nil
+        let isPhoto = item.hasThumb != nil || item.albumId != nil || item.folderName != nil
         let type: AssetType = isPhoto ? .photo : .media
-        let title = item.title ?? item.fileName ?? item.folderName ?? ""
+        let title = item.title ?? item.folderName ?? item.displayName ?? ""
         guard !title.isEmpty else { return nil }
 
         var cover: URL?

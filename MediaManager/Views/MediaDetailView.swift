@@ -308,37 +308,44 @@ private struct InfoRow: View {
 private struct FlowLayout: Layout {
     var spacing: CGFloat = 8
     static var layoutProperties: LayoutProperties { LayoutProperties() }
+
     func sizeThatFits(proposal: ProposedViewSize, subviews: LayoutSubviews, cache: inout ()) -> CGSize {
-        let rows = arrange(proposal.width ?? 0, subviews)
-        let height = rows.reduce(0) { $0 + ($1.last?.size.height ?? 0) } + spacing * CGFloat(max(rows.count - 1, 0))
-        return CGSize(width: proposal.width ?? 0, height: height)
+        let sizes = subviews.map { $0.sizeThatFits(proposal) }
+        let maxWidth = proposal.width ?? .infinity
+        var width: CGFloat = 0
+        var height: CGFloat = 0
+        var currentRowWidth: CGFloat = 0
+        var currentRowHeight: CGFloat = 0
+        for size in sizes {
+            if currentRowWidth + size.width + spacing > maxWidth, currentRowWidth > 0 {
+                width = max(width, currentRowWidth - spacing)
+                height += currentRowHeight + spacing
+                currentRowWidth = 0
+                currentRowHeight = 0
+            }
+            currentRowWidth += size.width + spacing
+            currentRowHeight = max(currentRowHeight, size.height)
+        }
+        width = max(width, currentRowWidth - spacing)
+        height += currentRowHeight
+        return CGSize(width: min(width, maxWidth), height: height)
     }
+
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: LayoutSubviews, cache: inout ()) {
+        let sizes = subviews.map { $0.sizeThatFits(proposal) }
         var x = bounds.minX
         var y = bounds.minY
-        var rowHeight: CGFloat = 0
-        for row in arrange(bounds.width, subviews) {
-            x = bounds.minX
-            rowHeight = row.last?.size.height ?? 0
-            for sub in row {
-                sub.place(at: CGPoint(x: x, y: y), proposal: proposal)
-                x += sub.size.width + spacing
+        var currentRowHeight: CGFloat = 0
+        for index in subviews.indices {
+            let size = sizes[index]
+            if x + size.width + spacing > bounds.maxX, x > bounds.minX {
+                x = bounds.minX
+                y += currentRowHeight + spacing
+                currentRowHeight = 0
             }
-            y += rowHeight + spacing
+            subviews[index].place(at: CGPoint(x: x, y: y), proposal: proposal)
+            x += size.width + spacing
+            currentRowHeight = max(currentRowHeight, size.height)
         }
-    }
-    private func arrange(_ maxWidth: CGFloat, _ subviews: LayoutSubviews) -> [[LayoutSubviews.Element]] {
-        var rows: [[LayoutSubviews.Element]] = []
-        var current: [LayoutSubviews.Element] = []
-        var x: CGFloat = 0
-        for sub in subviews {
-            let w = sub.size.width
-            if x + w > maxWidth, !current.isEmpty {
-                rows.append(current); current = []; x = 0
-            }
-            current.append(sub); x += w + spacing
-        }
-        if !current.isEmpty { rows.append(current) }
-        return rows
     }
 }
