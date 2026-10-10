@@ -70,6 +70,8 @@ struct VideoPlayerView: View {
     @State private var reportTask: Task<Void, Never>?
     /// 长按倍速的延迟任务：按下后 0.35s 才真正开始加速，期间松手就取消
     @State private var holdWork: DispatchWorkItem?
+    /// 是否正在「重开 HLS 会话」跳转中（防连点并发重开）
+    @State private var isRestarting = false
 
     /// 降级后的播放目标（服务端重新封装 / 转码）。nil 表示还在用原地址
     @State private var fallback: PlaybackTarget? = nil
@@ -84,6 +86,11 @@ struct VideoPlayerView: View {
     private var activeURL: URL { fallback?.url ?? url }
     /// 当前生效的时间轴基准
     private var activeOffset: Double { fallback?.timeOffset ?? timeOffset }
+    /// 当前是不是 HLS 源。HLS 在 FFmpeg 跑完前没有 ENDLIST，AVPlayer 当直播处理，
+    /// 直接 seek 会失效 —— 得走「重开会话从目标位置 -ss」。
+    private var isHLSStream: Bool {
+        activeURL.pathExtension.lowercased() == "m3u8"
+    }
 
     /// 横向滑满一屏对应的快进秒数
     private let seekSpan: Double = 120
@@ -255,7 +262,7 @@ struct VideoPlayerView: View {
             }
             .onEnded { _ in
                 if axis == .horizontal, let target = pendingSeek {
-                    engine.seek(to: max(0, target - activeOffset))
+                    seekTo(absolute: target)
                 }
                 engine.isScrubbing = false
                 axis = .none
@@ -353,7 +360,7 @@ struct VideoPlayerView: View {
                     engine.isScrubbing = false
                     pendingSeek = nil
                     hud = nil
-                    engine.seek(to: max(0, value - activeOffset))
+                    seekTo(absolute: value)
                     scheduleHide()
                 }
             )
@@ -371,8 +378,8 @@ struct VideoPlayerView: View {
                     .foregroundStyle(.white.opacity(0.7))
                     .monospacedDigit()
                 Spacer()
-                playerButton("gobackward.10") { engine.seek(by: -10) }
-                playerButton("goforward.10") { engine.seek(by: 10) }
+                playerButton("gobackward.10") { seekTo(absolute: displayPosition - 10) }
+                playerButton("goforward.10") { seekTo(absolute: displayPosition + 10) }
                 rateMenu
             }
         }
@@ -464,6 +471,49 @@ struct VideoPlayerView: View {
                 fallbackNotice = nil
                 fallbackError = "兼容模式启动失败：\(error.localizedDescription)"
             }
+        }
+    }
+
+    /// 统一的 seek 入口。直连 MP4 直接精确 seek；
+    /// HLS 源在 FFmpeg 跑完前没有 ENDLIST（AVPlayer 当直播），直接 seek 会失效，
+    /// 改成重开一个 HLS 会话从目标位置 `-ss` 切片。
+    private func seekTo(absolute seconds: Double) {
+        let dur = displayDuration
+        let clamped = dur > 0 ? min(max(seconds, 0), dur) : max(seconds, 0)
+        if isHLSStream {
+            restartHLS(from: clamped)
+        } else {
+            engine.seek(to: clamped - activeOffset)
+        }
+    }
+
+    /// 重开 HLS 会话跳到指定绝对位置。
+    /// 用 fallbackPlayback 强制走 HLS（不回落直连，避免 hev1 又黑屏一轮），
+    /// copy 策略沿用当前档：降级档 <2 都是「换封装(copy)」，档 2 才是重编码。
+    private func restartHLS(from seconds: Double) {
+        guard !isRestarting, let path = sourcePath, !path.isEmpty else { return }
+        guard let client = AppSession.shared.client else { return }
+        isRestarting = true
+        fallbackNotice = "正在跳到 " + PlayerTimeFormatter.string(seconds) + " …"
+        let name = title ?? (path as NSString).lastPathComponent
+        let type = assetType
+        let id = assetID
+        let kd = knownDuration
+        let copy = fallbackLevel < 2
+        Task {
+            do {
+                let target = try await client.fallbackPlayback(
+                    path: path, startAt: seconds > 1 ? seconds : nil, copyVideo: copy,
+                    title: name, assetType: type, assetID: id, knownDuration: kd)
+                fallback = target
+                fallbackNotice = nil
+                // 跳转后立即继续播；若该页已离屏则只缓冲不抢播
+                engine.load(url: target.url, startAt: target.startAt, autoplay: isActive, loop: loop)
+            } catch {
+                fallbackNotice = nil
+                fallbackError = "跳转失败：\(error.localizedDescription)"
+            }
+            isRestarting = false
         }
     }
 
