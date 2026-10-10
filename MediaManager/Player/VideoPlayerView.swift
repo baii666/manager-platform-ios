@@ -29,6 +29,8 @@ struct VideoPlayerView: View {
     /// 时间轴基准偏移。HLS 走服务端 `-ss` 从断点切片时，AVPlayer 的时间轴是从 0 重新开始的，
     /// 上报进度必须加回这个偏移，否则 2 小时的电影从第 30 分钟续播，会被记成「看了 5 分钟」。
     var timeOffset: Double = 0
+    /// 源文件路径。视频轨解不出来时，要拿它去服务端开「重编码」会话兜底。
+    var sourcePath: String? = nil
     /// 服务端已知的总时长。HLS 在 FFmpeg 跑完之前没有 `#EXT-X-ENDLIST`，
     /// AVPlayer 的 duration 是 indefinite（0），进度条和续播上报会一起失灵 —— 用它兜底。
     var knownDuration: Double? = nil
@@ -55,18 +57,32 @@ struct VideoPlayerView: View {
     @State private var hideWork: DispatchWorkItem?
     @State private var reportTask: Task<Void, Never>?
 
+    /// 降级后的播放目标（服务侧重编码）。nil 表示还在用原地址
+    @State private var fallback: PlaybackTarget? = nil
+    /// 只自动降级一次，避免解不出来时反复起转码会话
+    @State private var usedFallback = false
+    /// 降级过程的提示文案（转码要等几秒）
+    @State private var fallbackNotice: String? = nil
+    /// 连兼容模式都起不来时的错误
+    @State private var fallbackError: String? = nil
+
+    /// 当前生效的播放地址
+    private var activeURL: URL { fallback?.url ?? url }
+    /// 当前生效的时间轴基准
+    private var activeOffset: Double { fallback?.timeOffset ?? timeOffset }
+
     /// 横向滑满一屏对应的快进秒数
     private let seekSpan: Double = 120
 
     /// 进度条与上报用的总时长（绝对时间轴）
     private var displayDuration: Double {
-        if engine.duration > 0 { return engine.duration + timeOffset }
+        if engine.duration > 0 { return engine.duration + activeOffset }
         return knownDuration ?? 0
     }
 
     /// 进度条显示的当前位置（绝对时间轴）
     private var displayPosition: Double {
-        pendingSeek ?? (engine.currentTime + timeOffset)
+        pendingSeek ?? (engine.currentTime + activeOffset)
     }
 
     var body: some View {
@@ -103,9 +119,21 @@ struct VideoPlayerView: View {
                     .tint(.white)
             }
 
+            // 降级提示：视频轨解不出来时正在让服务端实时转码，等个几秒
+            if let fallbackNotice {
+                VStack(spacing: 10) {
+                    ProgressView().controlSize(.large).tint(.white)
+                    Text(fallbackNotice)
+                        .font(.subheadline)
+                        .foregroundStyle(.white.opacity(0.85))
+                }
+                .padding(22)
+                .background(Color.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+
             // 失败一定要看得见。之前没有任何错误状态，
             // URL 错 / 404 / 编解码不支持全都表现成「无声无画面」。
-            if let failure = engine.failure {
+            if let failure = engine.failure ?? fallbackError {
                 errorPanel(failure)
             }
         }
@@ -116,6 +144,10 @@ struct VideoPlayerView: View {
         .statusBar(hidden: true)
         .onAppear { setup() }
         .onDisappear { teardown() }
+        // ⚠️ iOS 17 起 `onChange(of:) { v in }`（单参数）已废弃，用零参数闭包
+        .onChange(of: engine.videoTrackDisabled) {
+            if engine.videoTrackDisabled { startFallback() }
+        }
     }
 
     /// 失败面板：把原因和完整 URL 都摆出来，方便一眼判断是地址错、404 还是格式不支持
@@ -130,7 +162,7 @@ struct VideoPlayerView: View {
                 .font(.subheadline)
                 .foregroundStyle(.white.opacity(0.8))
                 .multilineTextAlignment(.center)
-            Text(url.absoluteString)
+            Text(activeURL.absoluteString)
                 .font(.caption2.monospaced())
                 .foregroundStyle(.white.opacity(0.5))
                 .lineLimit(4)
@@ -171,7 +203,7 @@ struct VideoPlayerView: View {
                     axis = abs(value.translation.width) > abs(value.translation.height)
                         ? .horizontal : .vertical
                     startOnLeft = value.startLocation.x < UIScreen.main.bounds.width / 2
-                    seekBase = engine.currentTime + timeOffset
+                    seekBase = engine.currentTime + activeOffset
                     brightnessBase = UIScreen.main.brightness
                     volumeBase = SystemVolume.shared.value
                 }
@@ -180,7 +212,7 @@ struct VideoPlayerView: View {
             }
             .onEnded { _ in
                 if axis == .horizontal, let target = pendingSeek {
-                    engine.seek(to: max(0, target - timeOffset))
+                    engine.seek(to: max(0, target - activeOffset))
                 }
                 engine.isScrubbing = false
                 axis = .none
@@ -276,7 +308,7 @@ struct VideoPlayerView: View {
                     engine.isScrubbing = false
                     pendingSeek = nil
                     hud = nil
-                    engine.seek(to: max(0, value - timeOffset))
+                    engine.seek(to: max(0, value - activeOffset))
                     scheduleHide()
                 }
             )
@@ -343,9 +375,42 @@ struct VideoPlayerView: View {
 
     private func setup() {
         configureAudioSession()
-        engine.load(url: url, startAt: startPosition)
+        engine.load(url: activeURL, startAt: fallback?.startAt ?? startPosition)
         scheduleHide()
         startProgressReporting()
+    }
+
+    /// 兜底：视频轨解不出来（有声音没画面）时，让服务端把这个片源实时转成 H.264 再播。
+    ///
+    /// ⚠️ 这种情况 `item.status` 仍然是 `.readyToPlay`，不会走 `.failed`，
+    /// 所以只能靠主动检测视频轨的启用状态来发现。最典型是 10-bit HEVC（Main 10）：
+    /// 老一点的 iPad 硬解只到 8-bit，AVFoundation 悄悄把视频轨 disable 掉，界面就是黑屏 + 声音。
+    private func startFallback() {
+        guard !usedFallback, fallback == nil else { return }
+        guard let path = sourcePath, !path.isEmpty else { return }
+        guard let client = AppSession.shared.client else { return }
+        usedFallback = true
+        // 降级前看到的绝对位置，转码后接着从这里播
+        let at = activeOffset + engine.currentTime
+        let name = title ?? (path as NSString).lastPathComponent
+        let type = assetType
+        let id = assetID
+        let kd = knownDuration
+        fallbackNotice = "本机解不出这个视频编码，正在让服务端实时转码…"
+        Task {
+            do {
+                let target = try await client.compatiblePlayback(
+                    path: path, startAt: at > 1 ? at : nil,
+                    title: name, assetType: type, assetID: id, knownDuration: kd)
+                fallback = target
+                fallbackNotice = nil
+                // load 会把 videoTrackDisabled 复位，且 usedFallback 已置位，不会二次触发
+                engine.load(url: target.url, startAt: target.startAt)
+            } catch {
+                fallbackNotice = nil
+                fallbackError = "兼容模式启动失败：\(error.localizedDescription)"
+            }
+        }
     }
 
     private func teardown() {
@@ -353,9 +418,9 @@ struct VideoPlayerView: View {
         hideWork = nil
         reportTask?.cancel()
         reportTask = nil
-        let pos = engine.currentTime + timeOffset
+        let pos = engine.currentTime + activeOffset
         // HLS 没跑完时 engine.duration 是 0，退回服务端已知的时长，否则这次观看根本不会记录
-        let dur = engine.duration > 0 ? engine.duration + timeOffset : (knownDuration ?? 0)
+        let dur = engine.duration > 0 ? engine.duration + activeOffset : (knownDuration ?? 0)
         let type = assetType
         let id = assetID
         if let type, let id, dur > 0 {
@@ -373,7 +438,7 @@ struct VideoPlayerView: View {
         guard let type = assetType, let id = assetID else { return }
         // 用局部常量进 capture list：capture list 里直接写 self 的属性不稳妥
         let engineRef = engine
-        let offset = timeOffset
+        let offset = activeOffset
         let fallback = knownDuration
         reportTask = Task { [weak engineRef] in
             while !Task.isCancelled {

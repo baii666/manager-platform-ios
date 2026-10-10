@@ -113,6 +113,24 @@ final class APIClient: DataProviding, @unchecked Sendable {
         return url
     }
 
+    /// 兼容模式：强制 HLS 重编码（不带 copyVideo）。
+    ///
+    /// 只在「本机真的解不出来」时才用 —— 服务端转成 H.264 后一定能播，
+    /// 代价是烧 CPU。典型触发源：10-bit HEVC（Main 10）、VC-1、MPEG-2。
+    /// ⚠️ 不要拿它做默认路径：4K 片源丢给 libx264 会卡成幻灯片。
+    func compatiblePlayback(path: String,
+                            startAt: Double?,
+                            title: String,
+                            assetType: String?,
+                            assetID: Int?,
+                            knownDuration: Double? = nil) async throws -> PlaybackTarget {
+        let url = try await hlsURL(path: path, startAt: startAt, copyVideo: false)
+        let offset = (startAt ?? 0) > 1 ? (startAt ?? 0) : 0
+        return PlaybackTarget(url: url, title: title, assetType: assetType, assetID: assetID,
+                              startAt: 0, timeOffset: offset,
+                              knownDuration: knownDuration, sourcePath: path)
+    }
+
     /// 决定播放方式并给出最终地址。非直连容器要发两次请求（探测 + 开会话），所以是 async。
     func resolvePlayback(path: String,
                          startAt: Double?,
@@ -128,7 +146,7 @@ final class APIClient: DataProviding, @unchecked Sendable {
             }
             return PlaybackTarget(url: url, title: title, assetType: assetType, assetID: assetID,
                                   startAt: startAt ?? 0, timeOffset: 0,
-                                  knownDuration: knownDuration)
+                                  knownDuration: knownDuration, sourcePath: path)
         }
 
         // 探不到编码时按「能 copy」乐观处理。反过来的兜底是灾难性的：
@@ -140,7 +158,8 @@ final class APIClient: DataProviding, @unchecked Sendable {
         // HLS 的时间轴是从 -ss 那个点重新开始的，上报进度要加回基准
         let offset = (startAt ?? 0) > 1 ? (startAt ?? 0) : 0
         return PlaybackTarget(url: url, title: title, assetType: assetType, assetID: assetID,
-                              startAt: 0, timeOffset: offset, knownDuration: knownDuration)
+                              startAt: 0, timeOffset: offset,
+                              knownDuration: knownDuration, sourcePath: path)
     }
 
     // MARK: - 请求辅助

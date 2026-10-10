@@ -98,6 +98,7 @@ struct ShortsView: View {
                                 startPosition: target.startAt,
                                 timeOffset: target.timeOffset,
                                 knownDuration: target.knownDuration,
+                                sourcePath: target.sourcePath,
                                 title: target.title)
                     .toolbar { ToolbarItem(placement: .cancellationAction) {
                         Button("关闭") { playTarget = nil }

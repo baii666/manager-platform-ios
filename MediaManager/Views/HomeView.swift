@@ -114,6 +114,7 @@ struct HomeView: View {
                     startPosition: target.startAt,
                     timeOffset: target.timeOffset,
                     knownDuration: target.knownDuration,
+                    sourcePath: target.sourcePath,
                     title: target.title,
                     assetType: target.assetType,
                     assetID: target.assetID

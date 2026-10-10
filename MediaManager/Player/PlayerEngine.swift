@@ -20,6 +20,13 @@ final class PlayerEngine: ObservableObject {
     @Published private(set) var rate: Float = 1.0
     /// 播放失败原因。之前播放器没有任何错误状态，任何失败都是「静默白屏」，无法定位
     @Published private(set) var failure: String? = nil
+    /// 视频轨存在但被 AVPlayer 禁用 —— 画面解不出来，声音照常。
+    ///
+    /// ⚠️ 这种情况 `item.status` 依然是 `.readyToPlay`，**不会**走 `.failed`，
+    /// 所以不会触发上面的 failure，界面表现就是「只有声音没有画面」的黑屏。
+    /// 最典型的触发源是 10-bit HEVC（Main 10 / yuv420p10le）：老一点的 iPad
+    /// 硬解只到 8-bit，AVFoundation 直接把视频轨 disable 掉而不报错。
+    @Published private(set) var videoTrackDisabled = false
 
     /// 用户正在拖动进度条 / 快进手势中。为 true 时屏蔽时间回调，避免进度条回跳。
     var isScrubbing = false
@@ -39,6 +46,8 @@ final class PlayerEngine: ObservableObject {
     private var pendingStart: Double?
     /// 当前装载的 URL，供 retry 使用
     private var currentURL: URL?
+    /// 视频轨复查（延迟执行）
+    private var trackCheckWork: DispatchWorkItem?
 
     // MARK: 画中画
     // 放弃 AVPlayerViewController 后系统 PiP 按钮也没了，必须自己接回来，
@@ -71,6 +80,8 @@ final class PlayerEngine: ObservableObject {
         teardown()
         currentURL = url
         failure = nil
+        videoTrackDisabled = false
+        trackCheckWork?.cancel()
         isReady = false
         let item = AVPlayerItem(url: url)
         player.replaceCurrentItem(with: item)
@@ -87,7 +98,31 @@ final class PlayerEngine: ObservableObject {
         load(url: url, startAt: currentTime > 1 ? currentTime : nil)
     }
 
+    /// 视频轨被禁用的判断可能晚于 readyToPlay，延迟复查一次
+    private func scheduleTrackRecheck(_ item: AVPlayerItem) {
+        trackCheckWork?.cancel()
+        let work = DispatchWorkItem { [weak self, weak item] in
+            guard let self, let item else { return }
+            self.checkVideoTracks(item)
+        }
+        trackCheckWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0, execute: work)
+    }
+
+    /// 视频轨是否被本机解得出。
+    /// - 一条视频轨都没有：不是视频文件（或还没解析出来），不报
+    /// - 有视频轨但全被禁用：解不出画面 → 只有声音
+    private func checkVideoTracks(_ item: AVPlayerItem) {
+        let video = item.tracks.filter { $0.assetTrack?.mediaType == .video }
+        guard !video.isEmpty else { return }
+        if video.allSatisfy({ !$0.isEnabled }) {
+            videoTrackDisabled = true
+        }
+    }
+
     func teardown() {
+        trackCheckWork?.cancel()
+        trackCheckWork = nil
         if let timeObserver {
             player.removeTimeObserver(timeObserver)
             self.timeObserver = nil
@@ -108,6 +143,9 @@ final class PlayerEngine: ObservableObject {
                 self.isReady = item.status == .readyToPlay
                 if item.status == .readyToPlay {
                     self.applyDuration(item.duration)
+                    self.checkVideoTracks(item)
+                    // 轨道启用状态不一定在 ready 的那一刻就定下来，稍后再确认一次
+                    self.scheduleTrackRecheck(item)
                     if let start = self.pendingStart {
                         self.pendingStart = nil
                         self.seek(to: start)

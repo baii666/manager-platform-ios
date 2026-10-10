@@ -130,6 +130,8 @@ struct PlaybackTarget: Identifiable, Sendable {
     let timeOffset: Double
     /// 服务端已知的总时长。HLS 会话没跑完时 AVPlayer 拿不到 duration，用它兜底
     let knownDuration: Double?
+    /// 源文件路径。画面解不出来时要拿它去服务端开重编码会话
+    let sourcePath: String?
 }
 
 // decodeIfPresent 再包 try? 会产生 String?? / Double??（双层可选），
