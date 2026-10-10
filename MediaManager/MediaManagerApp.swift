@@ -13,6 +13,9 @@ struct MediaManagerApp: App {
         let memory = 128 * 1024 * 1024        // 128 MB 内存
         let disk = 1024 * 1024 * 1024         // 1 GB 磁盘
         URLCache.shared = URLCache(memoryCapacity: memory, diskCapacity: disk, diskPath: "imgcache")
+
+        // 列表页隐藏导航栏后右滑返回手势会失效，这里恢复它
+        UINavigationController.enablePopGesture()
     }
 
     var body: some Scene {

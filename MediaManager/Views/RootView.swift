@@ -56,7 +56,7 @@ struct BottomTabBar: View {
     @Binding var selection: RootTab
 
     var body: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: 44) {
             ForEach(RootTab.allCases) { tab in
                 Button {
                     selection = tab
@@ -68,13 +68,14 @@ struct BottomTabBar: View {
                             .font(.caption2.weight(.medium))
                     }
                     .foregroundStyle(selection == tab ? Theme.brand : Color.secondary)
-                    .frame(maxWidth: .infinity)
+                    .frame(minWidth: 60)
                     .padding(.vertical, 8)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }
         }
+        .frame(maxWidth: .infinity)
         .padding(.horizontal, 16)
         .background(Color(uiColor: .systemBackground))
         .overlay(alignment: .top) {
@@ -107,7 +108,7 @@ struct LibraryHomeView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // 顶 bar：电影 / 相册 / 拍摄集
+            // 顶 bar：电影 / 相册 / 拍摄集（居中）
             HStack(spacing: 6) {
                 ForEach(Category.allCases) { c in
                     Button {
@@ -127,8 +128,8 @@ struct LibraryHomeView: View {
                     }
                     .buttonStyle(.plain)
                 }
-                Spacer()
             }
+            .frame(maxWidth: .infinity)
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
 
