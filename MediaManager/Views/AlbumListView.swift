@@ -250,7 +250,7 @@ struct AlbumListView: View {
         }
     }
 
-    /// 双指捏合缩放卡片大小
+    /// 双指捏合缩放卡片大小。拖动中只改内存，松手才 commit 落盘。
     private var pinchGesture: some Gesture {
         MagnificationGesture()
             .onChanged { scale in
@@ -259,6 +259,7 @@ struct AlbumListView: View {
             }
             .onEnded { _ in
                 pinchStartWidth = 0
+                layout.commit()
             }
     }
 

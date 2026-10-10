@@ -170,16 +170,16 @@ final class CardLayoutController: ObservableObject {
         CardSizePrefs.saveBool(baseKey + ".landscape", libID: libID, landscape)
     }
 
-    /// 捏合 / 滑块调整尺寸：落到当前方向的尺寸值并夹到范围内，然后落盘
+    /// 捏合 / 滑块拖动过程中只更新内存值（不落盘），避免高频写 UserDefaults 卡顿。
     func resize(to width: CGFloat) {
         let clamped = min(max(width, range.lowerBound), range.upperBound)
-        if landscape {
-            cardWidthLandscape = clamped
-            CardSizePrefs.save(baseKey + ".cardWidthLandscape", libID: libID, clamped)
-        } else {
-            cardWidthPortrait = clamped
-            CardSizePrefs.save(baseKey + ".cardWidthPortrait", libID: libID, clamped)
-        }
+        if landscape { cardWidthLandscape = clamped } else { cardWidthPortrait = clamped }
+    }
+
+    /// 手势松手 / 滑块松手时落盘一次。
+    func commit() {
+        CardSizePrefs.save(baseKey + ".cardWidthPortrait", libID: libID, cardWidthPortrait)
+        CardSizePrefs.save(baseKey + ".cardWidthLandscape", libID: libID, cardWidthLandscape)
     }
 }
 
@@ -198,7 +198,11 @@ struct ToolSlider: View {
                     get: { layout.cardWidth },
                     set: { layout.resize(to: $0) }
                 ),
-                in: layout.range
+                in: layout.range,
+                onEditingChanged: { editing in
+                    // 拖动中只改内存，松手才落盘
+                    if !editing { layout.commit() }
+                }
             )
             .frame(width: 88)
             Text("\(Int(layout.cardWidth))")

@@ -250,8 +250,8 @@ struct MediaListView: View {
         }
     }
 
-    /// 双指捏合缩放卡片大小。scale 相对手势开始，所以记下起始宽度再乘比例，
-    /// 松手即落盘（resize 内部会 clamp 到范围）。
+    /// 双指捏合缩放卡片大小。scale 相对手势开始，所以记下起始宽度再乘比例。
+    /// 拖动中只改内存（resize 不落盘），松手才 commit 落盘，避免高频写 UserDefaults 卡顿。
     private var pinchGesture: some Gesture {
         MagnificationGesture()
             .onChanged { scale in
@@ -260,6 +260,7 @@ struct MediaListView: View {
             }
             .onEnded { _ in
                 pinchStartWidth = 0
+                layout.commit()
             }
     }
 
