@@ -3,12 +3,35 @@ import UIKit
 
 // MARK: - 相册列表状态
 final class AlbumListViewModel: ObservableObject {
+    /// 排序方式（对齐网页版 AlbumListPage 的排序下拉 + 后端 /api/photos sortMap）
+    enum Sort: String, CaseIterable, Sendable {
+        case updatedDesc = "updated_desc"
+        case updatedAsc = "updated_asc"
+        case releaseDesc = "release_desc"
+        case releaseAsc = "release_asc"
+        case nameAsc = "name_asc"
+        case nameDesc = "name_desc"
+        case random = "random"
+        var label: String {
+            switch self {
+            case .updatedDesc: return "最新更新"
+            case .updatedAsc: return "最早更新"
+            case .releaseDesc: return "最新发表"
+            case .releaseAsc: return "最早发表"
+            case .nameAsc: return "名称 A→Z"
+            case .nameDesc: return "名称 Z→A"
+            case .random: return "随机"
+            }
+        }
+    }
+
     /// 固定库模式：从「媒体库卡片墙」点进来时传入，直接看该库相册
     let fixedLibrary: Library?
 
     @Published var albums: [Album] = []
     @Published var libraries: [Library] = []
     @Published var selectedLibID: Int?
+    @Published var sort: Sort = .updatedDesc
     @Published var totalCount = 0
     @Published var isLoading = false
     @Published var errorMessage: String?
@@ -65,6 +88,13 @@ final class AlbumListViewModel: ObservableObject {
     }
 
     @MainActor
+    func setSort(_ s: Sort) async {
+        guard sort != s else { return }
+        sort = s
+        await reload()
+    }
+
+    @MainActor
     func reload() async {
         albums = []
         page = 1
@@ -78,7 +108,7 @@ final class AlbumListViewModel: ObservableObject {
         isLoading = true
         defer { isLoading = false }
         do {
-            let (items, total) = try await client.fetchAlbums(libID: libID, page: page, size: pageSize)
+            let (items, total) = try await client.fetchAlbums(libID: libID, page: page, size: pageSize, sort: sort.rawValue)
             totalCount = total
             albums.append(contentsOf: items)
             page += 1
@@ -137,6 +167,9 @@ struct AlbumListView: View {
                 // 固定库模式不显示库筛选
                 if library == nil && viewModel.libraries.count > 1 { libraryMenu }
             }
+            ToolbarItem(placement: .topBarTrailing) {
+                sortMenu
+            }
         }
         .navigationDestination(for: Album.self) { album in
             AlbumPhotosView(album: album, libID: viewModel.selectedLibID ?? 0)
@@ -150,6 +183,23 @@ struct AlbumListView: View {
             }
         }
         .task { await viewModel.loadLibraries() }
+    }
+
+    /// 排序选择（对齐网页版列表页顶部状态栏）
+    private var sortMenu: some View {
+        Menu {
+            ForEach(AlbumListViewModel.Sort.allCases, id: \.self) { s in
+                Button {
+                    Task { await viewModel.setSort(s) }
+                } label: {
+                    if viewModel.sort == s { Label(s.label, systemImage: "checkmark") }
+                    else { Text(s.label) }
+                }
+            }
+        } label: {
+            Image(systemName: "arrow.up.arrow.down")
+                .foregroundStyle(Theme.brand)
+        }
     }
 
     /// 库选择放导航栏下拉菜单（iOS 常见样式），不再挤在顶部占一整行

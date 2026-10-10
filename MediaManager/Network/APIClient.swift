@@ -491,9 +491,10 @@ final class APIClient: DataProviding, @unchecked Sendable {
     // MARK: - 相册 / 影视列表
 
     /// 相册列表。GET /api/photos?lib=x&page=1&size=60（返回 folders 数组）
-    func fetchAlbums(libID: Int, page: Int = 1, size: Int = 60) async throws -> (items: [Album], total: Int) {
+    /// sort：updated_desc / updated_asc / release_desc / release_asc / name_asc / name_desc / random
+    func fetchAlbums(libID: Int, page: Int = 1, size: Int = 60, sort: String = "updated_desc") async throws -> (items: [Album], total: Int) {
         let resp: AlbumListResponse = try await request(
-            "/api/photos?lib=\(libID)&page=\(page)&size=\(size)&sort=updated_desc"
+            "/api/photos?lib=\(libID)&page=\(page)&size=\(size)&sort=\(sort)"
         )
         return (resp.folders, resp.total)
     }
@@ -509,8 +510,9 @@ final class APIClient: DataProviding, @unchecked Sendable {
     }
 
     /// 影视列表。type: movie / tv；libID 为 nil 时后端返回用户可见媒体库的全集
-    func fetchMedia(type: String, libID: Int? = nil, page: Int = 1, size: Int = 60) async throws -> (items: [MediaItem], total: Int) {
-        var path = "/api/media?type=\(type)&page=\(page)&size=\(size)&sort=updated_desc"
+    /// sort：title / title_desc / year_desc / year_asc / rating_desc / updated_desc / premiered_desc 等
+    func fetchMedia(type: String, libID: Int? = nil, page: Int = 1, size: Int = 60, sort: String = "updated_desc") async throws -> (items: [MediaItem], total: Int) {
+        var path = "/api/media?type=\(type)&page=\(page)&size=\(size)&sort=\(sort)"
         if let libID { path += "&lib=\(libID)" }
         let resp: MediaListResponse = try await request(path)
         return (resp.items, resp.total)

@@ -4,6 +4,26 @@ import UIKit
 // MARK: - 影视列表状态
 // 对齐网页端 MediaListPage：selectedLibID 为 nil 时不传 lib，后端返回用户可见媒体库的全集
 final class MediaListViewModel: ObservableObject {
+    /// 排序方式（对齐网页版 MediaListPage 的 SORT_OPTIONS + 后端 /api/media sortMap）
+    enum Sort: String, CaseIterable, Sendable {
+        case updated = "updated_desc"
+        case title = "title"
+        case titleDesc = "title_desc"
+        case year = "year_desc"
+        case rating = "rating_desc"
+        case premiered = "premiered_desc"
+        var label: String {
+            switch self {
+            case .updated: return "最新更新"
+            case .title: return "标题 A→Z"
+            case .titleDesc: return "标题 Z→A"
+            case .year: return "年份"
+            case .rating: return "评分"
+            case .premiered: return "上映日期"
+            }
+        }
+    }
+
     let type: String
     /// 固定库模式：从「媒体库卡片墙」点进来时传入，直接看该库内容，不再拉库列表/显示筛选菜单
     let fixedLibrary: Library?
@@ -11,6 +31,7 @@ final class MediaListViewModel: ObservableObject {
     @Published var items: [MediaItem] = []
     @Published var libraries: [Library] = []
     @Published var selectedLibID: Int?
+    @Published var sort: Sort = .updated
     @Published var totalCount = 0
     @Published var isLoading = false
     @Published var errorMessage: String?
@@ -63,6 +84,13 @@ final class MediaListViewModel: ObservableObject {
     }
 
     @MainActor
+    func setSort(_ s: Sort) async {
+        guard sort != s else { return }
+        sort = s
+        await reload()
+    }
+
+    @MainActor
     func reload() async {
         items = []
         page = 1
@@ -76,7 +104,7 @@ final class MediaListViewModel: ObservableObject {
         isLoading = true
         defer { isLoading = false }
         do {
-            let (batch, total) = try await client.fetchMedia(type: type, libID: selectedLibID, page: page, size: pageSize)
+            let (batch, total) = try await client.fetchMedia(type: type, libID: selectedLibID, page: page, size: pageSize, sort: sort.rawValue)
             totalCount = total
             items.append(contentsOf: batch)
             page += 1
@@ -136,6 +164,9 @@ struct MediaListView: View {
                 // 固定库模式不显示库筛选（只有一个库）
                 if library == nil && !viewModel.libraries.isEmpty { libraryMenu }
             }
+            ToolbarItem(placement: .topBarTrailing) {
+                sortMenu
+            }
         }
         .overlay {
             if viewModel.items.isEmpty && !viewModel.isLoading {
@@ -148,6 +179,23 @@ struct MediaListView: View {
         .task { await viewModel.loadLibraries() }
         .navigationDestination(item: $selected) { item in
             MediaDetailView(media: item)
+        }
+    }
+
+    /// 排序选择（对齐网页版列表页顶部状态栏）
+    private var sortMenu: some View {
+        Menu {
+            ForEach(MediaListViewModel.Sort.allCases, id: \.self) { s in
+                Button {
+                    Task { await viewModel.setSort(s) }
+                } label: {
+                    if viewModel.sort == s { Label(s.label, systemImage: "checkmark") }
+                    else { Text(s.label) }
+                }
+            }
+        } label: {
+            Image(systemName: "arrow.up.arrow.down")
+                .foregroundStyle(Theme.brand)
         }
     }
 
