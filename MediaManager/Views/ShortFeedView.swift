@@ -15,8 +15,8 @@ import SwiftUI
 struct ShortFeedView: View {
     @ObservedObject var viewModel: ShortsViewModel
     let startIndex: Int
-
-    @Environment(\.dismiss) private var dismiss
+    /// 退出回调：设置 feedEntry = nil 回到列表页（改用 ZStack overlay 呈现后，背后列表可见）
+    var onClose: () -> Void = {}
 
     /// 当前正在看的页（scrollPosition 跟踪，滑到哪更新到哪）
     @State private var currentID: Int?
@@ -28,9 +28,10 @@ struct ShortFeedView: View {
     /// 预加载窗口半径：当前页 ±2
     private let windowRadius = 2
 
-    init(viewModel: ShortsViewModel, startIndex: Int) {
+    init(viewModel: ShortsViewModel, startIndex: Int, onClose: @escaping () -> Void = {}) {
         self.viewModel = viewModel
         self.startIndex = startIndex
+        self.onClose = onClose
         let idx = min(max(startIndex, 0), viewModel.items.count - 1)
         _currentIndex = State(initialValue: idx)
         _currentID = State(initialValue: viewModel.items.indices.contains(idx) ? viewModel.items[idx].id : nil)
@@ -59,7 +60,7 @@ struct ShortFeedView: View {
             .ignoresSafeArea()
 
             // 统一关闭入口（播放器里 xmark 已隐藏，避免两个按钮叠一起）
-            Button { dismiss() } label: {
+            Button { onClose() } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(.white)
@@ -69,10 +70,8 @@ struct ShortFeedView: View {
             .padding(.top, 8)
             .padding(.leading, 16)
         }
-        // 右滑退出：页面跟手向右移动，松手超过阈值向右滑出屏幕（不是默认的向下收起）
+        // 右滑退出：页面跟手向右移动，松手超过阈值向右滑出屏幕（露出背后的列表页）
         .offset(x: dragOffsetX)
-        // 底衬黑色：页面右移时露出的是黑底，而不是 fullScreenCover 底层的系统白底
-        .background(Color.black.ignoresSafeArea())
         .simultaneousGesture(exitDragGesture)
         .statusBar(hidden: true)
         .onChange(of: currentID) {
@@ -109,7 +108,7 @@ struct ShortFeedView: View {
                         dragOffsetX = screenW + 40
                     }
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                        dismiss()
+                        onClose()
                     }
                 } else {
                     withAnimation(.easeOut(duration: 0.25)) {

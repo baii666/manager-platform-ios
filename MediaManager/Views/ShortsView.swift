@@ -26,7 +26,8 @@ struct ShortsView: View {
     }
 
     var body: some View {
-        ScrollView {
+        ZStack {
+            ScrollView {
             if viewModel.items.isEmpty && !viewModel.isLoading {
                 ContentUnavailableView(viewModel.errorMessage ?? "暂无短视频",
                                        systemImage: viewModel.errorMessage == nil ? "play.rectangle.fill" : "exclamationmark.triangle")
@@ -93,9 +94,18 @@ struct ShortsView: View {
             }
         }
         .task { await viewModel.loadInitial() }
-        .fullScreenCover(item: $feedEntry) { entry in
-            ShortFeedView(viewModel: viewModel, startIndex: entry.startIndex)
+
+            // 刷流：用 ZStack overlay 呈现（不用 fullScreenCover），
+            // 右滑退出时页面右移、露出背后的列表页
+            if let entry = feedEntry {
+                ShortFeedView(viewModel: viewModel, startIndex: entry.startIndex,
+                              onClose: { feedEntry = nil })
+                    .transition(.move(edge: .trailing))
+                    .zIndex(1)
+            }
         }
+        // 刷流打开时隐藏导航栏（否则列表页导航栏盖在刷流上）
+        .toolbar(feedEntry == nil ? .automatic : .hidden, for: .navigationBar)
         .alert("无法播放", isPresented: Binding(
             get: { playError != nil },
             set: { if !$0 { playError = nil } }
