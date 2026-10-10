@@ -25,6 +25,10 @@ struct ResumeCard: View {
             fallbackIcon: asset.type.systemImage,
             fallbackColors: Theme.placeholderGradient(for: asset.type)
         )
+        // ⚠️ 必须先 imageFilled 再给尺寸 frame：backdrop/cover 是原图直出，
+        // 横版 fanart 和竖版海报分辨率完全不同，不钉进容器尺寸就会按原图像素渲染，
+        // 把标题和进度条挤出卡片（16:9 的 frame 形同虚设）
+        .imageFilled()
         .overlay(alignment: .topLeading) {
             HStack(spacing: 4) {
                 Image(systemName: asset.type.systemImage).font(.caption2)

@@ -59,6 +59,7 @@ struct MediaDetailView: View {
                 if let backdrop = d.backdropURL {
                     RemoteImage(url: backdrop, fallbackIcon: "film",
                                 fallbackColors: Theme.placeholderGradient(for: .media))
+                        .imageFilled()
                         .frame(height: 230)
                         .clipped()
                         .overlay(LinearGradient(
@@ -72,6 +73,7 @@ struct MediaDetailView: View {
                 HStack(alignment: .bottom, spacing: 16) {
                     RemoteImage(url: d.posterURL, fallbackIcon: "film",
                                 fallbackColors: Theme.placeholderGradient(for: .media))
+                        .imageFilled()
                         .frame(width: 120, height: 180)
                         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                         .shadow(radius: 8)
@@ -220,6 +222,7 @@ struct MediaDetailView: View {
                                 } label: {
                                     RemoteImage(url: stillsPhotos[i].thumbURL, fallbackIcon: "photo",
                                                 fallbackColors: Theme.placeholderGradient(for: .media))
+                                        .imageFilled()
                                         .frame(height: 90)
                                         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                                 }
@@ -282,6 +285,7 @@ private struct ActorChip: View {
         VStack(spacing: 6) {
             RemoteImage(url: actor.thumbURL, fallbackIcon: "person.fill",
                         fallbackColors: [Color.gray.opacity(0.3), Color.gray.opacity(0.1)])
+                .imageFilled()
                 .frame(width: 64, height: 64)
                 .clipShape(Circle())
             Text(actor.name).font(.caption2).lineLimit(1).frame(width: 64)

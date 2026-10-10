@@ -172,6 +172,7 @@ struct AlbumCard: View {
         VStack(alignment: .leading, spacing: 0) {
             ZStack(alignment: .bottomTrailing) {
                 RemoteImage(url: coverURL, fallbackIcon: "photo.on.rectangle")
+                    .imageFilled()
                     .frame(width: width, height: width * 3.0 / 2.0)
                     .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                 Text("\(album.count)")

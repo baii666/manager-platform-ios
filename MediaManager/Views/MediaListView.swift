@@ -185,6 +185,7 @@ struct MediaCard: View {
                 fallbackIcon: item.type == "tv" ? "tv" : "film",
                 fallbackColors: Theme.placeholderGradient(for: .media)
             )
+            .imageFilled()
             .frame(width: width, height: width * 3.0 / 2.0)
             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
 

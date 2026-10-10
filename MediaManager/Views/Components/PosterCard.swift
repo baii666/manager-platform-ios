@@ -23,6 +23,8 @@ struct AssetPosterCard: View {
             fallbackIcon: asset.type.systemImage,
             fallbackColors: Theme.placeholderGradient(for: asset.type)
         )
+        // 封面原图横竖比例不一，必须钉进容器尺寸，否则按原图像素渲染撑破卡片
+        .imageFilled()
         .overlay(alignment: .topLeading) {
             Text(asset.type.label)
                 .font(.caption2.weight(.semibold))
@@ -67,6 +69,7 @@ struct RecentPosterCard: View {
 
     private var cover: some View {
         RemoteImage(url: item.coverURL, fallbackIcon: item.kind.systemImage)
+            .imageFilled()
             .overlay(alignment: .topLeading) {
                 Text(item.kind.label)
                     .font(.caption2.weight(.semibold))
