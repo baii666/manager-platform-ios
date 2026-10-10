@@ -34,7 +34,11 @@ jobs:
             -configuration Debug \
             -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO \
-            build
+            build 2>&1 | tee build.log
+
+      - name: 暴露编译错误（临时）
+        if: failure()
+        run: grep -E ': error:' build.log | sed 's/^/::error::/' || true
 
       # 模拟器的安装阶段才会报 missing CFBundleExecutable / missing bundle id，
       # 编译阶段发现不了，所以这里提前校验产物 plist 的关键键都已解析出真值
