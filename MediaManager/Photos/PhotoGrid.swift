@@ -93,7 +93,7 @@ final class PhotoCell: UICollectionViewCell {
         contentView.layer.masksToBounds = true
         contentView.backgroundColor = .secondarySystemBackground
 
-        imageView.contentMode = .scaleAspectFill
+        imageView.contentMode = .scaleAspectFit
         imageView.clipsToBounds = true
         imageView.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(imageView)
