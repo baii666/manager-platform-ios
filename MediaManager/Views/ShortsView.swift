@@ -122,9 +122,9 @@ struct ShortsView: View {
 }
 
 // MARK: - 刷流入口
-// 用 item 触发 fullScreenCover（而不是 isPresented + 分离 index），
-// 避免闭包读到「更新前」的下标。
-private struct ShortFeedEntry: Identifiable {
+// 用 item 触发 overlay 呈现（而不是 isPresented + 分离 index），
+// 避免闭包读到「更新前」的下标。遵循 Equatable 供 .onChange(of:) 使用。
+private struct ShortFeedEntry: Identifiable, Equatable {
     let id: Int
     let startIndex: Int
 }
