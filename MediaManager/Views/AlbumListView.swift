@@ -186,7 +186,8 @@ struct AlbumListView: View {
                         ForEach(viewModel.albums) { album in
                             NavigationLink(value: album) {
                                 AlbumCard(album: album, coverURL: coverURL(for: album, landscape: layout.landscape),
-                                          width: grid.itemWidth, landscape: layout.landscape)
+                                          width: grid.itemWidth, landscape: layout.landscape,
+                                          showInfo: layout.cardWidth >= 150)
                             }
                             .buttonStyle(.plain)
                             .task {
@@ -308,10 +309,11 @@ struct AlbumCard: View {
     var width: CGFloat = 170
     /// 横版封面（16:9）还是竖版（2:3）
     var landscape: Bool = false
+    /// 是否显示下方标题区（卡片够大时）。由外层按 cardWidth 判断传入，而非列宽：
+    /// 列宽是均分结果、受屏幕宽度影响，用 cardWidth 才能让「小卡片」状态可预测。
+    var showInfo: Bool = true
 
     private var coverHeight: CGFloat { width * (landscape ? 9.0 / 16.0 : 3.0 / 2.0) }
-    /// 对齐网页版 AlbumListPage：卡片 <150px 时下方不显示标题，只在封面底部叠渐变标题
-    private var showInfo: Bool { width >= 150 }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {

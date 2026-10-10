@@ -187,7 +187,8 @@ struct MediaListView: View {
                     LazyVGrid(columns: grid.columns, spacing: 18) {
                         ForEach(viewModel.items) { item in
                             let cover = AppSession.shared.client?.mediaCoverURL(item, landscape: layout.landscape)
-                            MediaCard(item: item, coverURL: cover, width: grid.itemWidth, landscape: layout.landscape) {
+                            MediaCard(item: item, coverURL: cover, width: grid.itemWidth, landscape: layout.landscape,
+                                      showInfo: layout.cardWidth >= 150) {
                                 selected = item
                             }
                             .task {
@@ -308,11 +309,11 @@ struct MediaCard: View {
     var width: CGFloat = 150
     /// 横版封面（16:9）还是竖版海报（2:3）
     var landscape: Bool = false
+    /// 是否显示下方标题区（卡片够大时）。由外层按 cardWidth 判断传入，而非列宽。
+    var showInfo: Bool = true
     var onTap: () -> Void = {}
 
     private var coverHeight: CGFloat { width * (landscape ? 9.0 / 16.0 : 3.0 / 2.0) }
-    /// 对齐相册竖版：卡片 <150px 时下方不显示标题，标题叠在封面底部渐变条上
-    private var showInfo: Bool { width >= 150 }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
