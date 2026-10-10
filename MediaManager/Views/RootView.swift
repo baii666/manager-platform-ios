@@ -61,9 +61,15 @@ enum SidebarItem: String, CaseIterable, Identifiable, Hashable {
 struct RootView: View {
     @StateObject private var viewModel = HomeViewModel()
     @State private var selection: SidebarItem? = .home
+    /// 强制侧边栏常驻（横竖屏都显示）。
+    /// 默认 .automatic 在 iPad 竖屏会把 sidebar 折叠成 overlay ——
+    /// 一旦折叠，① 点进内容页时系统会自动展开 sidebar 盖住内容；
+    /// ② 左缘右滑被「展开 sidebar」手势接管，NavigationStack 的返回手势失效。
+    /// 常驻后两者都不再发生：右滑恢复为正常返回。
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
             List(selection: $selection) {
                 ForEach(SidebarSection.allCases) { section in
                     Section(section.title) {
