@@ -40,6 +40,8 @@ struct LibraryPickerView: View {
             contentView(for: lib)
         }
         .task { await load() }
+        // 库卡片墙是 tab 根页面：回到这里时恢复显示侧边栏
+        .onAppear { SidebarStore.shared.visibility = .all }
     }
 
     private var title: String {

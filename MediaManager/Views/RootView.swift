@@ -57,19 +57,22 @@ enum SidebarItem: String, CaseIterable, Identifiable, Hashable {
     }
 }
 
+// MARK: - 侧边栏可见性控制
+// 需求：库卡片墙（tab 根页面）显示侧边栏；push 进「库内容列表页」后隐藏侧边栏且不可拉出。
+// 通过共享 store 让根页面与列表页各自在 onAppear 时设置目标可见性。
+final class SidebarStore: ObservableObject {
+    static let shared = SidebarStore()
+    @Published var visibility: NavigationSplitViewVisibility = .all
+}
+
 // MARK: - 根视图：三栏骨架
 struct RootView: View {
     @StateObject private var viewModel = HomeViewModel()
+    @ObservedObject private var sidebar = SidebarStore.shared
     @State private var selection: SidebarItem? = .home
-    /// 强制侧边栏常驻（横竖屏都显示）。
-    /// 默认 .automatic 在 iPad 竖屏会把 sidebar 折叠成 overlay ——
-    /// 一旦折叠，① 点进内容页时系统会自动展开 sidebar 盖住内容；
-    /// ② 左缘右滑被「展开 sidebar」手势接管，NavigationStack 的返回手势失效。
-    /// 常驻后两者都不再发生：右滑恢复为正常返回。
-    @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
     var body: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility) {
+        NavigationSplitView(columnVisibility: $sidebar.visibility) {
             List(selection: $selection) {
                 ForEach(SidebarSection.allCases) { section in
                     Section(section.title) {
@@ -105,6 +108,10 @@ struct RootView: View {
                     PlaceholderView(item: selection ?? .home)
                 }
             }
+        }
+        // 切换 tab（侧边栏选择变化）时恢复侧边栏显示，覆盖 ShortsView / 占位页等根页面
+        .onChange(of: selection) { _, _ in
+            sidebar.visibility = .all
         }
     }
 }

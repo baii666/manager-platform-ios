@@ -33,6 +33,8 @@ struct HomeView: View {
         .background(Color(uiColor: .systemBackground))
         .navigationTitle("首页")
         .navigationBarTitleDisplayMode(.inline)
+        // 首页是 tab 根页面：回到这里时恢复显示侧边栏
+        .onAppear { SidebarStore.shared.visibility = .all }
         .task {
             if viewModel.stats.libraryCount == 0 {
                 await viewModel.load()
