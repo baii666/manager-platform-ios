@@ -74,8 +74,6 @@ struct RootView: View {
 // MARK: - 底 bar
 struct BottomTabBar: View {
     @Binding var selection: RootTab
-    // 底栏要不要垫毛玻璃取决于是否设了背景图，监听外观变化即时切换
-    @ObservedObject private var appearance = AppearanceSettings.shared
 
     /// 底 bar 内容的宽度上限（四个 tab 在这条宽度里均分）。
     /// iPad 横屏有 1000+pt，均分铺满的话图标相距 250pt 以上，视线来回跑；
@@ -114,18 +112,14 @@ struct BottomTabBar: View {
         .frame(height: 52)  // 标准 tab bar 高度，不厚
         .padding(.horizontal, 8)
         .background(
-            // 只让背景延伸到屏幕底覆盖 home indicator 区域，bar 本身保持 52pt 不增高。
-            // ⚠️ 用 AppBackgroundView 而不是写死 systemBackground：有自定义背景图时
-            // 底栏跟着走同一张图，不然整页有图、只有底栏是一块纯色。
-            // 再垫一层 ultraThinMaterial：图标直接压在亮图上会看不清，
-            // 毛玻璃既透出图又托住图标（对齐网页版底栏的半透明效果）。
-            ZStack {
-                AppBackgroundView()
-                if appearance.hasBackground {
-                    Rectangle().fill(.ultraThinMaterial)
-                }
-            }
-            .ignoresSafeArea(edges: .bottom)
+            // 底栏毛玻璃：直接用材质。它会自动模糊身后 App 根的那张背景图
+            //（MediaManagerApp 根上有全局 .appBackground()），同时透出图。
+            //
+            // ⚠️⚠️ 这里绝对不能放 AppBackgroundView / ignoresSafeArea 的大图层：
+            // 底栏在 safeAreaInset 里，这一层合成在主内容**之上**，
+            // 内部视图一 ignoresSafeArea 就被提案成全屏 —— 整条毛玻璃会盖到
+            // 所有页面内容上面（真实事故：海报被拦腰糊住、文字全看不见）。
+            .ultraThinMaterial
         )
         .overlay(alignment: .top) {
             Rectangle()

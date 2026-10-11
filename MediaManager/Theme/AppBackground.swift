@@ -16,8 +16,12 @@ struct AppBackgroundView: View {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFill()
-                    // ⚠️ 先 clipped 再 overlay：scaledToFill 的绘制会超出自己的 frame，
-                    // 不裁的话压暗层只盖住 frame，四周溢出部分就是没压暗的亮图
+                    // 磨砂：整个背景做成磨砂玻璃质感，不与前景内容抢清晰度。
+                    // ⚠️ blur 必须在 clipped 之前：scaledToFill 的绘制本来就超出 frame，
+                    // 模糊采样用的就是这些溢出像素，先裁后糊会在四边留出软边/黑边。
+                    .blur(radius: appearance.blur)
+                    // ⚠️ 先 clipped 再 overlay：不裁的话压暗层只盖住 frame，
+                    // 四周溢出部分就是没压暗的亮图
                     .clipped()
                     // 压暗：不盖一层的话卡片文字压在亮图上根本看不清
                     .overlay(Color.black.opacity(appearance.dim))
@@ -33,6 +37,12 @@ struct AppBackgroundView: View {
 extension View {
     /// 用全局背景填充（背景图 / 系统底色二选一，由 AppearanceSettings 决定）。
     /// 取代页面里原来那句 `.background(Color(uiColor: .systemBackground))`。
+    ///
+    /// ⚠️⚠️ 只能用在**主内容层**（页面根 / App 根）。绝对不要放进
+    /// `safeAreaInset(edge:)` 的内容里（比如底栏）：safeAreaInset 层是合成在
+    /// 主内容**之上**的，它内部的视图一 ignoresSafeArea 就会被提案成全屏，
+    /// 整个背景/材质会盖到所有页面内容上面（真实踩坑：底栏背景把海报拦腰糊住）。
+    /// 底栏这类悬浮层想要毛玻璃，直接 `.background(.ultraThinMaterial)` 就够了。
     func appBackground() -> some View {
         background { AppBackgroundView() }
     }

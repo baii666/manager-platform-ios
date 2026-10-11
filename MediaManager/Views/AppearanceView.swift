@@ -19,7 +19,10 @@ struct AppearanceView: View {
 
                 backgroundCard
 
-                if appearance.hasBackground { dimCard }
+                if appearance.hasBackground {
+                    dimCard
+                    blurCard
+                }
             }
             .padding(.vertical, 24)
             .padding(.horizontal, 24)
@@ -68,6 +71,9 @@ struct AppearanceView: View {
                     Image(uiImage: image)
                         .resizable()
                         .scaledToFill()
+                        // 预览与实际背景同参数（磨砂 + 压暗），所见即所得。
+                        // blur 在 frame/clip 之前：溢出像素做模糊采样，边缘不出软边
+                        .blur(radius: appearance.blur)
                         .frame(height: 140)
                         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                         // 预览也按实际效果压暗，所见即所得
@@ -120,7 +126,7 @@ struct AppearanceView: View {
                 }
             }
 
-            Text("图片会铺满整个 App（顶到安全区），并自动压暗以保证文字可读。")
+            Text("图片磨砂后铺满整个 App 的最底层，页面内容叠在上面；磨砂和压暗程度都可在下方微调。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -141,6 +147,26 @@ struct AppearanceView: View {
                     .foregroundStyle(.secondary)
             }
             Text("当前 \(Int(appearance.dim * 100))%")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    // MARK: 磨砂强度
+
+    private var blurCard: some View {
+        card("drop.fill", "背景磨砂") {
+            HStack {
+                Text("清")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Slider(value: $appearance.blur, in: 0...40)
+                    .tint(Theme.brand)
+                Text("糊")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Text(appearance.blur < 1 ? "当前 清晰（不模糊）" : "当前 模糊半径 \(Int(appearance.blur))")
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
         }

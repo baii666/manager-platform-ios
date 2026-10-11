@@ -46,6 +46,7 @@ final class AppearanceSettings: ObservableObject {
     private enum Keys {
         static let mode = "appearance.mode"
         static let dim = "appearance.dim"
+        static let blur = "appearance.blur"
     }
 
     /// 背景图最长边上限：4K 原图解码后常驻内存几十 MB，压到 1600 足够铺满屏幕
@@ -61,6 +62,12 @@ final class AppearanceSettings: ObservableObject {
         didSet { UserDefaults.standard.set(dim, forKey: Keys.dim) }
     }
 
+    /// 背景图磨砂（高斯模糊）半径，单位 pt：0 = 清晰原图，越大越糊。
+    /// 磨砂后背景退成「氛围底」，不与前景内容抢清晰度。
+    @Published var blur: Double {
+        didSet { UserDefaults.standard.set(blur, forKey: Keys.blur) }
+    }
+
     /// 自定义背景图。nil = 用系统底色。
     /// ⚠️ 只在内存里保留一份缩放后的图（1600 长边），不是原始大图。
     @Published var backgroundImage: UIImage?
@@ -74,6 +81,9 @@ final class AppearanceSettings: ObservableObject {
         // 默认压暗调低（0.35 → 0.22）：面板已全面毛玻璃化，文字可读性由面板保证，
         // 图可以透得更亮（对齐网页版效果）。已存过设置的用户不受影响。
         self.dim = saved ?? 0.22
+        let savedBlur = UserDefaults.standard.object(forKey: Keys.blur) as? Double
+        // 默认就给磨砂：清晰大图当背景会和卡片内容抢视线
+        self.blur = savedBlur ?? 16
         // 冷启动时同步读一次磁盘。图不大（几百 KB），主线程读不卡。
         self.backgroundImage = Self.loadImageFromDisk()
     }
