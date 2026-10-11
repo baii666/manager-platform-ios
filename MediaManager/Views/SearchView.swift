@@ -57,6 +57,10 @@ struct SearchView: View {
     /// 关键词搜索响应里的 total。语义是异步追加的，回来后要把它加回去，
     /// 所以这个中间值得单独留着
     @State private var keywordTotal = 0
+    /// 语义搜索响应里的 total（CLIP 那边一共匹配到多少条）。
+    /// ⚠️「全部」页的语义组只取 12 条做预览，组头那个数字要显示**真实总数**而不是 12，
+    /// 否则用户看不出「点进去还有更多」。语义视图下它同时是 hasMore 的判断依据
+    @State private var semanticTotal = 0
     /// 服务端回的**总匹配数**（顶栏「已加载 / 总数」的右边那个数）= 关键词 total + 语义条数。
     /// ⚠️ 独立于 totals：totals 是 /search/totals 按类型给的（给分类胶囊用），
     /// 这个是搜索响应自带的 total，跟列表页的 totalCount 同源。
@@ -265,6 +269,7 @@ struct SearchView: View {
         results = []
         totals = [:]
         keywordTotal = 0
+        semanticTotal = 0
         resultTotal = 0
         semanticItems = []
         isSemanticLoading = false
@@ -433,10 +438,17 @@ struct SearchView: View {
                                     .foregroundStyle(.secondary)
                             }
                             Spacer()
-                            // 语义组还没回来时不给「查看全部」：点了会跳到空的照片页
+                            // 语义组还没回来时不给「查看全部」：点了会跳到空的语义页
                             if !(section.isSemantic && section.items.isEmpty) {
                                 Button {
-                                    selectTab(targetTab(section))
+                                    // ⚠️ 语义组「查看全部」= 切到**语义 tab**，不是跳照片分类：
+                                    // 照片分类里只有关键词命中的照片，语义这一路（通常更多）
+                                    // 一条都不在里面，跳过去等于什么都没看到
+                                    if section.isSemantic {
+                                        selectSemantic()
+                                    } else {
+                                        selectTab(targetTab(section))
+                                    }
                                 } label: {
                                     Text("查看全部").font(.caption)
                                 }
@@ -655,10 +667,10 @@ struct SearchView: View {
     }
 
     /// 分组头「查看全部」跳到哪个分类：
-    /// · 语义组 → 照片（语义只在照片上工作，展开就是照片那一类）
     /// · tv 不是 Tab 的 case，「剧集」分组落到「影视」
+    /// ⚠️ 只管**关键词分组**（movie/tv/album/photo/shoot）。语义组不走这里 ——
+    /// 它有自己的 tab（语义视图），跳照片分类会把语义结果整个丢掉
     private func targetTab(_ section: ResultSection) -> Tab {
-        if section.isSemantic { return .photo }
         if section.type == "tv" { return .movie }
         return Tab(rawValue: section.type) ?? .all
     }
@@ -677,10 +689,12 @@ struct SearchView: View {
             guard let items = map[t], !items.isEmpty else { return nil }
             return ResultSection(type: t, items: items, count: totals[t] ?? 0)
         }
-        // 语义组：结果到了就有，还在跑就先给个占位组（告诉用户后面还有东西）
+        // 语义组：结果到了就有，还在跑就先给个占位组（告诉用户后面还有东西）。
+        // ⚠️ 计数用 semanticTotal（CLIP 那边总共匹配到多少）而不是预览条数 ——
+        // 这一组只放 12 条，显示 12 会让人以为语义就命中了这些
         if !semanticItems.isEmpty || isSemanticLoading {
             list.append(ResultSection(type: "semantic", items: semanticItems,
-                                      count: semanticItems.count))
+                                      count: max(semanticTotal, semanticItems.count)))
         }
         return list
     }
@@ -757,6 +771,7 @@ struct SearchView: View {
         isSemanticLoading = false
         // 换词了，总数也得跟着重来（否则新词第一页会顶着上一个词的总数）
         keywordTotal = 0
+        semanticTotal = 0
         resultTotal = 0
         // 分类计数（/totals 有 5s 服务端缓存，切 Tab 不会重复打爆）。
         // ⚠️ 语义视图下也打：胶囊上的计数要保持准确，点回某个分类时数字才是对的
@@ -868,6 +883,9 @@ struct SearchView: View {
                 added.append(item)
             }
             semanticItems = added
+            // 「全部」页语义组只预览 12 条，但组头要显示**语义总共匹配到多少**，
+            // 不然用户看着「12」以为就这些，点进去才发现还有一堆
+            semanticTotal = total
             resultTotal = isSemantic ? total : keywordTotal + added.count
             // 语义视图要能往下翻：这一页没取完（且确实取到了东西）才留 hasMore。
             // ⚠️ reload 里先把 hasMore 设成了 false（语义视图不打关键词请求），
@@ -906,6 +924,7 @@ struct SearchView: View {
                 added.append(item)
             }
             semanticItems.append(contentsOf: added)
+            semanticTotal = p.total
             resultTotal = p.total
             hasMore = !added.isEmpty && semanticItems.count < p.total
         } catch {
