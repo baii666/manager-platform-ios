@@ -1058,8 +1058,8 @@ private struct ViewerThumb: View {
 }
 
 // MARK: - 相似图查看蒙层
-// 点相似图时叠在看图器之上的一层简单蒙层：全屏黑底 + 原图，可捏合缩放、放大后拖动平移。
-// 不顶掉当前看图器，关闭即回到原位置。加载用 ImageCache 走内存缓存。
+// 点相似图时叠在看图器之上的一层半透明灰蒙层：底层看图器原样透出，
+// 蒙层中央显示相似图原图，可捏合缩放、放大后拖动平移。点空白处或右上关闭即回原位。
 private struct SimilarPhotoOverlay: View {
     let url: URL?
     var onClose: () -> Void
@@ -1072,7 +1072,10 @@ private struct SimilarPhotoOverlay: View {
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            // 半透明灰蒙层：透出底下的看图器，不整屏盖黑
+            Color.black.opacity(0.62)
+                .ignoresSafeArea()
+                .onTapGesture { onClose() }
 
             if let image {
                 GeometryReader { geo in
