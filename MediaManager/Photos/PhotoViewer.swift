@@ -876,17 +876,24 @@ struct PhotoViewerView: View {
     /// 封面生成队列按钮：已标记（队列中 / 已生成）= 绿，未加入 = 白。
     /// ⚠️ 颜色只表达「有没有标记」：一旦加入队列就变绿，跟「已出图」不作区分，
     /// 两种已标记状态靠图标区分（照片框 ↔ 对勾）。
+    ///
+    /// ⚠️ 已生成（终态）**不用 .disabled()**：它会把按钮内容整体淡化，
+    /// 绿色被系统灰化后跟没标记一样，看着就是「点了没反应 / 不显示颜色」。
+    /// 要的是「不可取消但仍然是绿的」—— 用 allowsHitTesting 只关交互、不动外观。
     private var coverTaskButton: some View {
         let name: String = coverGenerated ? "checkmark.rectangle" : "photo.on.rectangle"
         return Button(action: toggleCoverTask) {
             Image(systemName: name)
                 .font(.system(size: 17))
+                // monochrome：确保 SF Symbol 按前景色单一着色，不吃系统 tint
+                .symbolRenderingMode(.monochrome)
                 .foregroundStyle((coverGenerated || coverQueued) ? .green : .white)
                 .frame(width: 40, height: 36)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(coverGenerated || coverTaskBusy)
+        // 已生成是终态（后端也拒绝取消），只关点击，不淡化图标颜色
+        .allowsHitTesting(!coverGenerated && !coverTaskBusy)
     }
 
     // MARK: - 缩略图条
