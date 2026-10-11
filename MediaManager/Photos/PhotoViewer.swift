@@ -112,12 +112,14 @@ struct PhotoViewerView: View {
             if let photo {
                 singleImage(photo, size: size, extraOffsetX: trackOffset)
 
-                // 连续翻页：横向拖动时把相邻那张也挂出来跟手一起滑，
-                // 松手后两张一起滑到位，而不是「旧图瞬间换新图」的生硬切换。
+                // 相邻图**始终预挂载**在屏幕外（左右各一张），而不是等拖动才挂。
+                // 这样翻页时相邻图的原图早已加载好，滑进来就是清晰图，
+                // 不会再出现「先缩略图、原图到位后再跳一下」的清晰度突变。
                 if scale <= 1.01 {
-                    if trackOffset < 0, index + 1 < photos.count {
+                    if index + 1 < photos.count {
                         singleImage(photos[index + 1], size: size, extraOffsetX: trackOffset + size.width)
-                    } else if trackOffset > 0, index - 1 >= 0 {
+                    }
+                    if index - 1 >= 0 {
                         singleImage(photos[index - 1], size: size, extraOffsetX: trackOffset - size.width)
                     }
                 }
