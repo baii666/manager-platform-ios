@@ -241,8 +241,9 @@ struct MediaListView: View {
                               placeholder: "搜索标题、演员、类型…",
                               title: library?.name ?? (type == "tv" ? "剧集" : "电影"),
                               narrow: hSizeClass == .compact)
-            // 原来网格上方的工具行整行收进导航栏，页面只剩导航栏一行
-            ToolbarItemGroup(placement: .topBarTrailing) {
+            // 右侧整组收进一个 ToolbarItem（TrailingToolsItem），间距由 ToolbarMetrics 统一：
+            // 按钮之间等距等高，计数与按钮之间单独留 countGap（纯文本与可点按钮视觉分组）
+            TrailingToolsItem {
                 sortMenu
                 // 只留图标：图标本身够直观，省下的宽度留给搜索框
                 ToolChip(label: layout.landscape ? "横版" : "竖版",
@@ -261,9 +262,10 @@ struct MediaListView: View {
                         // 变成「1234 / 5678」上下两行，把导航栏撑高
                         .fixedSize(horizontal: true, vertical: false)
                         .lineLimit(1)
+                        // 与前面按钮的间隔独立于按钮间距（见 ToolbarMetrics.countGap）
+                        .padding(.leading, ToolbarMetrics.countGap)
                 }
             }
-            .withoutGlass()
         }
         .tint(Theme.brand)
         .navigationBarTitleDisplayMode(.inline)
@@ -343,14 +345,8 @@ struct MediaListView: View {
                 }
             }
         } label: {
-            HStack(spacing: 4) {
-                Text(viewModel.selectedLibrary?.name ?? "全部")
-                    .font(.subheadline.weight(.medium))
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 10, weight: .semibold))
-            }
-            // 与整条状态栏（含计数）统一成次级灰
-            .foregroundStyle(.secondary)
+            // 与排序按钮共用 ToolMenuLabel：同字体（caption）、同高度、同内边距
+            ToolMenuLabel(text: viewModel.selectedLibrary?.name ?? "全部")
         }
         // ⚠️ Menu 是控件，页面上的 .tint(Theme.brand) 会盖掉 label 里的
         // foregroundStyle（标题和展开后的菜单都变品牌色），必须给控件本身换 tint

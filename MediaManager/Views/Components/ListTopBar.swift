@@ -117,6 +117,64 @@ struct ListSearchBarItem: ToolbarContent {
     }
 }
 
+// MARK: - 顶部栏统一度量
+// 右侧那排控件（排序 / 横竖版 / 库筛选 / 计数）之前各自为政：
+// 排序、横竖版带 6pt 内边距，库筛选和计数没有；字体也有 caption / subheadline 两种，
+// 叠上 ToolbarItemGroup 的系统默认间距后每段间隙都不一样，看着歪歪扭扭。
+// 现在全部收进一份常量，按钮高度、字体、内边距、间距只有这一个出处。
+enum ToolbarMetrics {
+    /// 按钮的水平内边距（按钮之间的视觉间隙 = chipPaddingH × 2 + buttonSpacing）
+    static let chipPaddingH: CGFloat = 6
+    /// 按钮内容统一高度 —— caption 文字（≈16pt 行高）和 12pt 图标（≈14pt）
+    /// 自然高度差 2pt，不钉死的话两个按钮肉眼可见地一高一矮
+    static let chipHeight: CGFloat = 22
+    /// 按钮之间的间距（TrailingToolsItem 的 HStack spacing）
+    static let buttonSpacing: CGFloat = 2
+    /// 计数文本与前面按钮的间隔：比按钮间距大一截，让纯文本和可点按钮在视觉上分组
+    static let countGap: CGFloat = 10
+}
+
+/// 顶部栏 trailing 整组控件：单个 ToolbarItem 包一个自控间距的 HStack。
+/// ⚠️ 不用 ToolbarItemGroup：它的间距是系统默认值，叠加各控件自己的内边距后
+/// 间隙不可控也不一致。收进一个 ToolbarItem 后，间距由 ToolbarMetrics 说了算。
+/// 整组锚定在屏幕右缘 —— 计数文本变宽/变窄时整组自动伸缩，按钮间距始终不变。
+struct TrailingToolsItem<Content: View>: ToolbarContent {
+    private let content: Content
+
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+
+    var body: some ToolbarContent {
+        ToolbarItem(placement: .topBarTrailing) {
+            HStack(spacing: ToolbarMetrics.buttonSpacing) {
+                content
+            }
+        }
+        .withoutGlass()
+    }
+}
+
+/// Menu 控件的统一 label：文字 + chevron。排序菜单和三个页面的库筛选共用，
+/// 保证「标题 A→Z ˅」和「库名 ˅」是同一个大小、同一个内边距。
+struct ToolMenuLabel: View {
+    let text: String
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Text(text)
+                .font(.caption.weight(.medium))
+                .lineLimit(1)
+            Image(systemName: "chevron.down")
+                .font(.system(size: 9, weight: .semibold))
+        }
+        .frame(height: ToolbarMetrics.chipHeight)
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, ToolbarMetrics.chipPaddingH)
+        .contentShape(Rectangle())
+    }
+}
+
 /// 纯文字/图标工具按钮（不带任何背景）。高亮态改用文字颜色 + 字重表达，
 /// ⚠️ 不再自己画胶囊底：放进导航栏后系统还会再套一层玻璃底，两层叠一起很难看。
 ///
@@ -144,9 +202,10 @@ struct ToolChip: View {
                         .font(.caption.weight(highlighted ? .semibold : .medium))
                 }
             }
+            // 内容高度钉死成 chipHeight：图标按钮和文字按钮从此一样高
+            .frame(height: ToolbarMetrics.chipHeight)
             .foregroundStyle(.secondary)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 6)
+            .padding(.horizontal, ToolbarMetrics.chipPaddingH)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -170,16 +229,8 @@ struct ToolMenuChip<Content: View>: View {
         Menu {
             menuContent
         } label: {
-            HStack(spacing: 5) {
-                Text(label)
-                    .font(.caption.weight(.medium))
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 8, weight: .semibold))
-            }
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 6)
-            .contentShape(Rectangle())
+            // label 样式与库筛选菜单共用 ToolMenuLabel，大小/边距必然一致
+            ToolMenuLabel(text: label)
         }
         // ⚠️ 光在 label 里写 .foregroundStyle 没用：Menu 是「控件」，页面上的
         // .tint(Theme.brand) 会把它的标题和展开后的菜单一起染成品牌色。
