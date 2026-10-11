@@ -219,14 +219,15 @@ struct AlbumListView: View {
         // ⚠️ 系统返回按钮必须留着：藏了它右滑手势会一起没（见 MediaListView 注释）。
         // 跨库模式是栈底没有上一层，系统不会给返回按钮。
         .toolbar {
-            // 靠左 + 固定宽度（ListSearchBarItem.width），三个列表页共用同一个组件
-            ListSearchBarItem(text: $viewModel.searchText, placeholder: "搜索相册名…")
+            // 靠左 + 固定宽度（ListSearchBarItem.width），三个列表页共用同一个组件；
+            // 媒体库名跟在搜索框后面（可拉长，宽度不够才尾部省略）
+            ListSearchBarItem(text: $viewModel.searchText,
+                              placeholder: "搜索相册名…",
+                              title: library?.name ?? "相册",
+                              narrow: hSizeClass == .compact)
             // 原来网格上方的工具行整行收进导航栏，页面只剩导航栏一行。
             // 跨库模式（sheet）时「完成」按钮来自外层 HomeView，与这里的 trailing 共存。
             ToolbarItemGroup(placement: .topBarTrailing) {
-                Text(library?.name ?? "相册")
-                    .font(.subheadline.weight(.semibold))
-                    .lineLimit(1)
                 sortMenu
                 // 只留图标：图标本身够直观，省下的宽度留给搜索框
                 ToolChip(label: layout.landscape ? "横版" : "竖版",
@@ -323,7 +324,8 @@ struct AlbumListView: View {
                 Image(systemName: "chevron.down")
                     .font(.system(size: 10, weight: .semibold))
             }
-            .foregroundStyle(Theme.brand)
+            // 与整条状态栏（含计数）统一成次级灰
+            .foregroundStyle(.secondary)
         }
     }
 

@@ -45,13 +45,14 @@ struct ShootListView: View {
         // 导航栏因而不额外占高度，系统返回按钮正好在搜索框左边。
         // ⚠️ 系统返回按钮必须留着：藏了它右滑手势会一起没（见 MediaListView 注释）
         .toolbar {
-            // 靠左 + 固定宽度（ListSearchBarItem.width），三个列表页共用同一个组件
-            ListSearchBarItem(text: $viewModel.searchText, placeholder: "搜索拍摄集…")
+            // 靠左 + 固定宽度（ListSearchBarItem.width），三个列表页共用同一个组件；
+            // 媒体库名跟在搜索框后面（可拉长，宽度不够才尾部省略）
+            ListSearchBarItem(text: $viewModel.searchText,
+                              placeholder: "搜索拍摄集…",
+                              title: library?.name ?? "拍摄集",
+                              narrow: hSizeClass == .compact)
             // 原来网格上方的工具行整行收进导航栏，页面只剩导航栏一行
             ToolbarItemGroup(placement: .topBarTrailing) {
-                Text(library?.name ?? "拍摄集")
-                    .font(.subheadline.weight(.semibold))
-                    .lineLimit(1)
                 sortMenu
                 // 固定库模式不显示库筛选
                 if library == nil && !viewModel.libraries.isEmpty { libraryMenu }
@@ -116,7 +117,8 @@ struct ShootListView: View {
                     .font(.subheadline.weight(.medium))
                 Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold))
             }
-            .foregroundStyle(Theme.brand)
+            // 与整条状态栏（含计数）统一成次级灰
+            .foregroundStyle(.secondary)
         }
     }
 }

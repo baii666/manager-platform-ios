@@ -235,13 +235,14 @@ struct MediaListView: View {
         // 而且没有任何可靠手段能单独把手势取回来（自定义位移会白屏，
         // UIKit 桥接在这个场景下也接管不了转场）。样式只能走 tint / appearance。
         .toolbar {
-            // 靠左 + 固定宽度（ListSearchBarItem.width），三个列表页共用同一个组件
-            ListSearchBarItem(text: $viewModel.searchText, placeholder: "搜索标题、演员、类型…")
+            // 靠左 + 固定宽度（ListSearchBarItem.width），三个列表页共用同一个组件；
+            // 媒体库名跟在搜索框后面（可拉长，宽度不够才尾部省略）
+            ListSearchBarItem(text: $viewModel.searchText,
+                              placeholder: "搜索标题、演员、类型…",
+                              title: library?.name ?? (type == "tv" ? "剧集" : "电影"),
+                              narrow: hSizeClass == .compact)
             // 原来网格上方的工具行整行收进导航栏，页面只剩导航栏一行
             ToolbarItemGroup(placement: .topBarTrailing) {
-                Text(library?.name ?? (type == "tv" ? "剧集" : "电影"))
-                    .font(.subheadline.weight(.semibold))
-                    .lineLimit(1)
                 sortMenu
                 // 只留图标：图标本身够直观，省下的宽度留给搜索框
                 ToolChip(label: layout.landscape ? "横版" : "竖版",
@@ -348,7 +349,8 @@ struct MediaListView: View {
                 Image(systemName: "chevron.down")
                     .font(.system(size: 10, weight: .semibold))
             }
-            .foregroundStyle(Theme.brand)
+            // 与整条状态栏（含计数）统一成次级灰
+            .foregroundStyle(.secondary)
         }
     }
 }

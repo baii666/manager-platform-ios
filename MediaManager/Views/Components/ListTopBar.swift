@@ -76,16 +76,34 @@ extension ToolbarContent {
 struct ListSearchBarItem: ToolbarContent {
     @Binding var text: String
     var placeholder: String = "搜索…"
+    /// 搜索框**后面**显示的媒体库名（nil = 不显示这一项）
+    var title: String? = nil
+    /// 窄屏（iPhone）：一行要塞下「返回 + 搜索 + 库名 + 排序 + 横竖版」，搜索框缩短给库名让位
+    var narrow: Bool = false
 
     /// 固定宽度。想要更长/更短只改这一个数字。
     static let width: CGFloat = 280
+    /// 窄屏下的搜索框宽度（见 narrow）
+    static let narrowWidth: CGFloat = 170
 
     var body: some ToolbarContent {
         ToolbarItem(placement: .topBarLeading) {
-            ListSearchBar(text: $text, placeholder: placeholder, compact: true)
-                // ⚠️ 固定宽度而非 maxWidth：工具栏空间不足时会被压缩，
-                // 但有了确定值至少三个页面压出来是同一个长度
-                .frame(width: Self.width)
+            HStack(spacing: 10) {
+                ListSearchBar(text: $text, placeholder: placeholder, compact: true)
+                    // ⚠️ 固定宽度而非 maxWidth：工具栏空间不足时会被压缩，
+                    // 但有了确定值至少三个页面压出来是同一个长度
+                    .frame(width: narrow ? Self.narrowWidth : Self.width)
+                if let title {
+                    // 库名紧跟搜索框。文字可压缩但不设上限：够宽就整段显示（拉长），
+                    // 不够才尾部省略 —— 不会反过来把右侧的工具按钮挤掉。
+                    // 颜色跟计数（"34 / 120"）一致，整条状态栏一个色调。
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+            }
         }
         .withoutGlass()
     }
@@ -93,6 +111,9 @@ struct ListSearchBarItem: ToolbarContent {
 
 /// 纯文字/图标工具按钮（不带任何背景）。高亮态改用文字颜色 + 字重表达，
 /// ⚠️ 不再自己画胶囊底：放进导航栏后系统还会再套一层玻璃底，两层叠一起很难看。
+///
+/// ⚠️ 颜色一律用 .secondary（和右侧计数 "34 / 120" 同一个灰）：
+/// 之前高亮态跳成品牌色，整条状态栏花花绿绿。现在高亮只靠字重/图标区分。
 struct ToolChip: View {
     let label: String
     var icon: String? = nil
@@ -113,7 +134,7 @@ struct ToolChip: View {
                         .font(.caption.weight(highlighted ? .semibold : .medium))
                 }
             }
-            .foregroundStyle(highlighted ? Theme.brand : Color.secondary)
+            .foregroundStyle(.secondary)
             .padding(.horizontal, 6)
             .padding(.vertical, 6)
             .contentShape(Rectangle())
