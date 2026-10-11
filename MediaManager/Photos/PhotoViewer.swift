@@ -87,7 +87,7 @@ struct PhotoViewerView: View {
                 imageLayer(size: imageSize)
                     .offset(y: topReserve)
 
-                topBar(topInset: safe.top)
+                topBar()
                 bottomBar(bottomInset: safe.bottom)
                 if let tip { toast(tip) }
             }
@@ -416,7 +416,7 @@ struct PhotoViewerView: View {
 
     // MARK: - 顶部栏
 
-    private func topBar(topInset: CGFloat) -> some View {
+    private func topBar() -> some View {
         ZStack(alignment: .top) {
             HStack(alignment: .center) {
                 Text("\(index + 1) / \(photos.count)")
@@ -437,7 +437,10 @@ struct PhotoViewerView: View {
                 }
             }
             .padding(.horizontal, 16)
-            .padding(.top, 8 + topInset)
+            // ⚠️ 横幅紧贴屏幕顶部，不再用 safe.top 避让。状态栏已 statusBarHidden，
+            // 但灵动岛机型的 safe.top 仍返回挖孔高度，会把横幅推到顶部以下一大块，
+            // 中间露出黑边。改为固定小间距贴顶。
+            .padding(.top, 6)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .opacity(showUI ? 1 : 0)
