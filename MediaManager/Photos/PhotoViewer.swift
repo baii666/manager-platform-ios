@@ -833,7 +833,7 @@ struct PhotoViewerView: View {
                 toolButton(isFavorite ? "heart.fill" : "heart", active: isFavorite, tint: .red) {
                     toggleFavorite()
                 }
-                // 封面生成队列（三态：未加入=白 / 队列中=黄 / 已生成=绿，终态禁用）
+                // 封面生成队列：已标记=绿（队列中 / 已生成），未加入=白
                 coverTaskButton
                 toolButton("square.and.arrow.down") { saveToAlbum() }
                 Spacer(minLength: 0)
@@ -873,13 +873,15 @@ struct PhotoViewerView: View {
         .buttonStyle(.plain)
     }
 
-    /// 封面生成队列按钮：未加入=白、队列中=黄、已生成=绿对勾（终态禁用）。
+    /// 封面生成队列按钮：已标记（队列中 / 已生成）= 绿，未加入 = 白。
+    /// ⚠️ 颜色只表达「有没有标记」：一旦加入队列就变绿，跟「已出图」不作区分，
+    /// 两种已标记状态靠图标区分（照片框 ↔ 对勾）。
     private var coverTaskButton: some View {
         let name: String = coverGenerated ? "checkmark.rectangle" : "photo.on.rectangle"
         return Button(action: toggleCoverTask) {
             Image(systemName: name)
                 .font(.system(size: 17))
-                .foregroundStyle(coverGenerated ? .green : (coverQueued ? .yellow : .white))
+                .foregroundStyle((coverGenerated || coverQueued) ? .green : .white)
                 .frame(width: 40, height: 36)
                 .contentShape(Rectangle())
         }
