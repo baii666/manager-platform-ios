@@ -219,22 +219,62 @@ struct ToolSlider: View {
 
 // MARK: - 右滑返回
 // 列表页为了「搜索框贴顶」隐藏了导航栏，系统右滑返回手势会随之失效。
-// 这里用自定义手势补齐：任意位置向右滑（水平为主、位移够大）触发 dismiss 返回上一级。
+// 这里用自定义手势补齐：向右滑时页面**跟手**移动，松手按「位移 + 甩动速度」
+// 判定是完成返回还是弹回原位 —— 比原来「松手才瞬间跳走」接近系统的手感。
+//
+// ⚠️ 为什么没能和详情页完全一致：详情页走的是系统 interactivePop，返回时左边缘
+// 露出的是**上一层页面**并带视差；这里我们只是把当前页整体位移，露出的多半是
+// 页面背景。要完全对齐只能恢复系统的 interactivePopGestureRecognizer（UIKit 桥接），
+// 但那依赖 NavigationStack 的内部行为、隐藏导航栏后能否稳定启用没把握，
+// 所以先用这套纯 SwiftUI 的跟手版，不引入不可控的 hack。
 struct EdgePopGestureModifier: ViewModifier {
     var enabled: Bool = true
     @Environment(\.dismiss) private var dismiss
 
+    /// 跟手位移。判定返回时**故意不清零** —— 留给系统的 pop 转场接手，
+    /// 动画就能从手指松开的位置继续往右滑出去，中间不打断；自己再补一段动画
+    /// 反而会看到「滑出去、又滑一次」的重影。
+    @State private var offsetX: CGFloat = 0
+    /// 本次手势是否真的进入了跟手状态（垂直滚动不该触发）
+    @State private var tracking = false
+
+    /// 完成返回的位移阈值（沿用原值，行为不变）
+    private let commitDistance: CGFloat = 110
+    /// 甩一下就返回：末速度预测位移超过这个值也算 —— 快速轻扫时手指位移未必够 110
+    private let commitVelocity: CGFloat = 320
+
     func body(content: Content) -> some View {
         content
+            .offset(x: offsetX)
             .simultaneousGesture(
                 DragGesture(minimumDistance: 12)
+                    .onChanged { value in
+                        guard enabled else { return }
+                        let dx = value.translation.width
+                        // 只认「向右且水平为主」：垂直滚列表、向左滑都不跟手
+                        guard dx > 0, dx > abs(value.translation.height) else { return }
+                        tracking = true
+                        offsetX = dx
+                    }
                     .onEnded { value in
-                        guard enabled,
-                              value.translation.width > 110,
-                              value.translation.width > abs(value.translation.height) else { return }
-                        dismiss()
+                        guard enabled, tracking else { return }
+                        tracking = false
+                        let dx = value.translation.width
+                        guard dx > 0, dx > abs(value.translation.height) else {
+                            springBack()
+                            return
+                        }
+                        if dx > commitDistance || value.predictedEndTranslation.width > commitVelocity {
+                            dismiss()
+                        } else {
+                            springBack()
+                        }
                     }
             )
+    }
+
+    private func springBack() {
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) { offsetX = 0 }
     }
 }
 
