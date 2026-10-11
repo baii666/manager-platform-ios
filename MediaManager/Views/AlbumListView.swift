@@ -454,6 +454,10 @@ struct AlbumPhotosView: View {
     @State private var page = 1
     @State private var hasMore = true
     @State private var errorMessage: String?
+    /// 本相册已加入封面生成队列的照片数（取消会删记录，所以剩下的都算）
+    @State private var coverCount: Int?
+    /// 看图器里点了封面按钮 → 回本页时刷新计数
+    private let coverChanged = NotificationCenter.default.publisher(for: .coverTaskDidChange)
 
     var body: some View {
         PhotoGrid(
@@ -475,6 +479,22 @@ struct AlbumPhotosView: View {
         .ignoresSafeArea(edges: .bottom)
         .navigationTitle(album.title)
         .navigationBarTitleDisplayMode(.inline)
+        // 顶栏右侧：本相册的封面生成数量。格式对齐相册列表页的计数规范
+        //（caption.monospacedDigit + 次级灰 + fixedSize + 固定槽位）
+        .toolbar {
+            TrailingToolsItem {
+                if let n = coverCount {
+                    Text("封面 \(n)")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        // ⚠️ 不加 fixedSize：工具栏空间紧张时会被压缩换行，撑高导航栏
+                        .fixedSize(horizontal: true, vertical: false)
+                        .lineLimit(1)
+                        .frame(minWidth: ToolbarMetrics.countMinWidth, alignment: .trailing)
+                        .padding(.leading, ToolbarMetrics.countGap)
+                }
+            }
+        }
         .overlay {
             if photos.isEmpty {
                 if let errorMessage {
@@ -484,7 +504,14 @@ struct AlbumPhotosView: View {
                 }
             }
         }
-        .task { await loadMore() }
+        .task {
+            await loadMore()
+            await loadCoverCount()
+        }
+        // 看图器里加入/取消封面后回到本页，计数要跟着变
+        .onReceive(coverChanged) { _ in
+            Task { await loadCoverCount() }
+        }
         // ⚠️ 每个 tab / 每个 push 进来的页面都要自己垫一层背景：
         // NavigationStack 只渲染栈顶那一层，App 根的背景透不进来。
         // 缺了它，退出看图器（fullScreenCover）时露出的是一片白底。
@@ -504,4 +531,21 @@ struct AlbumPhotosView: View {
             errorMessage = "加载照片失败 · \(((error as? LocalizedError)?.errorDescription) ?? error.localizedDescription)"
         }
     }
+
+    /// 拉取本相册的封面任务数。失败时保持 nil（顶栏不显示这一项），
+    /// 不显示一个错误的 0 —— 「0 张」和「没查到」是两回事。
+    @MainActor
+    private func loadCoverCount() async {
+        guard let client = AppSession.shared.client else { return }
+        do {
+            coverCount = try await client.fetchCoverTaskCount(albumId: album.id).total
+        } catch {
+            coverCount = nil
+        }
+    }
+}
+
+extension Notification.Name {
+    /// 封面生成队列发生变化（看图器里加入/取消）
+    static let coverTaskDidChange = Notification.Name("CoverTaskDidChange")
 }

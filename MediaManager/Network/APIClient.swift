@@ -717,6 +717,15 @@ final class APIClient: DataProviding, @unchecked Sendable {
         return resp.action
     }
 
+    /// 按相册统计封面任务数。GET /api/cover-tasks/count?album_id=123
+    /// total = 队列中所有记录（取消会删记录，所以剩下的都算）；generated = 其中已出图的。
+    func fetchCoverTaskCount(albumId: Int) async throws -> (total: Int, generated: Int) {
+        let resp: CoverTaskCountResponse = try await request("/api/cover-tasks/count", queryItems: [
+            URLQueryItem(name: "album_id", value: "\(albumId)"),
+        ])
+        return (resp.total, resp.generated)
+    }
+
     // MARK: - 行为层（播放进度）
 
     /// 上报播放位置。POST /api/actions/progress {type,id,position,duration}
@@ -784,6 +793,24 @@ private struct CoverTaskStatusResponse: Decodable {
 /// POST /api/cover-tasks/toggle 的响应：加入/取消后的动作
 private struct CoverTaskToggleResponse: Decodable {
     let action: String
+}
+
+/// GET /api/cover-tasks/count 的响应：某相册的封面任务数
+private struct CoverTaskCountResponse: Decodable {
+    let total: Int
+    let generated: Int
+
+    enum CodingKeys: String, CodingKey {
+        case total
+        case generated
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        // 缺字段按 0 处理，不让整包解码失败把顶栏数字打没了
+        total = (try? c.decode(Int.self, forKey: .total)) ?? 0
+        generated = (try? c.decode(Int.self, forKey: .generated)) ?? 0
+    }
 }
 
 /// /api/actions/list 的响应：items + total（分页列表要 total 才知道还有没有下一页）

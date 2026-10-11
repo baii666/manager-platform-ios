@@ -419,6 +419,8 @@ struct PhotoViewerView: View {
                 let action = try await client.toggleCoverTask(photoId: photo.id)
                 coverQueued = (action == "added")
                 coverGenerated = false
+                // 通知相册照片列表页刷新顶栏的封面计数
+                NotificationCenter.default.post(name: .coverTaskDidChange, object: nil)
                 showTip(action == "added" ? "已加入封面生成队列" : "已从封面生成队列移除")
             } catch {
                 showTip("封面队列操作失败")
