@@ -19,6 +19,8 @@ struct PhotoViewerView: View {
     // UI 显隐
     @State private var showUI = true
     @State private var showInfo = false
+    /// 详情卡片下滑关闭的跟手位移（自绘卡片没有系统的下滑手势，得自己接）
+    @State private var cardDrag: CGFloat = 0
     @State private var showThumbs = false
     @State private var tip: String?
 
@@ -129,19 +131,17 @@ struct PhotoViewerView: View {
             isClosing = false
             closingFade = 1
             scheduleIdleHide()
-            // 从「进入相册」返回：看图器是重建的，这里按 presenter 的标志把详情卡片原样弹回来。
-            // ⚠️ 必须顺手 loadDetail()：数据加载挂在信息按钮的 action 上（showInfo=true 旁边），
-            // 直接置 showInfo 只会弹出一张空卡片。
-            if presenter.consumeInfoCardRequest() {
-                showInfo = true
-                loadDetail()
-            }
         }
         .onDisappear { idleTask?.cancel(); tipTask?.cancel(); detailTask?.cancel() }
-        // 详情用 sheet 弹出：独立于 showUI（点图隐藏工具栏不影响），下滑关闭，
-        // 不再是之前那个跟随状态栏一起消失的底部面板。
-        .sheet(isPresented: $showInfo) {
-            if let photo { detailSheet(photo) }
+        // 详情卡片：看图器**内部**的自绘层，不用 .sheet。
+        // ⚠️ sheet 是独立 presentation，父视图的 opacity 管不到它：
+        // 「进入相册」时看图器为了露出相册页必须暂时隐藏，而 sheet 卡片不会跟着隐藏
+        //（还浮在相册页上面），只能 dismiss 掉 → 返回时再 present 一次，
+        // 于是就有了「卡片被重新弹出来」的怪现象。
+        // 自绘层跟父视图同一层级，一起隐藏、一起显示，@State 全保留 ——
+        // 返回时卡片本来就在那儿，和系统导航「返回直接露出上一页」一样。
+        .overlay {
+            if showInfo, let photo { detailCard(photo) }
         }
     }
 
@@ -559,14 +559,12 @@ struct PhotoViewerView: View {
         }
     }
 
-    /// 进入所在相册：**挂起**看图器（不销毁）+ 让 RootView push 相册页。
-    /// 相册页返回后看图器原样恢复，详情卡片也重新弹出 —— 之前是直接关掉看图器，
-    /// 返回就退到了打开看图器之前的照片流，详情卡片丢了。
+    /// 进入所在相册：在看图器**之上**压一层相册页（看图器与详情卡片都不动），
+    /// 返回时撤掉那层就是详情卡片 —— 不是「关掉看图器再重建」。
     private func openInAlbum(_ albumRef: PhotoDetail.AlbumRef, libID: Int) {
         var album = Album(id: albumRef.id)
         album.folderName = albumRef.folderName ?? ""
-        PhotoViewerPresenter.shared.openAlbum(album, libID: libID, infoCardOpen: showInfo)
-        showInfo = false
+        presenter.openAlbum(album, libID: libID)
     }
 
     /// 点击相似图查看：全屏蒙层左右翻阅整组相似图，定位到所点那张。
@@ -575,10 +573,39 @@ struct PhotoViewerView: View {
         similarOverlay = (photos: similarPhotos, index: idx)
     }
 
-    private func detailSheet(_ photo: Photo) -> some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
+    /// 关详情卡片（统一带动画 + 复位跟手位移）
+    private func closeDetailCard() {
+        withAnimation(.easeOut(duration: 0.22)) {
+            showInfo = false
+            cardDrag = 0
+        }
+    }
+
+    /// 详情卡片（自绘层，从底部升起，可下滑关闭）
+    private func detailCard(_ photo: Photo) -> some View {
+        GeometryReader { geo in
+            ZStack(alignment: .bottom) {
+                // 遮罩：点空白关闭
+                Color.black.opacity(0.35)
+                    .ignoresSafeArea()
+                    .onTapGesture { closeDetailCard() }
+                    .transition(.opacity)
+
+                VStack(spacing: 0) {
+                    // 自绘头部（原来靠 NavigationStack 的 navigationTitle + toolbar，
+                    // 自绘层没有导航栏，标题和「完成」得自己摆）
+                    HStack {
+                        Text("图片详情")
+                            .font(.headline)
+                        Spacer()
+                        Button("完成") { closeDetailCard() }
+                            .font(.subheadline.weight(.semibold))
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    Divider()
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 16) {
                     // 语义相似图片（打开详情即加载，无需按钮）
                     sectionTitle("语义相似图片")
                     similarSection
@@ -697,17 +724,37 @@ struct PhotoViewerView: View {
                     }
                 }
                 .padding(16)
-            }
-            .navigationTitle("图片详情")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("完成") { showInfo = false }
-                }
-            }
-        }
-        // 相似图蒙层：挂在详情 sheet 内容内部的全屏覆盖（fullScreenCover 会在 sheet 之上
-        // 全屏呈现，不与 body 的 sheet 冲突），左右滑动放大翻阅整组相似图，关闭回卡片。
+            }       // ScrollView
+            }       // 卡片 VStack
+            .frame(width: geo.size.width, height: geo.size.height * 0.72)
+            // 系统色背景：深色模式自动跟系统（原来是 sheet，背景由系统给）
+            .background(Color(uiColor: .systemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            // 从底部升起（对齐原来 sheet 的进出场）
+            .transition(.move(edge: .bottom))
+            // 下滑关闭（对齐 sheet 的手感）
+            .offset(y: cardDrag)
+            .gesture(
+                DragGesture()
+                    .onChanged { v in
+                        // 只认向下拖（向上拖不动，避免和 ScrollView 抢手势）
+                        cardDrag = max(0, v.translation.height)
+                    }
+                    .onEnded { v in
+                        if v.translation.height > 110 {
+                            closeDetailCard()
+                        } else {
+                            withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+                                cardDrag = 0
+                            }
+                        }
+                    }
+            )
+            }   // ZStack
+        }       // GeometryReader
+        // 相似图蒙层：全屏覆盖，左右滑动放大翻阅整组相似图，关闭回详情卡片。
+        // ⚠️ 现在详情卡片是自绘层（不再是 sheet），fullScreenCover 挂在 body 上也不会
+        // 出现「sheet 已 present、cover 被系统忽略」那个冲突。
         .fullScreenCover(isPresented: Binding(
             get: { similarOverlay != nil },
             set: { if !$0 { similarOverlay = nil } }
@@ -846,7 +893,7 @@ struct PhotoViewerView: View {
                     scheduleIdleHide()
                 }
                 toolButton("info.circle") {
-                    showInfo = true
+                    withAnimation(.easeOut(duration: 0.22)) { showInfo = true }
                     loadDetail()
                 }
                 toolButton(isFavorite ? "heart.fill" : "heart", active: isFavorite, tint: .red) {
@@ -1231,3 +1278,4 @@ private struct SimilarPhotoPage: View {
         }
     }
 }
+
