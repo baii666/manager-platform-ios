@@ -193,8 +193,14 @@ enum CardSizePrefs {
 /// 电影、相册列表页各持有一个实例，逻辑完全一致。
 final class CardLayoutController: ObservableObject {
     /// 卡片宽度低于该值时进入「小卡片」模式（只显示封面、标题叠进封面底部渐变）。
+    ///
+    /// 150 太低了：竖版缩到 150 宽（封面才 225 高）时下方标题区还在，
+    /// 15pt 的标题相对卡片就显大。提到 190 —— 再小的卡片一律走内嵌标题。
+    ///
     /// ⚠️ 所有方向的 range 下限都必须低于此值，否则缩到最小也进不了小卡片。
-    static let compactThreshold: CGFloat = 150
+    /// ⚠️ 已存进 UserDefaults 的卡片宽度不受影响：用户原来存了 150，
+    /// 提高阈值后他会直接看到小卡片模式 —— 这正是「缩很小就该隐藏」的预期。
+    static let compactThreshold: CGFloat = 190
 
     /// UserDefaults key 前缀（如 "mediaList" / "albumList"）
     private let baseKey: String

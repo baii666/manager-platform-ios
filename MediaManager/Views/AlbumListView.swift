@@ -372,7 +372,7 @@ struct AlbumCard: View {
                     }
                 }
 
-                // 小卡片：底部渐变条 + 标题（对齐网页版 <150px 的悬浮渐变标题，iOS 无 hover 故常驻）
+                // 小卡片：底部渐变条 + 标题（对齐网页版的悬浮渐变标题，iOS 无 hover 故常驻）
                 if !showInfo {
                     LinearGradient(colors: [.clear, .black.opacity(0.72)], startPoint: .top, endPoint: .bottom)
                         .frame(height: coverHeight * 0.55)
