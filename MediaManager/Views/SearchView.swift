@@ -119,11 +119,15 @@ struct SearchView: View {
     var body: some View {
         VStack(spacing: 0) {
             content
-            // ⚠️ 底部必须垫一个 Spacer：历史记录/空态这种内容不满一屏时，
+            // ⚠️ 底部要垫一个 Spacer：历史记录/空态这种内容不满一屏时，
             // VStack 只占内容自身高度，会被 NavigationStack 垂直居中——
             // 内容跑到屏幕中间，上方一大块空白（iPad 上尤其明显）。
             // Spacer 撑满剩余高度，让内容始终靠顶。
-            Spacer(minLength: 0)
+            //
+            // ⚠️ 但瀑布流那两页（照片 / 语义）**不能垫**：它们自己就是撑满全屏的
+            // 滚动容器，Spacer 会和 GeometryReader 平分剩余高度 → 网格只剩半屏，
+            // 看着就像「滑不动」。
+            if !fillsScreen { Spacer(minLength: 0) }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         // ⚠️ 不设 navigationTitle：顶栏被搜索框占满（和三个列表页同一套规范），
@@ -212,6 +216,13 @@ struct SearchView: View {
         .navigationDestination(item: $movieTarget) { MediaDetailView(media: $0) }
         .navigationDestination(item: $albumTarget) { AlbumPhotosView(album: $0, libID: albumLibID) }
         .navigationDestination(item: $shootTarget) { ShootDetailView(shoot: $0) }
+    }
+
+    /// 当前结果区是不是**自己撑满全屏的滚动容器**（瀑布流）。
+    /// 是的话外层不能再垫 Spacer —— 那会分走一半高度，网格只剩半屏。
+    private var fillsScreen: Bool {
+        guard !activeQuery.isEmpty, errorMessage == nil else { return false }
+        return isSemantic || selectedTab == .photo
     }
 
     // MARK: 搜索框（在顶栏里，见 body 的 .toolbar）
@@ -468,11 +479,13 @@ struct SearchView: View {
         }
     }
 
-    /// 单类型：照片走瀑布流（复用相册内照片页的 PhotoGrid），其余走各自列表页的卡片组件
+    /// 单类型：照片走瀑布流（复用相册内照片页的 PhotoGrid），其余走各自列表页的卡片组件。
+    /// ⚠️ 照片分类下**不再挂语义横幅**：语义已经是独立的 tab 了，
+    /// 照片 tab 就该只有关键词命中的照片（它和语义 tab 是互斥的两个视图）
     @ViewBuilder
     private var flatResults: some View {
         if selectedTab == .photo {
-            photoResults
+            photoGrid(keywordPhotos)
         } else {
             cardResults
         }
@@ -511,77 +524,10 @@ struct SearchView: View {
                       columns: photoColumns(width: geo.size.width),
                       onSelect: { openViewer(photos: viewerPhotos, id: $0.id) },
                       onReachEnd: { Task { await loadMore() } })
-                .frame(width: geo.size.width, height: geo.size.height)
-        }
-    }
-
-    /// 照片分类下同样**分两段**：关键词命中（瀑布流）在上，
-    /// 语义匹配（下面一行横滑）放最后 —— 它异步回来得慢，不挡主结果。
-    private var photoResults: some View {
-        let photos = keywordPhotos
-        let semantic = semanticPhotos
-        let showSemantic = !semantic.isEmpty || isSemanticLoading
-        return GeometryReader { geo in
-            VStack(spacing: 0) {
-                // 瀑布流：高度要扣掉下面语义段占的那一条
-                photoGrid(photos)
-                    .frame(width: geo.size.width,
-                           height: max(geo.size.height - (showSemantic ? Self.semanticStripHeight : 0), 200))
-                if showSemantic {
-                    semanticStrip(semantic)
-                        .frame(height: Self.semanticStripHeight)
-                }
-            }
-        }
-    }
-
-    /// 照片分类里语义段占的高度（分隔线 + 标题 + 缩略图一行）。
-    /// ⚠️ 瀑布流要减掉它，否则整个 VStack 会超出屏幕一截
-    private static let semanticStripHeight: CGFloat = 190
-
-    /// 语义段：与「全部」里那个语义分组同款（sparkles 标题 + 横滑缩略图 + 相似度角标）。
-    /// 结果还没回来时显示「匹配中」占位 —— 它慢，但位置先占住，不会突然插进来把页面顶一下
-    private func semanticStrip(_ photos: [Photo]) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Divider()
-            HStack(spacing: 6) {
-                Image(systemName: "sparkles")
-                    .font(.caption)
-                    .foregroundStyle(Color.purple)
-                Text("语义匹配")
-                    .font(.subheadline.weight(.semibold))
-                if photos.isEmpty {
-                    ProgressView().controlSize(.small)
-                } else {
-                    Text("\(photos.count)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-            }
-            .padding(.horizontal, 16)
-            if photos.isEmpty {
-                HStack(spacing: 8) {
-                    ProgressView().controlSize(.small)
-                    Text("正在按画面内容匹配…")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                .frame(height: Self.previewCardWidth)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 16)
-            } else {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    LazyHStack(spacing: 12) {
-                        ForEach(photos) { p in
-                            SearchPhotoThumb(photo: p, size: Self.previewCardWidth) {
-                                openViewer(photos: viewerPhotos, id: p.id)
-                            }
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                }
-            }
+                // ⚠️ 底部扣掉底栏高度：网格不是 ScrollView，没有 safeArea 避让，
+                // 不扣的话滑到底最后一行会被底栏盖住
+                .frame(width: geo.size.width,
+                       height: max(geo.size.height - BottomTabBar.height, 200))
         }
     }
 
@@ -831,6 +777,8 @@ struct SearchView: View {
 
     @MainActor
     private func loadMore() async {
+        // 语义视图没有关键词结果，翻页走它自己那条链路（按 offset 取下一批语义照片）
+        if isSemantic { await loadMoreSemantic(); return }
         // 和 reload 同理：把这次翻页针对的词定格，回来时比对才知道结果还有没有效
         let token = activeQuery
         guard let client, hasMore, !token.isEmpty else { return }
@@ -877,17 +825,22 @@ struct SearchView: View {
     ///   绝不能让语义不可用把关键词搜索的结果也拖没了。
     @MainActor
     private func startSemantic(token: String) {
-        // ⚠️ 括号不能省：&& 优先级高于 ||，而且 guard let 绑定不能只出现在 || 的一侧
-        guard let client, (isSemantic || selectedTab == .all || selectedTab == .photo) else { return }
+        // ⚠️ 括号不能省：&& 优先级高于 ||，而且 guard let 绑定不能只出现在 || 的一侧。
+        // ⚠️ 只有「全部」（最后那组语义）和语义视图才打语义请求：
+        // 照片 tab 已经不展示语义了，打了也是白打
+        guard let client, (isSemantic || selectedTab == .all) else { return }
         semanticTask?.cancel()
         isSemanticLoading = true
         semanticTask = Task { @MainActor in
-            // 语义视图 / 照片分类取满一页；「全部」只是总览，少取一点免得这一组一家独大
-            let limit = (isSemantic || selectedTab != .all) ? pageSize : 12
+            // 语义视图取满一页（它要能往下翻）；「全部」只是总览，少取一点免得这一组一家独大
+            let limit = isSemantic ? pageSize : 12
             // ⚠️ 用 var + 初值：do/catch 两个分支都给 let 赋值，编译器会判「初始化两次」
             var items: [SearchItem] = []
+            // 语义响应自己的总匹配数（语义视图下要靠它判断还能不能往下翻）
+            var total = 0
             do {
                 let p = try await client.semanticSearch(query: token, limit: limit, offset: 0)
+                total = p.total
                 var map = similarity
                 for r in p.results { map[r.id] = r.similarity ?? 0 }
                 similarity = map
@@ -915,7 +868,50 @@ struct SearchView: View {
                 added.append(item)
             }
             semanticItems = added
-            resultTotal = keywordTotal + added.count
+            resultTotal = isSemantic ? total : keywordTotal + added.count
+            // 语义视图要能往下翻：这一页没取完（且确实取到了东西）才留 hasMore。
+            // ⚠️ reload 里先把 hasMore 设成了 false（语义视图不打关键词请求），
+            // 真正的判断只能等语义响应回来
+            if isSemantic { hasMore = !added.isEmpty && added.count < total }
+        }
+    }
+
+    /// 语义视图的翻页：和关键词那套一样按 offset 翻，追加到语义结果后面。
+    /// ⚠️ 之前语义只取一批就停了，滑到底没反应 —— 那就是「语义 tab 滑不动」的由来
+    @MainActor
+    private func loadMoreSemantic() async {
+        let token = activeQuery
+        guard let client, hasMore, !token.isEmpty else { return }
+        // 同一个词的重复触底要互斥；loadingToken 和关键词那套复用（两个视图互斥，
+        // 不会同时在跑）
+        guard !(isSemanticLoading && loadingToken == token) else { return }
+        isSemanticLoading = true
+        loadingToken = token
+        defer { if loadingToken == token { isSemanticLoading = false } }
+        do {
+            let p = try await client.semanticSearch(query: token, limit: pageSize,
+                                                    offset: semanticItems.count)
+            guard !Task.isCancelled, token == activeQuery else { return }
+            var map = similarity
+            for r in p.results { map[r.id] = r.similarity ?? 0 }
+            similarity = map
+            // 去重：offset 分页可能因为排序/新增出现重复
+            var seen = Set(semanticItems.map { "\($0.type)-\($0.id)" })
+            var added: [SearchItem] = []
+            for var item in p.results.map({ makeSearchItem($0) }) {
+                let key = "\(item.type)-\(item.id)"
+                guard !seen.contains(key) else { continue }
+                seen.insert(key)
+                item.semanticHit = true
+                added.append(item)
+            }
+            semanticItems.append(contentsOf: added)
+            resultTotal = p.total
+            hasMore = !added.isEmpty && semanticItems.count < p.total
+        } catch {
+            guard !Task.isCancelled, token == activeQuery else { return }
+            // 静默：翻页失败就当作没有更多，不要把整页结果变成错误态
+            hasMore = false
         }
     }
 
