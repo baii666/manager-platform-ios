@@ -465,6 +465,10 @@ struct AlbumPhotosView: View {
             }
         }
         .task { await loadMore() }
+        // ⚠️ 每个 tab / 每个 push 进来的页面都要自己垫一层背景：
+        // NavigationStack 只渲染栈顶那一层，App 根的背景透不进来。
+        // 缺了它，退出看图器（fullScreenCover）时露出的是一片白底。
+        .appBackground()
         .fullScreenCover(isPresented: Binding(
             get: { selectedIndex != nil },
             set: { if !$0 { selectedIndex = nil } }

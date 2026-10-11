@@ -267,6 +267,11 @@ struct PhotoViewerView: View {
     }
 
     private var backgroundOpacity: Double {
+        // ⚠️ 已确定关闭（isClosing）时背景恢复纯黑，不要再渐隐露底：
+        // 图片飞出后到 cover 真正 dismiss 之间还有 0.34s，这期间露底会先看到
+        // 下面页面 —— 就是用户说的「退出时先闪大白屏」。
+        // 跟手拖拽阶段（isClosing = false）仍然正常渐隐，保留下拉关闭的手感。
+        if isClosing { return 1 }
         guard dismissY != 0 else { return 1 }
         return max(CGFloat(0.15), CGFloat(1) - abs(dismissY) / CGFloat(900))
     }
