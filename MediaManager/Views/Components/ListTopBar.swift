@@ -41,52 +41,6 @@ struct ListSearchBar: View {
     }
 }
 
-// MARK: - 导航栏返回按钮（替代系统样式）
-// 系统 back button 的样式基本不可调：颜色跟 tint 走、文案自动变成上一层的标题
-//（库名一长就又挤又笨）。这里换成自定义按钮，想怎么调都行 ——
-// 下面四个常量就是全部可调项，改一处三个列表页同时生效。
-//
-// ⚠️ 点击只调 dismiss()，转场仍然是系统的 pop（露出真实上一层 + 视差），
-// 跟系统按钮走的是同一条转场，不会退化成白屏。
-struct NavBackButton: View {
-    @Environment(\.dismiss) private var dismiss
-
-    /// 箭头后面的文字。nil = 只显示箭头（最紧凑，推荐）
-    var title: String? = nil
-
-    // ↓↓↓ 样式都在这里调 ↓↓↓
-    private let symbolSize: CGFloat = 17        // 箭头大小
-    private let symbolWeight: Font.Weight = .semibold  // 箭头粗细（.medium 更秀气）
-    private let tint: Color = Theme.brand       // 颜色（换成 .primary 就是系统黑/白）
-    private let showsCircle: Bool = false       // true = 给箭头加个浅色圆底
-
-    var body: some View {
-        Button {
-            dismiss()
-        } label: {
-            HStack(spacing: 1) {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: symbolSize, weight: symbolWeight))
-                if let title {
-                    Text(title)
-                        .font(.system(size: 16))
-                }
-            }
-            .foregroundStyle(tint)
-            .padding(.horizontal, showsCircle ? 7 : 4)
-            .padding(.vertical, showsCircle ? 5 : 2)
-            .background {
-                if showsCircle {
-                    Circle().fill(tint.opacity(0.12))
-                }
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("返回")
-    }
-}
-
 /// 胶囊工具按钮：图标 + 文字；高亮态用品牌色浅底
 struct ToolChip: View {
     let label: String

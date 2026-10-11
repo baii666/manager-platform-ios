@@ -62,18 +62,15 @@ struct ShootListView: View {
         // ⚠️ 导航栏必须保持可见（隐藏会让系统右滑返回失效，而 NavigationStack
         // push 后不渲染下一层，自定义手势只能推出白屏）。搜索框放 principal 位，
         // 导航栏因而不额外占高度，系统返回按钮正好在搜索框左边。
+        // ⚠️ 系统返回按钮必须留着：藏了它右滑手势会一起没（见 MediaListView 注释）
         .toolbar {
-            // 系统 back button 换成自定义的（样式可调），位置仍在搜索框左边
-            ToolbarItem(placement: .topBarLeading) {
-                NavBackButton()
-            }
             ToolbarItem(placement: .principal) {
                 ListSearchBar(text: $viewModel.searchText,
                               placeholder: "搜索拍摄集…",
                               compact: true)
             }
         }
-        .navigationBarBackButtonHidden(true)
+        .tint(Theme.brand)
         .navigationBarTitleDisplayMode(.inline)
         // 下拉刷新
         .refreshable { await viewModel.refresh() }

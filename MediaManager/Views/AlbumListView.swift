@@ -242,21 +242,16 @@ struct AlbumListView: View {
         // 不额外占高度。固定库模式下系统返回按钮自动出现在搜索框左边；
         // 跨库模式（首页 sheet 入口）是栈底没有上一层，系统不会给返回按钮，
         // sheet 的「完成」按钮由外层 HomeView 的 confirmationAction 提供。
+        // ⚠️ 系统返回按钮必须留着：藏了它右滑手势会一起没（见 MediaListView 注释）。
+        // 跨库模式是栈底没有上一层，系统不会给返回按钮。
         .toolbar {
-            // 固定库模式：系统 back button 换成自定义的（样式可调），位置仍在搜索框左边。
-            // 跨库模式是栈底没有上一层，不给返回按钮。
-            if library != nil {
-                ToolbarItem(placement: .topBarLeading) {
-                    NavBackButton()
-                }
-            }
             ToolbarItem(placement: .principal) {
                 ListSearchBar(text: $viewModel.searchText,
                               placeholder: "搜索相册名…",
                               compact: true)
             }
         }
-        .navigationBarBackButtonHidden(library != nil)
+        .tint(Theme.brand)
         .navigationBarTitleDisplayMode(.inline)
         // 下拉刷新
         .refreshable { await viewModel.refresh() }

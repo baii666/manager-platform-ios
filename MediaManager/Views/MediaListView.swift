@@ -242,18 +242,18 @@ struct MediaListView: View {
         // NavigationStack 在 push 之后不再渲染下一层 —— 任何自定义手势都只能推出
         // 一片空白（右滑到一半是白屏）。导航栏可见时系统手势和系统 pop 转场
         // 都由 UINavigationController 接管，效果与电影详情页返回列表完全一致。
+        // ⚠️ 系统返回按钮必须留着：它和右滑返回手势是绑定的，
+        // .navigationBarBackButtonHidden(true) 会把 interactivePop 一起禁掉，
+        // 而且没有任何可靠手段能单独把手势取回来（自定义位移会白屏，
+        // UIKit 桥接在这个场景下也接管不了转场）。样式只能走 tint / appearance。
         .toolbar {
-            // 系统 back button 换成自定义的（样式可调），位置仍在搜索框左边
-            ToolbarItem(placement: .topBarLeading) {
-                NavBackButton()
-            }
             ToolbarItem(placement: .principal) {
                 ListSearchBar(text: $viewModel.searchText,
                               placeholder: "搜索标题、演员、类型…",
                               compact: true)
             }
         }
-        .navigationBarBackButtonHidden(true)
+        .tint(Theme.brand)
         .navigationBarTitleDisplayMode(.inline)
         // 下拉刷新
         .refreshable { await viewModel.refresh() }
