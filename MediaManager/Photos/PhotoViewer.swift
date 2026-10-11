@@ -33,6 +33,9 @@ struct PhotoViewerView: View {
     @State private var trackOffset: CGFloat = 0
     @State private var dismissY: CGFloat = 0
     @State private var isClosing = false
+    /// 关闭阶段整层的淡出系数：退出时看图器（含黑底）整体淡掉，
+    /// 屏幕直接交还给上一级页面（照片网格），而不是让 cover 整层滑走。
+    @State private var closingFade: Double = 1
 
     // 1:1 需要「图片像素尺寸」与「容器尺寸」
     @State private var imagePixelSize: CGSize?
@@ -92,8 +95,13 @@ struct PhotoViewerView: View {
         // 图片真正铺满整屏；顶栏/底栏用 safeAreaInsets 手动避让。
         .ignoresSafeArea()
         .statusBarHidden(true)
+        // ⚠️ 关闭时整层淡出（见 close(after:)）：图片飞出/原地 + 全层透明，
+        // cover 真正 dismiss 时已经看不见，屏幕直接是上一级页面 —— 退出才丝滑
+        .opacity(closingFade)
         .task(id: index) { await didChangeIndex() }
-        .onAppear { scheduleIdleHide() }
+        // 保险：视图复用（同一 index 再次打开）时把上一次的关闭态清掉，
+        // 否则 closingFade 还停在 0，重新打开就是一片空白
+        .onAppear { isClosing = false; closingFade = 1; scheduleIdleHide() }
         .onDisappear { idleTask?.cancel(); tipTask?.cancel() }
     }
 
@@ -262,18 +270,24 @@ struct PhotoViewerView: View {
     private func close(after dy: CGFloat = 0) {
         guard !isClosing else { return }
         isClosing = true
-        withAnimation(.easeOut(duration: 0.32)) { dismissY = dy > 0 ? 1600 : -1600 }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.34) { onClose() }
+        withAnimation(.easeOut(duration: 0.25)) {
+            // dy == 0 = 点关闭按钮（不是手势）：图片原地不动，整层淡出即可。
+            // 只有手势方向明确时才让图片顺着那个方向飞出去。
+            if dy != 0 { dismissY = dy > 0 ? 1600 : -1600 }
+            // 整层淡到 0：cover 真正 dismiss 时已经完全透明，
+            // 屏幕上看到的就是上一级页面 —— 不会再出现「先黑/先白再跳一下」
+            closingFade = 0
+        }
+        // 淡出动画走完（0.25s）再让 cover 消失：此时整层已透明，
+        // 系统那一下 dismiss 就看不到了，屏幕上一直是上一级页面
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.27) { onClose() }
     }
 
     private var backgroundOpacity: Double {
-        // ⚠️ 已确定关闭（isClosing）时背景恢复纯黑，不要再渐隐露底：
-        // 图片飞出后到 cover 真正 dismiss 之间还有 0.34s，这期间露底会先看到
-        // 下面页面 —— 就是用户说的「退出时先闪大白屏」。
-        // 跟手拖拽阶段（isClosing = false）仍然正常渐隐，保留下拉关闭的手感。
-        if isClosing { return 1 }
         guard dismissY != 0 else { return 1 }
-        return max(CGFloat(0.15), CGFloat(1) - abs(dismissY) / CGFloat(900))
+        // 跟手下拉：黑底随位移渐隐，直接露出上一级页面（照片网格）。
+        // 退出的背景就该是上一级页面本身，所以允许一路淡到 0（不再保留 0.15 底）。
+        return max(CGFloat(0), CGFloat(1) - abs(dismissY) / CGFloat(900))
     }
 
     @MainActor
