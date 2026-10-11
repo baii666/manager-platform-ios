@@ -413,7 +413,7 @@ struct AlbumCard: View {
             }
         }
         .frame(width: width)
-        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .appSurface(in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .stroke(Color(uiColor: .separator).opacity(0.6), lineWidth: 0.5)

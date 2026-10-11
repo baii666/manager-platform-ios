@@ -25,6 +25,6 @@ struct SearchResultsView: View {
                 }
             }
         }
-        .background(Color(uiColor: .systemBackground))
+        .appBackground()
     }
 }

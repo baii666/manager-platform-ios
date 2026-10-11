@@ -295,7 +295,7 @@ private struct ShortCard: View {
             // 只要高度有任何变化（图片加载完成、列宽重算）都不会重排 → 卡片压在一起
             .frame(height: cardHeight, alignment: .top)
             .clipped()
-            .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .appSurface(in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(.separator))
         }
         .buttonStyle(.plain)

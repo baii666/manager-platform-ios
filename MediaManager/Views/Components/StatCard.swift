@@ -42,10 +42,7 @@ struct StatCard: View {
             Spacer(minLength: 0)
         }
         .padding(12)
-        .background(
-            Color(uiColor: .secondarySystemBackground),
-            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
-        )
+        .appSurface(in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     /// 3,126,174 → "312.6万"，13,707 → "1.4万"，2315 保持原样

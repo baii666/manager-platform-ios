@@ -85,6 +85,6 @@ struct LoginView: View {
             }
         }
         .padding(12)
-        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .appSurface(in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }

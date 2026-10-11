@@ -117,7 +117,12 @@ final class PhotoCell: UICollectionViewCell {
         super.init(frame: frame)
         contentView.layer.cornerRadius = 10
         contentView.layer.masksToBounds = true
-        contentView.backgroundColor = .secondarySystemBackground
+        // ⚠️ 设了全局背景图时必须透底：这是 UIKit 的 cell，不透明底色会把
+        // 背景图挡死，整个照片网格变成一块块实心灰砖（SwiftUI 侧全是毛玻璃）。
+        // cell 重用时会被再次调用，外观切换后滚动一下即刷新。
+        contentView.backgroundColor = AppearanceSettings.shared.hasBackground
+            ? .clear
+            : .secondarySystemBackground
 
         // 格子高度会按「图片真实尺寸」重排对齐，所以这里填满也不会裁到内容
         imageView.contentMode = .scaleAspectFill

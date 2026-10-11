@@ -121,10 +121,7 @@ struct MineView: View {
         }
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            Color(uiColor: .secondarySystemBackground),
-            in: RoundedRectangle(cornerRadius: 20, style: .continuous)
-        )
+        .appSurface(in: RoundedRectangle(cornerRadius: 20, style: .continuous))
     }
 
     private var displayName: String {
@@ -250,10 +247,7 @@ struct MineView: View {
                 }
                 .buttonStyle(.plain)
             }
-            .background(
-                Color(uiColor: .secondarySystemBackground),
-                in: RoundedRectangle(cornerRadius: 14, style: .continuous)
-            )
+            .appSurface(in: RoundedRectangle(cornerRadius: 14, style: .continuous))
 
             Button(role: .destructive) {
                 confirmingLogout = true
@@ -375,7 +369,7 @@ struct ActionAssetListView: View {
                 }
             }
         }
-        .background(Color(uiColor: .systemBackground))
+        .appBackground()
         .navigationTitle(route.title)
         .navigationBarTitleDisplayMode(.inline)
         .task { await viewModel.loadIfNeeded() }

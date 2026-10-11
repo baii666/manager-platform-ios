@@ -308,7 +308,7 @@ struct ShootCard: View {
                 }
                 .padding(10)
             }
-            .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .appSurface(in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(.separator))
         }
         .buttonStyle(.plain)

@@ -36,8 +36,7 @@ struct ListSearchBar: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, compact ? 6 : 9)
-        .background(Color(uiColor: .secondarySystemBackground),
-                    in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+        .appSurface(in: RoundedRectangle(cornerRadius: 11, style: .continuous))
     }
 }
 

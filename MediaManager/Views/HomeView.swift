@@ -133,7 +133,7 @@ struct HomeView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(24)
-        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .appSurface(in: RoundedRectangle(cornerRadius: 20, style: .continuous))
     }
 
     // MARK: 继续观看 / 我的收藏 / 观看记录

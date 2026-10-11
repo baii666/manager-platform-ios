@@ -37,3 +37,35 @@ extension View {
         background { AppBackgroundView() }
     }
 }
+
+// MARK: - 毛玻璃面板
+// 对齐网页版「图片背景主题」的效果：背景图全程透出，
+// 卡片 / 搜索框 / 设置分组等面板全部换成半透明毛玻璃压在图上，
+// 而不是把图压得很暗再叠不透明卡片。
+//
+// ⚠️ 没设背景图时仍回退原来的 secondarySystemBackground，
+// 所以把页面里原来的 background(Color, in: 形状) 换成 appSurface(in: 形状)
+// 不改变纯色主题下的任何观感。
+struct AppSurfaceShape<S: Shape>: View {
+    var shape: S
+    @ObservedObject private var appearance = AppearanceSettings.shared
+
+    var body: some View {
+        Group {
+            if appearance.hasBackground {
+                // ultraThinMaterial：最透的毛玻璃，图能透出来又有足够对比度托住文字
+                shape.fill(.ultraThinMaterial)
+            } else {
+                shape.fill(Color(uiColor: .secondarySystemBackground))
+            }
+        }
+    }
+}
+
+extension View {
+    /// 面板底：设了背景图 → 毛玻璃；没设 → secondarySystemBackground。
+    /// 用法与 `.background(Color(...), in: 形状)` 一一对应，直接替换。
+    func appSurface<S: Shape>(in shape: S) -> some View {
+        background { AppSurfaceShape(shape: shape) }
+    }
+}

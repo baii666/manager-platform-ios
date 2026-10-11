@@ -166,10 +166,7 @@ struct AppearanceView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            Color(uiColor: .secondarySystemBackground),
-            in: RoundedRectangle(cornerRadius: 16, style: .continuous)
-        )
+        .appSurface(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     // MARK: 选图

@@ -71,7 +71,9 @@ final class AppearanceSettings: ObservableObject {
         let raw = UserDefaults.standard.string(forKey: Keys.mode) ?? AppThemeMode.system.rawValue
         self.mode = AppThemeMode(rawValue: raw) ?? .system
         let saved = UserDefaults.standard.object(forKey: Keys.dim) as? Double
-        self.dim = saved ?? 0.35
+        // 默认压暗调低（0.35 → 0.22）：面板已全面毛玻璃化，文字可读性由面板保证，
+        // 图可以透得更亮（对齐网页版效果）。已存过设置的用户不受影响。
+        self.dim = saved ?? 0.22
         // 冷启动时同步读一次磁盘。图不大（几百 KB），主线程读不卡。
         self.backgroundImage = Self.loadImageFromDisk()
     }

@@ -49,7 +49,7 @@ struct SearchView: View {
                 }
             }
             .padding(.horizontal, 12).padding(.vertical, 9)
-            .background(Color(uiColor: .secondarySystemBackground), in: Capsule())
+            .appSurface(in: Capsule())
             .padding(.horizontal, 16).padding(.vertical, 10)
 
             // 分类 Tab + 计数
@@ -291,7 +291,7 @@ private struct SearchCard: View {
                 }
                 .padding(10)
             }
-            .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .appSurface(in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(.separator))
         }
         .buttonStyle(.plain)
