@@ -358,18 +358,24 @@ struct SearchView: View {
             VStack(alignment: .leading, spacing: 22) {
                 ForEach(sections) { section in
                     VStack(alignment: .leading, spacing: 10) {
-                        HStack {
+                        HStack(spacing: 6) {
+                            // 语义组加个 sparkles：一眼看出这组是「按画面匹配」的，
+                            // 不是按文件名/标题命中关键词的
+                            if section.isSemantic {
+                                Image(systemName: "sparkles")
+                                    .font(.caption)
+                                    .foregroundStyle(Color.purple)
+                            }
                             Text(section.title)
                                 .font(.headline)
-                            if let total = totals[section.type], total > 0 {
-                                Text("\(total)")
+                            if section.count > 0 {
+                                Text("\(section.count)")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
                             Spacer()
                             Button {
-                                // tv 不是 Tab 的 case，「剧集」分组的查看全部落到「影视」
-                                selectTab(section.type == "tv" ? .movie : (Tab(rawValue: section.type) ?? .all))
+                                selectTab(targetTab(section))
                             } label: {
                                 Text("查看全部").font(.caption)
                             }
@@ -382,7 +388,7 @@ struct SearchView: View {
                                     // 照片在浏览页是瀑布流（UIKit 组件），横滑预览里
                                     // 用同款圆角方块缩略图，观感保持一致
                                     if item.type == "photo" {
-                                        SearchPhotoThumb(photo: makePhoto(item)) { route(item) }
+                                        SearchPhotoThumb(photo: makeBadgedPhoto(item)) { route(item) }
                                     } else {
                                         resultCard(item, width: SearchView.previewCardWidth)
                                     }
@@ -398,8 +404,7 @@ struct SearchView: View {
         }
     }
 
-    /// 单类型 / 语义模式：
-    /// 照片走瀑布流（复用相册内照片页的 PhotoGrid），其余走各自列表页的卡片组件
+    /// 单类型：照片走瀑布流（复用相册内照片页的 PhotoGrid），其余走各自列表页的卡片组件
     @ViewBuilder
     private var flatResults: some View {
         if selectedTab == .photo {
@@ -411,27 +416,80 @@ struct SearchView: View {
 
     // MARK: 照片结果（复用 PhotoGrid 瀑布流）
 
-    /// 结果里的照片 → Photo（语义模式把相似度做成角标带进 cell）
-    private var viewerPhotos: [Photo] {
-        results.filter { $0.type == "photo" }.map { item in
-            var p = makePhoto(item)
-            // 语义匹配：让用户看得到「为什么是这张」
-            if let s = similarity[item.id] { p.badge = "\(Int(s * 100))%" }
-            return p
+    /// 结果里的照片 → Photo（语义命中把相似度做成角标带进 cell / 缩略图）
+    private func makeBadgedPhoto(_ item: SearchItem) -> Photo {
+        var p = makePhoto(item)
+        // 让用户看得到「为什么是这张」
+        if let s = similarity[item.id] { p.badge = "\(Int(s * 100))%" }
+        return p
+    }
+
+    /// 语义命中的照片。**单独一组**展示，不并进关键词命中的照片里
+    private var semanticPhotos: [Photo] {
+        results.filter { $0.semanticHit && $0.type == "photo" }.map { makeBadgedPhoto($0) }
+    }
+
+    /// 关键词命中的照片（已排除语义项，避免两组重复出现同一张）
+    private var keywordPhotos: [Photo] {
+        results.filter { $0.type == "photo" && !$0.semanticHit }.map { makeBadgedPhoto($0) }
+    }
+
+    /// 看图器的数据源：两类照片合起来，语义的排前面（与页面上的顺序一致）
+    private var viewerPhotos: [Photo] { semanticPhotos + keywordPhotos }
+
+    /// 照片分类下同样**分两段**：语义匹配（上面一行横滑）+ 关键词命中（下面瀑布流）。
+    /// ⚠️ PhotoGrid 是 UICollectionView，没有 intrinsicContentSize，
+    /// 必须由外层给定尺寸（GeometryReader 量剩下的空间），否则高度为 0
+    private var photoResults: some View {
+        let semantic = semanticPhotos
+        let photos = keywordPhotos
+        return GeometryReader { geo in
+            VStack(spacing: 0) {
+                if !semantic.isEmpty {
+                    semanticStrip(semantic)
+                        .frame(height: Self.semanticStripHeight)
+                }
+                PhotoGrid(photos: photos,
+                          columns: photoColumns(width: geo.size.width),
+                          onSelect: { openViewer(photos: viewerPhotos, id: $0.id) },
+                          onReachEnd: { Task { await loadMore() } })
+                    .frame(width: geo.size.width,
+                           height: max(geo.size.height - (semantic.isEmpty ? 0 : Self.semanticStripHeight), 200))
+            }
         }
     }
 
-    private var photoResults: some View {
-        let photos = viewerPhotos
-        // ⚠️ PhotoGrid 是 UICollectionView，没有 intrinsicContentSize，
-        // 必须由外层给定尺寸（GeometryReader 量剩下的空间），否则高度为 0
-        return GeometryReader { geo in
-            PhotoGrid(photos: photos,
-                      columns: photoColumns(width: geo.size.width),
-                      onSelect: { openViewer(photos: photos, id: $0.id) },
-                      onReachEnd: { Task { await loadMore() } })
-                .frame(width: geo.size.width, height: geo.size.height)
+    /// 照片分类里语义段占的高度（标题 + 缩略图一行）。
+    /// ⚠️ 瀑布流要减掉它，否则整个 VStack 会超出屏幕一截
+    private static let semanticStripHeight: CGFloat = 190
+
+    /// 语义段：与「全部」里那个语义分组同款（sparkles 标题 + 横滑缩略图 + 相似度角标）
+    private func semanticStrip(_ photos: [Photo]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "sparkles")
+                    .font(.caption)
+                    .foregroundStyle(Color.purple)
+                Text("语义匹配")
+                    .font(.subheadline.weight(.semibold))
+                Text("\(photos.count)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: 12) {
+                    ForEach(photos) { p in
+                        SearchPhotoThumb(photo: p, size: Self.previewCardWidth) {
+                            openViewer(photos: viewerPhotos, id: p.id)
+                        }
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
         }
+        .padding(.top, 8)
     }
 
     /// 列数随宽度走：窄屏 3 列，宽屏逐步加密（对齐相册照片页的观感）
@@ -518,7 +576,7 @@ struct SearchView: View {
             ShootCard(shoot: item.asShoot(), client: client) { route(item) }
         case "photo":
             // 兜底：单类型结果里混进照片时不留空白格
-            SearchPhotoThumb(photo: makePhoto(item), size: width) { route(item) }
+            SearchPhotoThumb(photo: makeBadgedPhoto(item), size: width) { route(item) }
         default:
             EmptyView()
         }
@@ -538,9 +596,15 @@ struct SearchView: View {
     private struct ResultSection: Identifiable {
         let type: String
         let items: [SearchItem]
+        /// 分组头右边的数字。
+        /// ⚠️ 语义组没有 /search/totals 的来源（后端不算它），用自己的条数
+        let count: Int
         var id: String { type }
+        /// 语义组：单独一项，不并入「照片」组（两者区别是命中方式，不是内容类型）
+        var isSemantic: Bool { type == "semantic" }
         var title: String {
             switch type {
+            case "semantic": return "语义匹配"
             case "movie": return "电影"
             case "tv": return "剧集"
             case "album": return "相册"
@@ -551,14 +615,29 @@ struct SearchView: View {
         }
     }
 
-    /// 把混合结果按类型归组（后端按请求顺序返回，顺序是乱的）
+    /// 分组头「查看全部」跳到哪个分类：
+    /// · 语义组 → 照片（语义只在照片上工作，展开就是照片那一类）
+    /// · tv 不是 Tab 的 case，「剧集」分组落到「影视」
+    private func targetTab(_ section: ResultSection) -> Tab {
+        if section.isSemantic { return .photo }
+        if section.type == "tv" { return .movie }
+        return Tab(rawValue: section.type) ?? .all
+    }
+
+    /// 把混合结果按类型归组（后端按请求顺序返回，顺序是乱的）。
+    /// ⚠️ 语义命中的照片**单独成一组**排最前：它们靠画面内容匹配上，
+    /// 混进「照片」组里用户分不清哪张是为什么出现的。
     private var sections: [ResultSection] {
-        let order = ["movie", "tv", "album", "photo", "shoot"]
+        let order = ["semantic", "movie", "tv", "album", "photo", "shoot"]
         var map: [String: [SearchItem]] = [:]
-        for item in results { map[item.type, default: []].append(item) }
+        for item in results {
+            let key = item.semanticHit ? "semantic" : item.type
+            map[key, default: []].append(item)
+        }
         return order.compactMap { t in
             guard let items = map[t], !items.isEmpty else { return nil }
-            return ResultSection(type: t, items: items)
+            let count = t == "semantic" ? items.count : (totals[t] ?? 0)
+            return ResultSection(type: t, items: items, count: count)
         }
     }
 
@@ -654,15 +733,17 @@ struct SearchView: View {
                 query: token, types: selectedTab.requestTypes, page: page, size: size)
             // 结果回来时词已经换了 / 任务被取消 → 整批丢弃，不能往列表里写
             guard !Task.isCancelled, token == activeQuery else { return }
-            // 语义匹配是**附加项**：只跟第一页一起取一次，合并进照片那一组。
+            // 语义匹配是**附加项**：只跟第一页一起取一次，单独成一组展示。
             // ⚠️ 不再走「语义模式」那条互斥分支 —— 那样一点语义按钮，
             // 影视/相册/拍摄集的结果就全没了（用户明确不要这个行为）。
+            // ⚠️ 也**不并入照片组**：两者命中方式不同，混在一起说不清哪张是靠画面匹配的。
             let semanticItems = await fetchSemantic(client: client, token: token, existing: p.items)
             guard !Task.isCancelled, token == activeQuery else { return }
             var items = p.items
             if page == 1 {
                 semanticAdded = semanticItems.count
-                // 语义命中的照片排前面：它们才是「按画面内容」匹配上的
+                // 语义项插在最前：分组展示时它们会被拎进独立的「语义匹配」组，
+                // 那一组排在「全部」页的第一位
                 items = semanticItems + items
             }
             if page == 1 { results = items } else { results.append(contentsOf: items) }
@@ -699,10 +780,12 @@ struct SearchView: View {
         // ⚠️ key 带 type：不同类型之间的 id 是各表自增的，会撞号
         var seen = Set(existing.map { "\($0.type)-\($0.id)" })
         var added: [SearchItem] = []
-        for item in p.results.map({ makeSearchItem($0) }) {
+        for var item in p.results.map({ makeSearchItem($0) }) {
             let key = "\(item.type)-\(item.id)"
             guard !seen.contains(key) else { continue }
             seen.insert(key)
+            // 打标记：分组时靠它把语义结果单独拎出来成一组，不混进「照片」组
+            item.semanticHit = true
             added.append(item)
         }
         return added
@@ -775,6 +858,20 @@ private struct SearchPhotoThumb: View {
                 .frame(width: size, height: size)
                 .clipped()
                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                // 语义命中的相似度角标：与瀑布流 cell 里的 BadgeLabel 同款（左下角、
+                // 半透明黑底）。横滑预览没法复用 UIKit 的 cell，这里补一枚同款的。
+                .overlay(alignment: .bottomLeading) {
+                    if let badge = photo.badge {
+                        Text(badge)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background(Color.black.opacity(0.55), in: Capsule())
+                            .padding(.leading, 6)
+                            .padding(.bottom, 6)
+                    }
+                }
         }
         .buttonStyle(.plain)
     }

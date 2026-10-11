@@ -748,6 +748,11 @@ struct SearchItem: Identifiable, Codable, Sendable {
     var displayName: String? = nil
     var fileName: String? = nil
 
+    /// 纯客户端标记：这条是**语义匹配**（CLIP 以文搜图）命中的，不是关键词命中的。
+    /// ⚠️ 后端不返回这个字段，只有搜索页自己会写。用途是把语义结果和关键词结果
+    /// **分成两组展示**——两者都是照片，混在照片组里用户分不清哪张是靠画面匹配上的。
+    var semanticHit: Bool = false
+
     var titleText: String {
         if !title.isEmpty { return title }
         if let d = displayName, !d.isEmpty { return d }
