@@ -798,7 +798,12 @@ struct SearchView: View {
     private func reload(newWord: Bool) async {
         // 词在这里定格：请求期间用户可能又改了词，回来时用它判断结果是否还有效
         let token = activeQuery
-        guard let client, !token.isEmpty else {
+        // ⚠️ 这里只是**确认 client 存在**：真正的请求分别由 fetchTotals / loadMore
+        // 各自 guard let 后发出，本函数不直接用它。
+        // 所以不能写成 `guard let client, ...` —— 解绑出来的 client 在函数体里
+        // 一次都没用到，编译器会警告「immutable value 'client' was never used」，
+        // 纯存在性判断直接用 `!= nil` 表达意图最清楚。
+        guard client != nil, !token.isEmpty else {
             results = []; totals = [:]; similarity = [:]; return
         }
         errorMessage = nil
