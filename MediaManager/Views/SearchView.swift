@@ -42,6 +42,10 @@ struct SearchView: View {
     @State private var selectedTab: Tab = .all
     @State private var results: [SearchItem] = []
     @State private var totals: [String: Int] = [:]
+    /// 服务端回的**总匹配数**（顶栏「已加载 / 总数」的右边那个数）。
+    /// ⚠️ 独立于 totals：totals 是 /search/totals 按类型给的（给分类胶囊用），
+    /// 这个是搜索响应自带的 total，跟列表页的 totalCount 同源。
+    @State private var resultTotal = 0
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var page = 1
@@ -149,12 +153,26 @@ struct SearchView: View {
                          tintColor: isSemantic ? Color.purple : nil) {
                     toggleSemantic()
                 }
-                // ⚠️ 用 opacity 而不是 if：转圈出现/消失会把右边的语义按钮推着左右跳，
-                // 留一个固定槽位（宽度 16）就纹丝不动
+                // 转圈：列表页同款槽位思路（固定宽度 + opacity），
+                // 出现/消失不会把左右的控件推着挪
                 ProgressView()
                     .controlSize(.small)
                     .frame(width: 16)
                     .opacity(isLoading ? 1 : 0)
+                // 「已加载 / 总数」，列表页顶栏同款：等宽数字 + 固定槽位 + 与按钮分组的间隔。
+                // ⚠️ 同样只在宽屏显示：窄屏这一行已经很挤（iPhone 排版后续统一适配）
+                if hSizeClass == .regular, !activeQuery.isEmpty {
+                    Text("\(results.count) / \(currentTotal)")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        // ⚠️ 不加 fixedSize：工具栏空间紧张时 Text 会被压缩换行，
+                        // 变成「12 / 128」上下两行，把导航栏撑高
+                        .fixedSize(horizontal: true, vertical: false)
+                        .lineLimit(1)
+                        // ⚠️ 固定槽位：整排锚定屏幕右缘，位数变化（9→10）不会推动前面的按钮
+                        .frame(minWidth: ToolbarMetrics.countMinWidth, alignment: .trailing)
+                        .padding(.leading, ToolbarMetrics.countGap)
+                }
             }
         }
         .onChange(of: query) { scheduleSearch() }
@@ -196,10 +214,20 @@ struct SearchView: View {
         activeQuery = ""
         results = []
         totals = [:]
+        resultTotal = 0
         similarity = [:]
         page = 1
         hasMore = false
         errorMessage = nil
+    }
+
+    /// 顶栏「已加载 / 总数」的右边那个数。
+    /// ⚠️ 优先用搜索响应自带的 total（和列表页 totalCount 同源）；后端没给（0，
+    /// 老版本接口就不返回 total）时退回 /search/totals 的分类计数汇总，
+    /// 免得显示成「30 / 0」这种看着像坏了的东西。
+    private var currentTotal: Int {
+        if resultTotal > 0 { return resultTotal }
+        return selectedTab.totalKeys.reduce(0) { $0 + (totals[$1] ?? 0) }
     }
 
     /// 语义模式的说明条：说清它只搜照片、且照片要先跑过 AI 分析，
@@ -585,7 +613,7 @@ struct SearchView: View {
         activeQuery = q
         selectedTab = .all
         guard !q.isEmpty else {
-            results = []; totals = [:]; similarity = [:]; return
+            results = []; totals = [:]; resultTotal = 0; similarity = [:]; return
         }
         SearchHistoryStore.add(q)
         history = SearchHistoryStore.load()
@@ -611,6 +639,8 @@ struct SearchView: View {
         }
         errorMessage = nil
         page = 1; hasMore = true; results = []; similarity = [:]
+        // 换词了，总数也得跟着重来（否则新词第一页会顶着上一个词的总数）
+        resultTotal = 0
         if isSemantic {
             // 语义模式没有分类计数（它只搜照片），别去打 /totals
             totals = [:]
@@ -645,6 +675,7 @@ struct SearchView: View {
                 guard !Task.isCancelled, token == activeQuery else { return }
                 let items = p.results.map { makeSearchItem($0) }
                 if page == 1 { results = items } else { results.append(contentsOf: items) }
+                resultTotal = p.total
                 var map = similarity
                 for r in p.results { map[r.id] = r.similarity ?? 0 }
                 similarity = map
@@ -657,6 +688,8 @@ struct SearchView: View {
                     query: token, types: selectedTab.requestTypes, page: page, size: size)
                 guard !Task.isCancelled, token == activeQuery else { return }
                 if page == 1 { results = p.items } else { results.append(contentsOf: p.items) }
+                // searchGrouped 已经把各类型的 total 加过了，直接用
+                resultTotal = p.total
                 page += 1
                 hasMore = selectedTab == .all ? false : p.hasMore
             }
