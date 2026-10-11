@@ -65,6 +65,9 @@ struct PhotoViewerView: View {
 
     private var client: APIClient? { AppSession.shared.client }
 
+    /// 全局呈现器（单例）：挂起恢复、翻页下标回写都要用到
+    @ObservedObject private var presenter = PhotoViewerPresenter.shared
+
     init(photos: [Photo], index: Int = 0, hasMore: Bool = false,
          onLoadMore: (() -> Void)? = nil, onClose: @escaping () -> Void = {}) {
         self.photos = photos
@@ -122,7 +125,18 @@ struct PhotoViewerView: View {
         .task(id: index) { await didChangeIndex() }
         // 保险：视图复用（同一 index 再次打开）时把上一次的关闭态清掉，
         // 否则 closingFade 还停在 0，重新打开就是一片空白
-        .onAppear { isClosing = false; closingFade = 1; scheduleIdleHide() }
+        .onAppear {
+            isClosing = false
+            closingFade = 1
+            scheduleIdleHide()
+            // 从「进入相册」返回：看图器是重建的，这里按 presenter 的标志把详情卡片原样弹回来。
+            // ⚠️ 必须顺手 loadDetail()：数据加载挂在信息按钮的 action 上（showInfo=true 旁边），
+            // 直接置 showInfo 只会弹出一张空卡片。
+            if presenter.consumeInfoCardRequest() {
+                showInfo = true
+                loadDetail()
+            }
+        }
         .onDisappear { idleTask?.cancel(); tipTask?.cancel(); detailTask?.cancel() }
         // 详情用 sheet 弹出：独立于 showUI（点图隐藏工具栏不影响），下滑关闭，
         // 不再是之前那个跟随状态栏一起消失的底部面板。
@@ -331,6 +345,9 @@ struct PhotoViewerView: View {
     @MainActor
     private func didChangeIndex() async {
         resetTransform()
+        // 回写当前下标：从「进入相册」返回时看图器按 startIndex 重建，
+        // 不回写的话会跳回最初打开的那张（用户翻过的页白翻了）
+        presenter.updateStartIndex(index)
         await loadFavorite()
         await loadCoverStatus()
         preloadNeighbors()
@@ -542,12 +559,14 @@ struct PhotoViewerView: View {
         }
     }
 
-    /// 进入所在相册：先关详情 sheet，再关闭看图器 + 通过全局 presenter 让 RootView 跳转。
+    /// 进入所在相册：**挂起**看图器（不销毁）+ 让 RootView push 相册页。
+    /// 相册页返回后看图器原样恢复，详情卡片也重新弹出 —— 之前是直接关掉看图器，
+    /// 返回就退到了打开看图器之前的照片流，详情卡片丢了。
     private func openInAlbum(_ albumRef: PhotoDetail.AlbumRef, libID: Int) {
-        showInfo = false
         var album = Album(id: albumRef.id)
         album.folderName = albumRef.folderName ?? ""
-        PhotoViewerPresenter.shared.openAlbum(album, libID: libID)
+        PhotoViewerPresenter.shared.openAlbum(album, libID: libID, infoCardOpen: showInfo)
+        showInfo = false
     }
 
     /// 点击相似图查看：全屏蒙层左右翻阅整组相似图，定位到所点那张。

@@ -32,22 +32,68 @@ final class PhotoViewerPresenter: ObservableObject {
     /// 「进入相册」跳转目标：看图器里点进入所在相册时设置，RootView 监听后切 tab + push。
     @Published var openAlbumTarget: AlbumOpenTarget?
 
+    // MARK: - 进入相册时的「挂起 / 恢复」
+    // ⚠️ 之前 openAlbum 直接把看图器关掉（isVisible=false），相册页 pop 回来就退回
+    // 打开看图器之前的那个照片流 —— 用户从详情卡片点「进入相册」，回来却丢了详情卡片。
+    // 现在改成「挂起」：只是暂时隐藏看图器（好让相册页可见），栈弹回来时原样恢复，
+    // 连详情卡片一起重新打开。
+    /// 是否有挂起的看图器等待恢复
+    private(set) var pendingResume = false
+    /// 挂起时详情卡片是否开着（恢复时原样重开）
+    private var resumeInfoCard = false
+    /// 详情卡片恢复请求：由 PhotoViewerView 出现时消费一次
+    private var infoCardRequested = false
+
     func show(_ photos: [Photo], index: Int, hasMore: Bool = false, onLoadMore: (() -> Void)? = nil) {
         self.photos = photos
         self.startIndex = index
         self.hasMore = hasMore
         self.onLoadMore = onLoadMore
+        // 相册页里另开看图器 = 新会话，取消上一次的挂起（否则 pop 时会错恢复旧的那张）
+        pendingResume = false
+        resumeInfoCard = false
+        infoCardRequested = false
         generation += 1
         isVisible = true
     }
 
     func updatePhotos(_ photos: [Photo]) { self.photos = photos }
 
-    func dismiss() { isVisible = false }
-
-    /// 关闭看图器并请求跳转到相册。
-    func openAlbum(_ album: Album, libID: Int) {
-        openAlbumTarget = AlbumOpenTarget(album: album, libID: libID)
+    func dismiss() {
         isVisible = false
+        pendingResume = false
+    }
+
+    /// 翻页时回写当前下标：挂起恢复后 PhotoViewerView 会按 startIndex 重建，
+    /// 不回写就会跳回最初打开的那张。
+    func updateStartIndex(_ i: Int) { startIndex = i }
+
+    /// 关闭看图器并请求跳转到相册（挂起，不是销毁）。
+    func openAlbum(_ album: Album, libID: Int, infoCardOpen: Bool) {
+        resumeInfoCard = infoCardOpen
+        pendingResume = true
+        openAlbumTarget = AlbumOpenTarget(album: album, libID: libID)
+        // 只是隐藏：相册页 push 在 tab 的导航栈里，看图器 overlay 会盖住它
+        isVisible = false
+    }
+
+    /// 相册页被 pop 掉 → 恢复挂起的看图器（含详情卡片）。没有挂起就直接返回。
+    /// ⚠️ 不加 @MainActor：调用方（RootView / PhotoViewerView）本来就在主线程，
+    /// 标了反而要在类内做隔离转换。
+    func resumeFromAlbum() {
+        guard pendingResume else { return }
+        pendingResume = false
+        isVisible = true
+        if resumeInfoCard { infoCardRequested = true }
+        resumeInfoCard = false
+    }
+
+    /// PhotoViewerView 出现时调用：是否需要立刻把详情卡片重新弹出来。
+    /// ⚠️ 走「标志位 + 消费」而不是 @Published + onChange：恢复时视图是新创建的，
+    /// onChange 首次渲染不触发（它只比较生命周期内的值变化），收不到。
+    func consumeInfoCardRequest() -> Bool {
+        guard infoCardRequested else { return false }
+        infoCardRequested = false
+        return true
     }
 }
