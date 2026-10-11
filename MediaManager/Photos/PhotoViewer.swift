@@ -124,6 +124,18 @@ struct PhotoViewerView: View {
         .sheet(isPresented: $showInfo) {
             if let photo { detailSheet(photo) }
         }
+        // 相似图蒙层：用 fullScreenCover 全屏、最顶层呈现（盖在 sheet 详情卡片之上），
+        // 可滑动查看原图，关闭回卡片。不改 index，避免之前的黑屏/越界问题。
+        .fullScreenCover(isPresented: Binding(
+            get: { similarOverlayURL != nil },
+            set: { if !$0 { similarOverlayURL = nil } }
+        )) {
+            if let url = similarOverlayURL {
+                SimilarPhotoOverlay(url: url) { similarOverlayURL = nil }
+            } else {
+                Color.black.ignoresSafeArea()
+            }
+        }
     }
 
     // MARK: - 图片层
@@ -649,13 +661,6 @@ struct PhotoViewerView: View {
                 }
             }
         }
-        // 相似图蒙层：叠在详情卡片之上（卡片保持不动），可滑动查看原图，关闭回卡片。
-        .overlay {
-            if let url = similarOverlayURL {
-                SimilarPhotoOverlay(url: url) { similarOverlayURL = nil }
-                    .transition(.opacity)
-            }
-        }
     }
 
     /// 拍摄信息区块是否有内容（对标网页版：任一 EXIF 字段存在即显示）
@@ -1069,8 +1074,8 @@ private struct SimilarPhotoOverlay: View {
 
     var body: some View {
         ZStack {
-            // 半透明灰蒙层：透出底下的详情卡片
-            Color.black.opacity(0.62)
+            // 全屏灰蒙层（贴满整屏）：盖住底下的详情卡片
+            Color(white: 0.08).opacity(0.94)
                 .ignoresSafeArea()
                 .onTapGesture { onClose() }
 
