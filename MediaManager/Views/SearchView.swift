@@ -681,7 +681,10 @@ struct SearchView: View {
         let order = ["movie", "tv", "album", "photo", "shoot"]
         var map: [String: [SearchItem]] = [:]
         for item in results { map[item.type, default: []].append(item) }
-        var list = order.compactMap { t in
+        // ⚠️ 显式写 [ResultSection] 和闭包返回类型：闭包里两个语句（guard + return），
+        // Swift 推断不出复杂闭包的返回类型，会报
+        // "Unable to infer complex closure return type"
+        var list: [ResultSection] = order.compactMap { t -> ResultSection? in
             guard let items = map[t], !items.isEmpty else { return nil }
             return ResultSection(type: t, items: items, count: totals[t] ?? 0)
         }
@@ -820,8 +823,11 @@ struct SearchView: View {
     ///   绝不能让语义不可用把关键词搜索的结果也拖没了。
     @MainActor
     private func startSemantic(token: String) {
+        // ⚠️ all/photo 那个 || 必须加括号：&& 优先级高于 ||，
+        // 不加会解析成 (client && isSemantic && all) || photo，
+        // 而且 `guard let` 绑定不能只出现在 || 的一侧，编译器会直接报错
         guard let client, isSemantic,
-              selectedTab == .all || selectedTab == .photo else { return }
+              (selectedTab == .all || selectedTab == .photo) else { return }
         semanticTask?.cancel()
         isSemanticLoading = true
         semanticTask = Task { @MainActor in
