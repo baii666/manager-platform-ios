@@ -697,6 +697,26 @@ final class APIClient: DataProviding, @unchecked Sendable {
         return resp.favorite
     }
 
+    // MARK: - 封面生成队列（exp.cover-tasks）
+
+    /// 查询单张照片的封面生成队列状态。GET /api/cover-tasks/status?photo_id=123
+    func fetchCoverTaskStatus(photoId: Int) async throws -> (inQueue: Bool, generated: Bool) {
+        let resp: CoverTaskStatusResponse = try await request("/api/cover-tasks/status", queryItems: [
+            URLQueryItem(name: "photo_id", value: "\(photoId)"),
+        ])
+        return (resp.inQueue, resp.generated)
+    }
+
+    /// 加入 / 取消封面生成队列。POST /api/cover-tasks/toggle {photo_id}
+    /// 返回 "added" 或 "removed"。
+    func toggleCoverTask(photoId: Int) async throws -> String {
+        let resp: CoverTaskToggleResponse = try await request(
+            "/api/cover-tasks/toggle", method: "POST",
+            json: ["photo_id": photoId]
+        )
+        return resp.action
+    }
+
     // MARK: - 行为层（播放进度）
 
     /// 上报播放位置。POST /api/actions/progress {type,id,position,duration}
@@ -742,6 +762,28 @@ private struct PhotoFacesResponse: Decodable {
 /// GET /api/photos/:id/similar 的响应：similar 数组
 private struct SimilarPhotosResponse: Decodable {
     let similar: [SimilarPhoto]
+}
+
+/// GET /api/cover-tasks/status 的响应：单张照片的封面生成队列状态
+private struct CoverTaskStatusResponse: Decodable {
+    let inQueue: Bool
+    let generated: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case inQueue = "in_queue"
+        case generated
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        inQueue = (try? c.decode(Bool.self, forKey: .inQueue)) ?? false
+        generated = (try? c.decode(Bool.self, forKey: .generated)) ?? false
+    }
+}
+
+/// POST /api/cover-tasks/toggle 的响应：加入/取消后的动作
+private struct CoverTaskToggleResponse: Decodable {
+    let action: String
 }
 
 /// /api/actions/list 的响应：items + total（分页列表要 total 才知道还有没有下一页）

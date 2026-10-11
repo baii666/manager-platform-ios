@@ -42,6 +42,10 @@ struct PhotoViewerView: View {
     @State private var containerSize: CGSize = .zero
 
     @State private var isFavorite = false
+    // 封面生成队列三态：未加入(false)/队列中(true)/已生成(终态)
+    @State private var coverQueued = false
+    @State private var coverGenerated = false
+    @State private var coverTaskBusy = false
     @State private var idleTask: Task<Void, Never>?
     @State private var tipTask: Task<Void, Never>?
 
@@ -341,6 +345,7 @@ struct PhotoViewerView: View {
     private func didChangeIndex() async {
         resetTransform()
         await loadFavorite()
+        await loadCoverStatus()
         preloadNeighbors()
         if hasMore, index >= photos.count - 3 { onLoadMore?() }
         // 翻页：清掉上一张的人脸/相似结果（避免串图）
@@ -399,6 +404,38 @@ struct PhotoViewerView: View {
             isFavorite = try await client.fetchFavorite(type: "photo", id: photo.id)
         } catch {
             isFavorite = false
+        }
+    }
+
+    /// 查询当前照片的封面生成队列状态（三态：未加入/队列中/已生成）
+    @MainActor
+    private func loadCoverStatus() async {
+        guard let client, let photo else { return }
+        do {
+            let s = try await client.fetchCoverTaskStatus(photoId: photo.id)
+            coverQueued = s.inQueue
+            coverGenerated = s.generated
+        } catch {
+            coverQueued = false
+            coverGenerated = false
+        }
+    }
+
+    /// 加入 / 取消封面生成队列（已生成是终态，按钮已禁用，这里兜底不调接口）
+    private func toggleCoverTask() {
+        guard let photo, !coverTaskBusy, !coverGenerated else { return }
+        coverTaskBusy = true
+        Task { @MainActor in
+            defer { coverTaskBusy = false }
+            guard let client else { return }
+            do {
+                let action = try await client.toggleCoverTask(photoId: photo.id)
+                coverQueued = (action == "added")
+                coverGenerated = false
+                showTip(action == "added" ? "已加入封面生成队列" : "已从封面生成队列移除")
+            } catch {
+                showTip("封面队列操作失败")
+            }
         }
     }
 
@@ -794,6 +831,8 @@ struct PhotoViewerView: View {
                 toolButton(isFavorite ? "heart.fill" : "heart", active: isFavorite, tint: .red) {
                     toggleFavorite()
                 }
+                // 封面生成队列（三态：未加入=白 / 队列中=黄 / 已生成=绿，终态禁用）
+                coverTaskButton
                 toolButton("square.and.arrow.down") { saveToAlbum() }
                 Spacer(minLength: 0)
             }
@@ -830,6 +869,20 @@ struct PhotoViewerView: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+
+    /// 封面生成队列按钮：未加入=白、队列中=黄、已生成=绿对勾（终态禁用）。
+    private var coverTaskButton: some View {
+        let name: String = coverGenerated ? "checkmark.rectangle" : "photo.on.rectangle"
+        return Button(action: toggleCoverTask) {
+            Image(systemName: name)
+                .font(.system(size: 17))
+                .foregroundStyle(coverGenerated ? .green : (coverQueued ? .yellow : .white))
+                .frame(width: 40, height: 36)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(coverGenerated || coverTaskBusy)
     }
 
     // MARK: - 缩略图条
