@@ -316,6 +316,32 @@ final class APIClient: DataProviding, @unchecked Sendable {
         return resp.photo
     }
 
+    /// 人脸检测结果。GET /api/photos/:id/faces → {faces:[{id,bbox,det_score}]}
+    func fetchPhotoFaces(photoId: Int) async throws -> [PhotoFace] {
+        let resp: PhotoFacesResponse = try await request("/api/photos/\(photoId)/faces")
+        return resp.faces
+    }
+
+    /// 相似图片。GET /api/photos/:id/similar?method=phash|clip&limit=n → {similar:[...]}
+    func fetchSimilarPhotos(photoId: Int, method: String, limit: Int = 50) async throws -> [SimilarPhoto] {
+        let resp: SimilarPhotosResponse = try await request(
+            "/api/photos/\(photoId)/similar",
+            queryItems: [
+                URLQueryItem(name: "method", value: method),
+                URLQueryItem(name: "limit", value: "\(limit)"),
+            ]
+        )
+        return resp.similar
+    }
+
+    /// 人脸头像缩略图
+    func faceThumbURL(_ id: Int, size: Int = 600) -> URL? {
+        makeURL("/face-thumb", queryItems: [
+            URLQueryItem(name: "id", value: "\(id)"),
+            URLQueryItem(name: "size", value: "\(size)"),
+        ])
+    }
+
     func search(query: String) async throws -> [UnifiedAsset] {
         // ⚠️ 别再请求 type=all：后端 all 分支返回的是分组 map
         //（{movie:[...], tv:[...], album:[...], shoot:[...], library:[...]}），
@@ -706,6 +732,16 @@ private struct ItemsResponse<T: Decodable>: Decodable {
 /// GET /api/photo/:id 的响应：photo 对象挂在 photo 键下
 private struct PhotoDetailResponse: Decodable {
     let photo: PhotoDetail
+}
+
+/// GET /api/photos/:id/faces 的响应：faces 数组
+private struct PhotoFacesResponse: Decodable {
+    let faces: [PhotoFace]
+}
+
+/// GET /api/photos/:id/similar 的响应：similar 数组
+private struct SimilarPhotosResponse: Decodable {
+    let similar: [SimilarPhoto]
 }
 
 /// /api/actions/list 的响应：items + total（分页列表要 total 才知道还有没有下一页）

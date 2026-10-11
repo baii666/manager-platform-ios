@@ -415,6 +415,61 @@ struct PhotoDetail: Identifiable, Decodable, Sendable {
     }
 }
 
+// MARK: - 人脸检测结果
+// 对应 GET /api/photos/:id/faces 返回的 faces 项（后端只返回 bbox + 置信度，不含人物名）
+struct PhotoFace: Identifiable, Decodable, Sendable {
+    let id: Int
+    var bboxX1: Double = 0
+    var bboxY1: Double = 0
+    var bboxX2: Double = 0
+    var bboxY2: Double = 0
+    var detScore: Double = 0
+
+    /// 检测置信度百分比文案（如 "87%"）
+    var scoreText: String { String(format: "%.0f%%", detScore * 100) }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case bboxX1 = "bbox_x1"
+        case bboxY1 = "bbox_y1"
+        case bboxX2 = "bbox_x2"
+        case bboxY2 = "bbox_y2"
+        case detScore = "det_score"
+    }
+}
+
+// MARK: - 相似图片
+// 对应 GET /api/photos/:id/similar 返回的 similar 项。
+// phash 结果带 distance（汉明距离，越小越像）；clip 结果带 similarity（余弦相似度 0~1，越大越像）。
+struct SimilarPhoto: Identifiable, Decodable, Sendable {
+    let id: Int
+    var fileName: String = ""
+    var distance: Int? = nil
+    var similarity: Double? = nil
+    var width: Int? = nil
+    var height: Int? = nil
+    var aestheticScore: Double? = nil
+
+    /// 展示用相似度文案：phash 显示距离，clip 显示百分比
+    var scoreText: String? {
+        if let distance {
+            return "距离 \(distance)"
+        }
+        if let similarity {
+            return String(format: "%.0f%%", similarity * 100)
+        }
+        return nil
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, width, height
+        case fileName = "file_name"
+        case distance
+        case similarity
+        case aestheticScore = "aesthetic_score"
+    }
+}
+
 // MARK: - 任务进度（SSE 推送）
 // 后端扫描/转码等后台任务通过 text/event-stream 推送进度
 struct TaskProgress: Identifiable, Sendable {

@@ -50,6 +50,15 @@ struct PhotoViewerView: View {
     @State private var isLoadingDetail = false
     @State private var detailTask: Task<Void, Never>?
 
+    // 人脸检测 + 相似图片（详情卡片的核心功能，按需展开）
+    @State private var faces: [PhotoFace] = []
+    @State private var facesLoading = false
+    @State private var showFaces = false
+    @State private var similarPhotos: [SimilarPhoto] = []
+    @State private var similarLoading = false
+    @State private var showSimilar = false
+    @State private var similarMethod = "phash"
+
     private var client: APIClient? { AppSession.shared.client }
 
     init(photos: [Photo], index: Int = 0, hasMore: Bool = false,
@@ -314,6 +323,11 @@ struct PhotoViewerView: View {
         await loadFavorite()
         preloadNeighbors()
         if hasMore, index >= photos.count - 3 { onLoadMore?() }
+        // 翻页：清掉上一张的人脸/相似结果（避免串图）
+        faces = []
+        showFaces = false
+        similarPhotos = []
+        showSimilar = false
         // 信息面板开着时，翻页要同步刷新详情（否则会一直显示上一张的 EXIF）
         if showInfo { loadDetail() }
         scheduleIdleHide()
@@ -448,6 +462,36 @@ struct PhotoViewerView: View {
         }
     }
 
+    /// 加载人脸检测结果
+    private func loadFaces() {
+        guard let client, let photo, !facesLoading else { return }
+        facesLoading = true
+        Task { @MainActor in
+            do {
+                faces = try await client.fetchPhotoFaces(photoId: photo.id)
+            } catch {
+                faces = []
+            }
+            facesLoading = false
+        }
+    }
+
+    /// 加载相似图片（method: phash | clip）
+    private func loadSimilar(method: String) {
+        guard let client, let photo else { return }
+        similarMethod = method
+        similarLoading = true
+        similarPhotos = []
+        Task { @MainActor in
+            do {
+                similarPhotos = try await client.fetchSimilarPhotos(photoId: photo.id, method: method)
+            } catch {
+                similarPhotos = []
+            }
+            similarLoading = false
+        }
+    }
+
     private func infoPanel(_ photo: Photo) -> some View {
         VStack(spacing: 0) {
             // 顶部拖拽指示条
@@ -475,6 +519,40 @@ struct PhotoViewerView: View {
                                 .background(.white.opacity(0.1), in: Circle())
                         }
                         .buttonStyle(.plain)
+                    }
+
+                    // 功能按钮：人脸 / 像素相似 / 语义相似
+                    HStack(spacing: 8) {
+                        actionButton("人脸", active: showFaces) {
+                            withAnimation { showFaces.toggle() }
+                            if showFaces && faces.isEmpty { loadFaces() }
+                        }
+                        actionButton("像素相似", active: showSimilar && similarMethod == "phash") {
+                            if showSimilar && similarMethod == "phash" {
+                                withAnimation { showSimilar = false }
+                            } else {
+                                withAnimation { showSimilar = true }
+                                loadSimilar(method: "phash")
+                            }
+                        }
+                        actionButton("语义相似", active: showSimilar && similarMethod == "clip") {
+                            if showSimilar && similarMethod == "clip" {
+                                withAnimation { showSimilar = false }
+                            } else {
+                                withAnimation { showSimilar = true }
+                                loadSimilar(method: "clip")
+                            }
+                        }
+                    }
+
+                    // 相似图片结果
+                    if showSimilar {
+                        similarSection
+                    }
+
+                    // 人脸列表
+                    if showFaces {
+                        facesSection
                     }
 
                     // 基本信息
@@ -586,6 +664,97 @@ struct PhotoViewerView: View {
         (d.cameraMake?.isEmpty == false) || (d.cameraModel?.isEmpty == false) ||
         d.focalLength != nil || d.aperture != nil || d.iso != nil ||
         (d.gpsLat != nil && d.gpsLng != nil)
+    }
+
+    /// 功能按钮（人脸 / 像素相似 / 语义相似）
+    private func actionButton(_ title: String, active: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(active ? Theme.brand : Color.white.opacity(0.75))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(active ? Theme.brand.opacity(0.18) : Color.white.opacity(0.08), in: Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// 相似图片结果网格
+    private var similarSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if similarLoading {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small).tint(.white.opacity(0.7))
+                    Text("搜索中…").font(.caption).foregroundStyle(.white.opacity(0.6))
+                }
+            } else if similarPhotos.isEmpty {
+                Text(similarMethod == "phash"
+                     ? "未找到相似图片"
+                     : "未找到语义相似图片（可能该图未生成 CLIP embedding）")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.5))
+            } else {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 62), spacing: 6)], spacing: 6) {
+                    ForEach(similarPhotos) { sp in
+                        Button {
+                            // 相似图在当前列表里则跳转
+                            if let idx = photos.firstIndex(where: { $0.id == sp.id }) {
+                                index = idx
+                                resetTransform()
+                                imagePixelSize = nil
+                            }
+                        } label: {
+                            ViewerThumb(url: client?.makeURL("/photo", queryItems: [
+                                URLQueryItem(name: "id", value: "\(sp.id)"),
+                                URLQueryItem(name: "size", value: "600"),
+                            ]))
+                            .frame(width: 62, height: 62)
+                            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                            .overlay(alignment: .bottom) {
+                                if let score = sp.scoreText {
+                                    Text(score)
+                                        .font(.system(size: 9, weight: .semibold))
+                                        .foregroundStyle(.white)
+                                        .padding(.horizontal, 4)
+                                        .padding(.vertical, 1)
+                                        .background(.black.opacity(0.65))
+                                        .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
+                                        .padding(3)
+                                }
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+    }
+
+    /// 人脸列表网格
+    private var facesSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if facesLoading {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small).tint(.white.opacity(0.7))
+                    Text("检测中…").font(.caption).foregroundStyle(.white.opacity(0.6))
+                }
+            } else if faces.isEmpty {
+                Text("该图片未检测到人脸").font(.caption).foregroundStyle(.white.opacity(0.5))
+            } else {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 62), spacing: 6)], spacing: 6) {
+                    ForEach(faces) { face in
+                        VStack(spacing: 2) {
+                            ViewerThumb(url: client?.faceThumbURL(face.id))
+                                .frame(width: 62, height: 62)
+                                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                            Text(face.scoreText)
+                                .font(.system(size: 9))
+                                .foregroundStyle(.white.opacity(0.6))
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private func sectionTitle(_ text: String) -> some View {
