@@ -189,38 +189,25 @@ struct HomeView: View {
 
     // MARK: 统计配置
 
-    /// 统计卡布局：横屏 5 列网格（1 行铺满）；竖屏横向滚动一行（5 个卡片固定宽度）。
-    /// ⚠️ 5 是质数，竖屏任何固定列数都会留下一行参差，横向滚动是最干净的解。
+    /// 统计卡布局：横屏 4 列网格（1 行铺满）；竖屏 2 列网格（2×2 整齐）。
     @ViewBuilder
     private var statGrid: some View {
-        if hSizeClass == .compact {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 12) {
-                    ForEach(statEntries) { entry in
-                        StatCard(icon: entry.icon, label: entry.label, value: entry.value,
-                                 tint: entry.tint, action: entry.action)
-                            .frame(width: 150)
-                    }
-                }
-            }
-        } else {
-            LazyVGrid(columns: statColumns, spacing: 12) {
-                ForEach(statEntries) { entry in
-                    StatCard(icon: entry.icon, label: entry.label, value: entry.value,
-                             tint: entry.tint, action: entry.action)
-                }
+        LazyVGrid(columns: statColumns, spacing: 12) {
+            ForEach(statEntries) { entry in
+                StatCard(icon: entry.icon, label: entry.label, value: entry.value,
+                         tint: entry.tint, action: entry.action)
             }
         }
     }
 
-    /// 统计卡列数（仅横屏网格用）：5 列 = 1 行铺满
+    /// 统计卡列数：横屏 4 列（1 行），竖屏 2 列（2×2）
     private var statColumns: [GridItem] {
-        Array(repeating: GridItem(.flexible(), spacing: 12), count: 5)
+        let count = hSizeClass == .compact ? 2 : 4
+        return Array(repeating: GridItem(.flexible(), spacing: 12), count: count)
     }
 
     private var statEntries: [StatEntry] {
         [
-            StatEntry(id: "lib", icon: "folder.fill", label: "媒体库", value: viewModel.stats.libraryCount, tint: Theme.brand),
             StatEntry(id: "movie", icon: "film", label: "电影", value: viewModel.stats.movieCount, tint: .blue),
             StatEntry(id: "photo", icon: "camera", label: "图片", value: viewModel.stats.photoCount, tint: .green) {
                 showingAlbums = true
