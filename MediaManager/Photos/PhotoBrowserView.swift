@@ -7,7 +7,6 @@ final class PhotoBrowserViewModel: ObservableObject {
 
     private let provider: DataProviding
     private let pageSize = 60
-    private var offset = 0
 
     init(provider: DataProviding? = nil) {
         self.provider = provider ?? AppSession.shared.client ?? MockDataProvider()
@@ -25,8 +24,9 @@ final class PhotoBrowserViewModel: ObservableObject {
         isLoading = true
         defer { isLoading = false }
         do {
-            let batch = try await provider.fetchPhotos(limit: pageSize, offset: offset)
-            offset += batch.count
+            // ⚠️ 随机照片接口本身随机，`offset` 无意义；翻页去重靠 exclude 把已加载的
+            // 照片 id 传给后端排除，否则每次请求都是「全新随机一批」，和已加载大量重叠。
+            let batch = try await provider.fetchPhotos(limit: pageSize, offset: 0, exclude: photos.map(\.id))
             photos.append(contentsOf: batch)
         } catch {
             // 忽略：保留已加载内容即可

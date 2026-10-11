@@ -55,7 +55,7 @@ struct MockDataProvider: DataProviding {
         return pool.filter { $0.title.lowercased().contains(q) }
     }
 
-    func fetchPhotos(limit: Int, offset: Int) async throws -> [Photo] {
+    func fetchPhotos(limit: Int, offset: Int, exclude: [Int] = []) async throws -> [Photo] {
         try await Task.sleep(nanoseconds: 300_000_000)
         return Self.makePhotos(from: offset, count: limit)
     }

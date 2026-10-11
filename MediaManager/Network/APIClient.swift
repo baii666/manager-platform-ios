@@ -299,9 +299,13 @@ final class APIClient: DataProviding, @unchecked Sendable {
         return resp.items.map { resolveRecent($0) }
     }
 
-    func fetchPhotos(limit: Int, offset: Int) async throws -> [Photo] {
+    func fetchPhotos(limit: Int, offset: Int, exclude: [Int] = []) async throws -> [Photo] {
         let libID = try await photoLibraryID()
-        let resp: ItemsResponse<Photo> = try await request("/api/photos/random?lib=\(libID)&size=\(limit)")
+        var url = "/api/photos/random?lib=\(libID)&size=\(limit)"
+        if !exclude.isEmpty {
+            url += "&exclude=\(exclude.map(String.init).joined(separator: ","))"
+        }
+        let resp: ItemsResponse<Photo> = try await request(url)
         return resp.items.map { resolvePhoto($0) }
     }
 

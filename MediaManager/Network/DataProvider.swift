@@ -26,7 +26,8 @@ protocol DataProviding: Sendable {
     func fetchActionAssets(action: AssetActionKind, page: Int, size: Int) async throws -> (items: [UnifiedAsset], total: Int)
     func fetchRecent(limit: Int) async throws -> [RecentItem]
     func search(query: String) async throws -> [UnifiedAsset]
-    func fetchPhotos(limit: Int, offset: Int) async throws -> [Photo]
+    /// 随机拉取照片。`exclude` 传已加载的照片 id，让后端排除，翻页不重复。
+    func fetchPhotos(limit: Int, offset: Int, exclude: [Int]) async throws -> [Photo]
 }
 
 // MARK: - 错误
