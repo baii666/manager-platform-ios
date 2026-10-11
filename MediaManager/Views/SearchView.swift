@@ -141,24 +141,33 @@ struct SearchView: View {
             // 收进一个 HStack 后间距、先后顺序都由我们自己说了算。
             ToolbarItem(placement: .topBarLeading) {
                 HStack(spacing: 4) {
-                    // 语义开关：紧挨搜索框（用户指定顺序），紫 = 开
-                    ToolChip(label: "语义", icon: "sparkles", highlighted: isSemantic,
-                             tintColor: isSemantic ? Color.purple : nil) {
-                        toggleSemantic()
-                    }
                     // 搜索按钮：防抖之外给一个明确的「立刻搜」出口（不用等 350ms，也不用按回车）
                     ToolChip(label: "搜索", icon: "magnifyingglass") {
                         runSearch(query)
                     }
                     // 空词没什么可搜的，按钮置灰
                     .disabled(query.trimmingCharacters(in: .whitespaces).isEmpty)
-                    // 分类胶囊组：语义模式下不显示（语义只搜照片，没有分类）
-                    if !activeQuery.isEmpty && !isSemantic {
+                    // 分类胶囊组：整组占位始终在。
+                    // ⚠️ 语义模式下**置灰而不是隐藏**（.disabled）—— 隐藏会让后面的
+                    // 语义按钮整体左移，用户要求点它时前面的东西别动。
+                    // 灰掉既保住了位置，也说明了「语义模式不按分类搜」。
+                    if !activeQuery.isEmpty {
                         categoryChips
+                            .disabled(isSemantic)
                             // ⚠️ 防压缩：这个组之前被系统压到只剩一个圆点，
                             // fixedSize 让按钮文字保持完整，空间不足宁可溢出也不缩成空壳
                             .fixedSize(horizontal: true, vertical: false)
                     }
+                    // 语义开关：放在类别最后面（用户指定），紫 = 开。
+                    // ⚠️ 放最后一个是有讲究的：它在最右，自己变宽只往右扩，
+                    // 不会把前面的搜索按钮和分类胶囊推得左右挪。
+                    // ⚠️ minWidth 钉死槽位：高亮态字重从 medium 变 semibold，
+                    // 文字会宽那么一两个点，不给下限的话切换时整排会轻微抖一下。
+                    ToolChip(label: "语义", icon: "sparkles", highlighted: isSemantic,
+                             tintColor: isSemantic ? Color.purple : nil) {
+                        toggleSemantic()
+                    }
+                    .frame(minWidth: 62)
                 }
             }
             .withoutGlass()
