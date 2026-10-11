@@ -258,6 +258,9 @@ struct AlbumListView: View {
         }
         .tint(Theme.brand)
         .navigationBarTitleDisplayMode(.inline)
+        // ⚠️ 每个 tab / 每个 push 进来的页面都要自己垫一层背景：
+        // NavigationStack 只渲染栈顶那一层，App 根的背景透不进来
+        .appBackground()
         // 下拉刷新
         .refreshable { await viewModel.refresh() }
         // ⚠️ iOS 17 起 onChange(of:) 零参闭包

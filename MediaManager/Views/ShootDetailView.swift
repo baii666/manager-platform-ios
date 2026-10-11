@@ -69,6 +69,9 @@ struct ShootDetailView: View {
         }
         .navigationTitle(shoot.title)
         .navigationBarTitleDisplayMode(.inline)
+        // ⚠️ 每个 tab / 每个 push 进来的页面都要自己垫一层背景：
+        // NavigationStack 只渲染栈顶那一层，App 根的背景透不进来
+        .appBackground()
         .task { await viewModel.loadInitial() }
         .fullScreenCover(item: $playTarget) { target in
             NavigationStack {

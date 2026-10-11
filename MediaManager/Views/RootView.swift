@@ -195,5 +195,8 @@ struct LibraryHomeView: View {
             case .shoot: ShootListView(library: lib)
             }
         }
+        // ⚠️ TabView(.page) 底层是 UIPageViewController，它自带不透明底色，
+        // 只靠 App 根的那层背景透不出来 —— 本页必须自己垫一层
+        .appBackground()
     }
 }

@@ -42,6 +42,9 @@ struct LibraryPickerView: View {
         .task(id: type) { await loadIfNeeded() }
         // 下拉刷新：保留旧数据，加载完替换（避免闪空）
         .refreshable { await load(clear: false) }
+        // ⚠️ 同上：本页挂在 TabView(.page) 里，那一层自带不透明底色，
+        // 每个分页自己垫背景才能透出背景图
+        .appBackground()
     }
 
     private var emptyIcon: String {
