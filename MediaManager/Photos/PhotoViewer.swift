@@ -129,19 +129,6 @@ struct PhotoViewerView: View {
         .sheet(isPresented: $showInfo) {
             if let photo { detailSheet(photo) }
         }
-        // 相似图蒙层：用 fullScreenCover 全屏、最顶层呈现（盖在 sheet 详情卡片之上），
-        // 左右滚动翻阅整组相似图，关闭回卡片。不改 index，避免之前的黑屏/越界问题。
-        .fullScreenCover(isPresented: Binding(
-            get: { similarOverlay != nil },
-            set: { if !$0 { similarOverlay = nil } }
-        )) {
-            if let data = similarOverlay {
-                SimilarPhotoOverlay(photos: data.photos, initialIndex: data.index,
-                                    client: client) { similarOverlay = nil }
-            } else {
-                Color.black.ignoresSafeArea()
-            }
-        }
     }
 
     // MARK: - 图片层
@@ -696,6 +683,19 @@ struct PhotoViewerView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("完成") { showInfo = false }
                 }
+            }
+        }
+        // 相似图蒙层：挂在详情 sheet 内容内部的全屏覆盖（fullScreenCover 会在 sheet 之上
+        // 全屏呈现，不与 body 的 sheet 冲突），左右滑动放大翻阅整组相似图，关闭回卡片。
+        .fullScreenCover(isPresented: Binding(
+            get: { similarOverlay != nil },
+            set: { if !$0 { similarOverlay = nil } }
+        )) {
+            if let data = similarOverlay {
+                SimilarPhotoOverlay(photos: data.photos, initialIndex: data.index,
+                                    client: client) { similarOverlay = nil }
+            } else {
+                Color.black.ignoresSafeArea()
             }
         }
     }
