@@ -448,6 +448,9 @@ struct AlbumPhotosView: View {
     let album: Album
     /// 后端 /api/photos 强制要求 lib，缺失会 400
     let libID: Int
+    /// 返回回调。非 nil 说明本页是「盖在看图器上的相册层」，顶栏最左给返回按钮
+    ///（本层不是 push 进导航栈的，没有系统返回手势，返回靠这个按钮 / 左边缘拖拽）。
+    var onBack: (() -> Void)? = nil
 
     @State private var photos: [Photo] = []
     @State private var isLoading = false
@@ -486,16 +489,31 @@ struct AlbumPhotosView: View {
         // 改放 leading 位 —— 紧跟返回按钮右边，跟相册列表页「库名在左、计数在右」同一套排版。
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
-                Text(album.title)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    // 与 ListSearchBarItem 里库名同一套保险：至少 120pt（≈8 个汉字），
-                    // 空间再紧也不会被压没；layoutPriority 让相册名优先拿到宽度。
-                    // ⚠️ alignment 必须 .leading：frame 默认居中，名字短时会离返回按钮老远。
-                    .frame(minWidth: 120, alignment: .leading)
-                    .layoutPriority(1)
+                HStack(spacing: 4) {
+                    if let onBack {
+                        Button(action: onBack) {
+                            HStack(spacing: 2) {
+                                Image(systemName: "chevron.left")
+                                    .font(.system(size: 15, weight: .semibold))
+                                Text("返回")
+                                    .font(.subheadline.weight(.semibold))
+                            }
+                            .foregroundStyle(Theme.brand)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    Text(album.title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        // 与 ListSearchBarItem 里库名同一套保险：至少 120pt（≈8 个汉字），
+                        // 空间再紧也不会被压没；layoutPriority 让相册名优先拿到宽度。
+                        // ⚠️ alignment 必须 .leading：frame 默认居中，名字短时会离返回按钮老远。
+                        .frame(minWidth: onBack == nil ? 120 : 90, alignment: .leading)
+                        .layoutPriority(1)
+                }
             }
             .withoutGlass()
 

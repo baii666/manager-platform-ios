@@ -7,7 +7,8 @@ import SwiftUI
 // 黑底一渐隐，露出的就是照片网格本身，退出全程无跳变。
 // （短视频刷流的 FullscreenOverlay 是同一个思路的先例。）
 // MARK: - 相册跳转目标
-// 看图器里点「进入相册」→ 关闭看图器 + 通过此目标让 RootView 切到媒体库 tab 并 push 相册页。
+// 看图器详情卡片点「进入相册」→ 看图器原地不动，RootView 在它之上盖一层相册页
+//（AlbumPageLayer）。返回时撤掉那层就是详情卡片，全程不重建、不重新弹出。
 struct AlbumOpenTarget: Hashable, Identifiable {
     let album: Album
     let libID: Int
@@ -29,53 +30,47 @@ final class PhotoViewerPresenter: ObservableObject {
     private(set) var hasMore = false
     private(set) var onLoadMore: (() -> Void)?
 
-    /// 「进入相册」跳转目标：看图器里点进入所在相册时设置，RootView 监听后 push。
-    @Published var openAlbumTarget: AlbumOpenTarget?
-
-    // MARK: - 进入相册时「保留挂载、只隐藏」
-    // ⚠️ 演进过程（都是踩过的坑）：
-    //  1) 最初直接关掉看图器 → 相册页返回后退回打开看图器之前的照片流，详情卡片丢了；
-    //  2) 改成「关掉再恢复」→ 看图器是重建的，详情卡片被重新弹一次，很怪；
-    //  3) 现在：看图器**保留在层级里**，只是透明 + 不吃点击（suspended），
-    //     相册页 push 在 tab 的导航栈里正常显示；pop 回来把透明度恢复即可 ——
-    //     看图器和详情卡片的状态（包括翻到第几张、卡片开着与否）全都在，
-    //     看到的就是「返回直接露出上一页」。
-    /// 只是被相册页临时遮住（看图器仍在层级里，不能卸载）
-    @Published var suspended = false
+    /// 「进入相册」打开的相册层：非 nil 时 RootView 在看图器**之上**渲染 AlbumPageLayer。
+    /// ⚠️ 看图器全程 isVisible=true（不隐藏、不卸载），相册层只是盖在它上面 ——
+    /// 滑动返回的整个过程中，下面的看图器和详情卡片都是实时可见的。
+    /// 之前把相册页 push 到 tab 导航栈、看图器设成透明挂起，结果滑到一半时
+    /// 看图器还是透明的（path 要等 pop 完成才变化），半路露出的是照片流。
+    @Published var albumPageTarget: AlbumOpenTarget?
+    /// 相册页里点开照片时，看图器要临时升到相册层之上（RootView 按它排 zIndex）。
+    @Published var viewerAboveAlbum = false
 
     func show(_ photos: [Photo], index: Int, hasMore: Bool = false, onLoadMore: (() -> Void)? = nil) {
         self.photos = photos
         self.startIndex = index
         self.hasMore = hasMore
         self.onLoadMore = onLoadMore
-        suspended = false
+        // 相册页里点开照片 → 看图器升到相册层之上；关掉后露出相册层（不是照片流）
+        viewerAboveAlbum = (albumPageTarget != nil)
         generation += 1
         isVisible = true
     }
 
     func updatePhotos(_ photos: [Photo]) { self.photos = photos }
 
-    /// 真正退出看图器：卸载（与「挂起」区分开）
+    /// 真正退出看图器。若是从相册页里退出的，露出的是相册层
     func dismiss() {
         isVisible = false
-        suspended = false
+        viewerAboveAlbum = false
     }
 
     /// 翻页时回写当前下标（看图器若被重建，能回到原来那张而不是最初打开的那张）
     func updateStartIndex(_ i: Int) { startIndex = i }
 
-    /// 进入相册：看图器保留挂载、只隐藏（好让相册页可见），并把跳转目标交给 RootView。
-    /// ⚠️ 详情卡片是自绘 overlay（不是 sheet），会跟着父视图一起隐藏 —— 不会被留在屏幕上。
+    /// 进入相册：看图器（连同详情卡片）原地不动，相册层直接盖上来。
+    /// 返回时撤掉相册层就是详情卡片 —— 全程没有重建、没有重新弹出。
     func openAlbum(_ album: Album, libID: Int) {
-        suspended = true
-        openAlbumTarget = AlbumOpenTarget(album: album, libID: libID)
-        isVisible = false
+        viewerAboveAlbum = false
+        albumPageTarget = AlbumOpenTarget(album: album, libID: libID)
     }
 
-    /// 相册页被 pop 掉 → 把看图器恢复成可见（不是重建）
-    func resumeFromAlbum() {
-        guard suspended else { return }
-        suspended = false
-        isVisible = true
+    /// 关闭相册层（返回）：下面的看图器和详情卡片本来就在那儿
+    func closeAlbum() {
+        albumPageTarget = nil
+        viewerAboveAlbum = false
     }
 }

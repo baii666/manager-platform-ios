@@ -134,12 +134,12 @@ struct PhotoViewerView: View {
         }
         .onDisappear { idleTask?.cancel(); tipTask?.cancel(); detailTask?.cancel() }
         // 详情卡片：看图器**内部**的自绘层，不用 .sheet。
-        // ⚠️ sheet 是独立 presentation，父视图的 opacity 管不到它：
-        // 「进入相册」时看图器为了露出相册页必须暂时隐藏，而 sheet 卡片不会跟着隐藏
-        //（还浮在相册页上面），只能 dismiss 掉 → 返回时再 present 一次，
+        // ⚠️ sheet 是独立 presentation：它浮在系统窗口的更高层级上，
+        // 父视图的 opacity / zIndex / offset 全都管不到它。相册层盖上来时
+        // sheet 卡片仍会浮在最上面，只能 dismiss 掉 → 返回时再 present 一次，
         // 于是就有了「卡片被重新弹出来」的怪现象。
-        // 自绘层跟父视图同一层级，一起隐藏、一起显示，@State 全保留 ——
-        // 返回时卡片本来就在那儿，和系统导航「返回直接露出上一页」一样。
+        // 自绘层跟父视图同一层级：相册层盖上来时它自然被盖住，
+        // 返回（撤掉相册层）时卡片本来就在那儿，@State 全保留。
         .overlay {
             if showInfo, let photo { detailCard(photo) }
         }
@@ -1279,3 +1279,73 @@ private struct SimilarPhotoPage: View {
     }
 }
 
+
+// MARK: - 相册页层（盖在看图器之上）
+// 详情卡片点「进入相册」→ 这一层从右侧滑入、盖在看图器上（看图器与详情卡片全程不动）。
+// 返回两种方式：顶栏「返回」按钮 / 左边缘右滑拖拽。拖拽过程中下面的看图器和
+// 详情卡片实时可见 —— 这正是系统 push 做不到的效果：看图器 overlay 比-tab 导航栈高，
+// 系统 push 必须先把看图器藏起来，交互式返回滑到一半时 path 还没变，半路露馅。
+private struct AlbumPageLayer: View {
+    let target: AlbumOpenTarget
+    /// 撤掉本层（下面的看图器 + 详情卡片本来就在那儿）
+    var onClose: () -> Void
+
+    // 初始就顶到屏幕外：避免首帧闪现（GeometryReader 的宽度要到布局后才知道）
+    @State private var dragX: CGFloat = UIScreen.main.bounds.width
+    @State private var appeared = false
+
+    var body: some View {
+        GeometryReader { geo in
+            let w = geo.size.width
+            NavigationStack {
+                AlbumPhotosView(album: target.album, libID: target.libID,
+                                onBack: { closeAnimated(width: w) })
+            }
+            .offset(x: dragX)
+            // 左边缘拖拽条：替代系统的交互式返回手势（本层不是 push 进导航栈的）
+            .overlay(alignment: .leading) {
+                Color.clear
+                    .frame(width: 28)
+                    .contentShape(Rectangle())
+                    .gesture(edgeDrag(width: w))
+            }
+            .onAppear {
+                guard !appeared else { return }
+                appeared = true
+                withAnimation(.easeOut(duration: 0.24)) { dragX = 0 }
+            }
+        }
+        // 盖满整屏（RootView overlay 默认在安全区内，不忽略的话顶部/底栏处会露缝）
+        .ignoresSafeArea()
+    }
+
+    private func closeAnimated(width: CGFloat) {
+        withAnimation(.easeIn(duration: 0.2)) { dragX = width }
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            onClose()
+        }
+    }
+
+    private func edgeDrag(width: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 12)
+            .onChanged { v in
+                guard v.translation.width > 0 else { return }
+                dragX = v.translation.width
+            }
+            .onEnded { v in
+                // 拖过屏宽三成、或预测位移过半 → 放手滑出；否则弹回
+                let far = v.translation.width > width * 0.3
+                    || v.predictedEndTranslation.width > width * 0.55
+                if far {
+                    withAnimation(.easeOut(duration: 0.2)) { dragX = width }
+                    Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: 200_000_000)
+                        onClose()
+                    }
+                } else {
+                    withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) { dragX = 0 }
+                }
+            }
+    }
+}

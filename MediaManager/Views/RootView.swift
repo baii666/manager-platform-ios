@@ -46,7 +46,7 @@ struct RootView: View {
     //（fullScreen 呈现会把底层页面移出窗口层级，退出时露出的不是上一级而是空窗口 → 闪白）
     @ObservedObject private var photoViewer = PhotoViewerPresenter.shared
     @State private var tab: RootTab = .home
-    // 各 tab 的导航栈（看图器「进入相册」要跨 overlay 深链跳转，push 到当前 tab 栈顶）
+    // 各 tab 的导航栈（正常页面跳转用；看图器「进入相册」不走导航栈，见下面的相册层）
     @State private var homePath = NavigationPath()
     @State private var libraryPath = NavigationPath()
 
@@ -76,76 +76,42 @@ struct RootView: View {
         }
         // ⚠️ overlay 必须挂在 safeAreaInset **之后**（外层）：safeAreaInset 的内容
         // 合成在主内容之上，挂在它里面/之前会被底栏压住。看图器要盖住底栏。
+        // 看图器和相册层放**同一个 ZStack** 里用 zIndex 排序：
+        //  · 从详情卡片「进入相册」→ 相册层(z2)盖在看图器(z1)上；
+        //  · 相册页里点照片 → 看图器临时升到 z3（viewerAboveAlbum）。
+        // ⚠️ 相册层不能用系统 push：push 到 tab 导航栈的话看图器 overlay 比它高，
+        // 只能先把看图器藏起来 → 交互式返回滑到一半时 path 还没变，半路露出照片流。
+        // 相册层盖在看图器上，看图器全程可见，滑返回时下面实时露出看图器+详情卡片。
         .overlay {
-            // ⚠️ 挂起（suspended）时看图器**不能卸载**：保留在层级里，只是透明 + 不吃点击，
-            // 这样从相册页返回时它就是「一直在那儿」，详情卡片不会被重新弹一次。
-            // 只有真正退出（dismiss）才卸载。
-            if photoViewer.isVisible || photoViewer.suspended {
-                PhotoViewerView(
-                    photos: photoViewer.photos,
-                    index: photoViewer.startIndex,
-                    hasMore: photoViewer.hasMore,
-                    onLoadMore: photoViewer.onLoadMore,
-                    onClose: { photoViewer.dismiss() }
-                )
-                // ⚠️ 用 generation 驱动重建：photos/index 是 PhotoViewerView 创建时的快照，
-                // 不响应 presenter.photos 变化。点击相似图单图覆盖（show 换照片数组）时，
-                // 必须重建视图才能显示新图，否则状态错乱黑屏。
-                .id(photoViewer.generation)
-                // 打开时淡入（退出本身是内容自己淡出，不依赖 transition）
-                .transition(.opacity)
-                // 挂起 = 透明 + 不接收点击，相册页才能正常显示和滚动
-                .opacity(photoViewer.isVisible ? 1 : 0)
-                .allowsHitTesting(photoViewer.isVisible)
+            ZStack {
+                if photoViewer.isVisible {
+                    PhotoViewerView(
+                        photos: photoViewer.photos,
+                        index: photoViewer.startIndex,
+                        hasMore: photoViewer.hasMore,
+                        onLoadMore: photoViewer.onLoadMore,
+                        onClose: { photoViewer.dismiss() }
+                    )
+                    // ⚠️ 用 generation 驱动重建：photos/index 是 PhotoViewerView 创建时的快照，
+                    // 不响应 presenter.photos 变化。点击相似图单图覆盖（show 换照片数组）时，
+                    // 必须重建视图才能显示新图，否则状态错乱黑屏。
+                    .id(photoViewer.generation)
+                    // 打开时淡入（退出本身是内容自己淡出，不依赖 transition）
+                    .transition(.opacity)
+                    .zIndex(photoViewer.viewerAboveAlbum ? 3 : 1)
+                }
+                if photoViewer.albumPageTarget != nil {
+                    AlbumPageLayer(
+                        target: photoViewer.albumPageTarget!,
+                        onClose: { photoViewer.closeAlbum() }
+                    )
+                    .zIndex(2)
+                }
             }
         }
-        // ⚠️ 从相册页返回时不要淡入：要的是「pop 完直接露出看图器」，
-        // 淡入会让它看起来像是重新出现的一层。
-        .animation(skipViewerFadeIn ? nil : .easeIn(duration: 0.15), value: photoViewer.isVisible)
+        .animation(.easeIn(duration: 0.15), value: photoViewer.isVisible)
         // overlay 里 .statusBarHidden 可能不生效，在根上按看图器显隐统一控制
         .statusBarHidden(photoViewer.isVisible)
-        // 看图器「进入相册」→ 不切 tab，push 到「当前 tab」的导航栈顶。
-        // ⚠️ 看图器只是被遮住（suspended），相册页 pop 回来把透明度恢复即可 ——
-        // 见 PhotoViewerPresenter.openAlbum / resumeFromAlbum。
-        .onChange(of: photoViewer.openAlbumTarget) { _, target in
-            guard let target else { return }
-            photoViewer.openAlbumTarget = nil
-            switch tab {
-            case .home:
-                homePath.append(target)
-                pendingAlbumDepth = homePath.count
-                pendingAlbumTab = .home
-            case .library:
-                libraryPath.append(target)
-                pendingAlbumDepth = libraryPath.count
-                pendingAlbumTab = .library
-            default: break
-            }
-        }
-        // 相册页被 pop（栈变浅）→ 恢复看图器（不重建，详情卡片也还在）
-        .onChange(of: homePath.count) { _, count in self.checkAlbumPop(count, tab: .home) }
-        .onChange(of: libraryPath.count) { _, count in self.checkAlbumPop(count, tab: .library) }
-    }
-
-    /// 看图器 push 相册页时的栈深度（用来判断相册页是不是被弹掉了）
-    @State private var pendingAlbumDepth: Int? = nil
-    /// 挂起看图器时所在的 tab。⚠️ 必须记住：两个 tab 各有一个 path，
-    /// 切到另一个 tab 时那个栈的 count 也在变，只比数字会把「切 tab」误判成「相册页被弹掉」。
-    @State private var pendingAlbumTab: RootTab? = nil
-    /// 从相册页返回这一次不要淡入动画（见上面的 .animation）
-    @State private var skipViewerFadeIn = false
-
-    private func checkAlbumPop(_ count: Int, tab: RootTab) {
-        guard pendingAlbumTab == tab, let depth = pendingAlbumDepth, count < depth else { return }
-        pendingAlbumDepth = nil
-        pendingAlbumTab = nil
-        skipViewerFadeIn = true
-        photoViewer.resumeFromAlbum()
-        // 转场结束后把动画开关复位，下次打开看图器还有淡入
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 400_000_000)
-            self.skipViewerFadeIn = false
-        }
     }
 }
 
@@ -291,10 +257,6 @@ struct LibraryHomeView: View {
             case .photo: AlbumListView(library: lib)
             case .shoot: ShootListView(library: lib)
             }
-        }
-        // 看图器「进入相册」的深链目标：直接 push 相册页（跳过相册列表）
-        .navigationDestination(for: AlbumOpenTarget.self) { target in
-            AlbumPhotosView(album: target.album, libID: target.libID)
         }
         // ⚠️ TabView(.page) 底层是 UIPageViewController，它自带不透明底色，
         // 只靠 App 根的那层背景透不出来 —— 本页必须自己垫一层
