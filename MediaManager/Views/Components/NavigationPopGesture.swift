@@ -23,7 +23,10 @@ import SwiftUI
 ///
 /// ⚠️ 不能直接 `delegate = nil`：那样在栈底（root）右滑会触发一次找不到对应页面的
 /// pop 转场，界面卡死不动 —— UINavigationController 的经典坑。这里显式判 count > 1。
-private final class PopGestureDelegate: NSObject, UIGestureRecognizerDelegate {
+///
+/// ⚠️ 这里不能标 private：下面 SystemPopGestureEnabler 是 internal，它的三个协议方法
+/// 的签名里要用到这个类型，private 会让编译器要求那三个方法也降级成 fileprivate。
+final class PopGestureDelegate: NSObject, UIGestureRecognizerDelegate {
     weak var navigationController: UINavigationController?
 
     func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
@@ -32,7 +35,8 @@ private final class PopGestureDelegate: NSObject, UIGestureRecognizerDelegate {
 }
 
 /// 探测用的透明 VC：挂进 SwiftUI 层级，只为拿到它所在的 UINavigationController。
-private final class PopGestureProbeVC: UIViewController {
+/// ⚠️ 同 PopGestureDelegate，不能标 private（会被 SystemPopGestureEnabler 的方法签名用到）。
+final class PopGestureProbeVC: UIViewController {
     /// 桥接结果回传（成功 = 系统手势已接管）
     var onResolved: ((Bool) -> Void)?
 
@@ -72,10 +76,10 @@ private final class PopGestureProbeVC: UIViewController {
             previousDelegate = gr.delegate
             captured = true
         }
-        if gr.delegate !== popDelegate {
-            gr.isEnabled = true
-            gr.delegate = popDelegate
-        }
+        // 不做「delegate 是不是已经是我们」的判断：协议类型和具体类之间用 === 比较
+        // 在类型推断上有变数，而这里重复赋值的代价可以忽略（就是一次属性写入）
+        gr.isEnabled = true
+        gr.delegate = popDelegate
         popDelegate.navigationController = nc
         guard !reported else { return }
         reported = true
