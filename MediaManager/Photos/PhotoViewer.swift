@@ -516,7 +516,7 @@ struct PhotoViewerView: View {
             }
             .padding(12)
         }
-        .frame(width: 280, maxHeight: 380, alignment: .topLeading)
+        .frame(minWidth: 280, maxWidth: 280, maxHeight: 380, alignment: .topLeading)
         .background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
         .padding(.trailing, 16)
