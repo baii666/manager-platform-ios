@@ -131,11 +131,16 @@ struct SearchView: View {
                 onSubmit: { runSearch(query) },
                 onClear: { clearAll() }
             )
+            // 分类胶囊组也放 leading，紧跟搜索框（筛选就该挨着输入框）。
+            // ⚠️ 没有词 / 语义模式下整组不显示：空态时只有历史记录，语义模式只搜照片
+            if !activeQuery.isEmpty && !isSemantic {
+                ToolbarItem(placement: .topBarLeading) {
+                    categoryChips
+                }
+                .withoutGlass()
+            }
             // 右侧整组：与列表页同一个 TrailingToolsItem，间距/高度由 ToolbarMetrics 统一
             TrailingToolsItem {
-                // 分类选择：和搜索框同一行。做成下拉菜单而不是一排胶囊 ——
-                // 五个胶囊各带计数塞不进导航栏，会跟搜索框抢宽度
-                if !activeQuery.isEmpty && !isSemantic { categoryMenu }
                 // 语义开关：与首页搜索框里那个 sparkles 同一套语义（紫 = 开）。
                 // ⚠️ iPhone 只留图标：顶栏这一行要塞「返回 + 搜索框 + 分类 + 语义 + 转圈」，
                 // 文字那两个字符在窄屏上是第一个该让位的（图标 + 紫色足够表意）
@@ -169,11 +174,11 @@ struct SearchView: View {
     // ⚠️ 搜索框本体不再画在内容区：三个列表页已经把它放进了 navigationBar
     //（ListSearchBarItem，紧跟系统返回按钮），搜索页跟着同一套规范走。
 
-    /// iPhone 上的搜索框宽度。⚠️ 数值是「顶栏一行塞得下」倒推出来的：
-    /// 返回按钮(~44) + 搜索框 + 分类菜单(~50) + 语义图标(~28) + 转圈槽位(16) + 系统间距(~20)
-    /// ≈ 343 < 375（最小机型），再宽就会把右边那组挤没。
-    /// 列表页窄屏是 170（后面还跟着库名 + 排序 + 横竖版），搜索页比它略宽。
-    private static let compactFieldWidth: CGFloat = 185
+    /// iPhone 上的搜索框宽度（与列表页 narrow 同一个值 170）。
+    /// ⚠️ 当前排版以 iPad 为准（宽屏走 ListSearchBarItem.width = 280，空间充裕）；
+    /// iPhone 上顶栏还要再塞一整排分类胶囊，宽度必然不够，这里只是个临时值 ——
+    /// 等 iPhone 适配时分类组会换形态（大概率挪回内容区或改成分段控件），再一起定。
+    private static let compactFieldWidth: CGFloat = 170
 
     /// 语义开关。切完立刻重搜（词没变就不打接口）
     @MainActor
@@ -213,28 +218,41 @@ struct SearchView: View {
         .padding(.vertical, 8)
     }
 
-    // MARK: 分类选择（顶栏下拉菜单）
+    // MARK: 分类选择（顶栏胶囊组）
     //
-    // ⚠️ 之前是一排横滑胶囊（categoryBar），在内容区单独占一行；现在整页控件都收进顶栏，
-    // 五个胶囊还各带计数，塞不进导航栏那一行 —— 改成下拉菜单：
-    // 收起时只显示当前分类，展开后每一项带自己的结果数。
-    private var categoryMenu: some View {
-        ToolMenuChip(label: selectedTab.label) {
+    // ⚠️ 位置从内容区挪到了导航栏，紧跟搜索框 —— 整页控件收进顶栏那一行。
+    // ⚠️ 试过下拉菜单（ToolMenuChip），用户否掉了：本项目主要跑 iPad，横向空间足够，
+    //    分类是高频切换项，摊开成一排比藏进菜单里好点；iPhone 的拥挤问题后续再统一适配。
+    // ⚠️ 选中态保留胶囊底：ToolbarItem 加了 .withoutGlass()，iOS 26 那层共享玻璃底
+    //    已经去掉了，再画一层底不会变成「两层圆弧」。
+    private var categoryChips: some View {
+        HStack(spacing: 6) {
             ForEach(Tab.allCases, id: \.self) { tab in
                 Button {
                     selectedTab = tab
                     startSearch()
                 } label: {
-                    let count = tab.totalKeys.reduce(0) { $0 + (totals[$1] ?? 0) }
-                    if tab == selectedTab {
-                        Label(tab.label, systemImage: "checkmark")
-                    } else if count > 0 {
-                        // 计数只在展开的菜单里出现：顶栏 label 变了宽会推动左边整排按钮
-                        Text("\(tab.label)  \(count)")
-                    } else {
+                    HStack(spacing: 5) {
                         Text(tab.label)
+                        // 计数直接摊在胶囊里：iPad 横向空间够，不用藏进菜单。
+                        // ⚠️ 恒显（0 也显示）：按条件显示的话胶囊宽度会随计数有无变宽变窄，
+                        // 切分类时整排胶囊跟着左右挪。monospacedDigit 同理，
+                        // 位数变化（9→10）时数字本身不等宽会抖。
+                        Text("\(tab.totalKeys.reduce(0) { $0 + (totals[$1] ?? 0) })")
+                            .font(.caption2.monospacedDigit())
+                            // 计数恒为次级灰：选中项的标题已经是品牌色，
+                            // 数字再跟着变色整颗胶囊就太花了
+                            .foregroundStyle(.secondary)
                     }
+                    .font(.subheadline.weight(selectedTab == tab ? .semibold : .regular))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 5)
+                    .background(selectedTab == tab ? Theme.brand.opacity(0.15) : Color.clear,
+                                in: Capsule())
+                    // 未选中用次级灰：跟顶栏其它工具（排序/库筛选）同一个色调
+                    .foregroundStyle(selectedTab == tab ? Theme.brand : Color.secondary)
                 }
+                .buttonStyle(.plain)
             }
         }
     }
