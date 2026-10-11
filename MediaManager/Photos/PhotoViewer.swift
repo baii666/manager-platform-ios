@@ -81,7 +81,10 @@ struct PhotoViewerView: View {
             let topReserve: CGFloat = showThumbs ? 60 : 0
             let imageSize = CGSize(width: geo.size.width, height: geo.size.height - topReserve)
 
-            ZStack {
+            // ⚠️ 对齐 .top：ZStack 默认居中会让 imageLayer（高=全屏-topReserve）顶边落在
+            // topReserve/2，再叠加 offset(topReserve) 实际顶边=1.5×topReserve，条和图之间多出一段黑。
+            // 顶部对齐后 offset(topReserve) 恰好把图片顶边推到条的下沿，图片也更大。
+            ZStack(alignment: .top) {
                 Color.black.opacity(backgroundOpacity)
 
                 imageLayer(size: imageSize)
