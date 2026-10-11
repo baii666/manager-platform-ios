@@ -197,7 +197,7 @@ struct SearchView: View {
                 // 「已加载 / 总数」，列表页顶栏同款：等宽数字 + 固定槽位 + 与按钮分组的间隔。
                 // ⚠️ 同样只在宽屏显示：窄屏这一行已经很挤（iPhone 排版后续统一适配）
                 if hSizeClass == .regular, !activeQuery.isEmpty {
-                    Text("\(loadedCount) / \(currentTotal)")
+                    Text("\(shownLoaded) / \(shownTotal)")
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
                         // ⚠️ 不加 fixedSize：工具栏空间紧张时 Text 会被压缩换行，
@@ -276,10 +276,30 @@ struct SearchView: View {
         page = 1
         hasMore = false
         errorMessage = nil
+        shownLoaded = 0
+        shownTotal = 0
     }
 
     /// 顶栏「已加载 / 总数」的左边那个数：关键词结果 + 异步追加的语义结果
     private var loadedCount: Int { results.count + semanticItems.count }
+
+    // MARK: 顶栏计数快照
+    //
+    // ⚠️ 顶栏不直接读 loadedCount / currentTotal，读的是这两个快照。
+    // 原因：切分类 / 切语义的那一瞬间 results 被清空、总数被归零，
+    // 直接读就会看到「10 / 128 → 0 / 0 → 24 / 312」—— 中间那一下就是
+    // 切换 tab 时顶栏「闪一下」的来源。快照只在两种时刻更新：
+    // ① 结果真的回来了（loadMore / 语义成功）② 换了词 / 清空（立刻归零）。
+    // 同一个词切 tab 时旧数字一直挂着，新结果到了直接跳到新值，只有一次变化。
+    @State private var shownLoaded = 0
+    @State private var shownTotal = 0
+
+    /// 在**结果落地之后**刷新顶栏计数。切 tab 期间不调它，所以数字不会先归零
+    @MainActor
+    private func updateCountSnapshot() {
+        shownLoaded = loadedCount
+        shownTotal = currentTotal
+    }
 
     /// 顶栏「已加载 / 总数」的右边那个数。
     /// ⚠️ 优先用搜索响应自带的 total（和列表页 totalCount 同源）；后端没给（0，
@@ -322,7 +342,11 @@ struct SearchView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
-                    .font(.subheadline.weight(active == tab ? .semibold : .regular))
+                    // ⚠️ 字重**恒定**（不随选中态在 regular/semibold 之间切）：
+                    // 中文字重变化会让胶囊宽那么一两个点，切换时两个胶囊同时变宽/变窄，
+                    // 整排跟着左右挪 —— 这就是切 tab 时顶栏「晃一下」的另一半原因。
+                    // 选中态靠品牌色文字 + 15% 品牌色胶囊底表达，宽度完全不变。
+                    .font(.subheadline.weight(.medium))
                     .padding(.horizontal, 12)
                     .padding(.vertical, 5)
                     .background(active == tab ? Theme.brand.opacity(0.15) : Color.clear,
@@ -745,6 +769,7 @@ struct SearchView: View {
         guard !q.isEmpty else {
             results = []; totals = [:]; resultTotal = 0; similarity = [:]
             semanticTask?.cancel(); semanticItems = []; isSemanticLoading = false
+            shownLoaded = 0; shownTotal = 0
             return
         }
         SearchHistoryStore.add(q)
@@ -760,14 +785,17 @@ struct SearchView: View {
         // ⚠️ 点了按钮就按输入框里**当前的词**搜：用户可能改了词但没点搜索按钮，
         // 这时若沿用 activeQuery（上一次搜的词），按钮会看起来「点了没反应」
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        // ⚠️ 是不是**换了个词**：切分类 / 切语义时词没变，不该按「新搜索」处理
+        let newWord = !q.isEmpty && q != activeQuery
         if !q.isEmpty { activeQuery = q }
         semanticTask?.cancel()
         totalsTask?.cancel()
-        searchTask = Task { await reload() }
+        searchTask = Task { await reload(newWord: newWord) }
     }
 
+    /// - Parameter newWord: 这次是不是换了个词（而不是同一个词切分类 / 切语义）
     @MainActor
-    private func reload() async {
+    private func reload(newWord: Bool) async {
         // 词在这里定格：请求期间用户可能又改了词，回来时用它判断结果是否还有效
         let token = activeQuery
         guard let client, !token.isEmpty else {
@@ -775,16 +803,22 @@ struct SearchView: View {
         }
         errorMessage = nil
         page = 1; hasMore = true; results = []; similarity = [:]
-        // 计数先清空：它现在是并发取的，不清的话新词第一屏会顶着**上一个词**的数字
-        totals = [:]
-        // 换词了，语义那一组也整个作废（旧词的语义结果不能留在新词下面）
         semanticTask?.cancel()
-        semanticItems = []
         isSemanticLoading = false
-        // 换词了，总数也得跟着重来（否则新词第一页会顶着上一个词的总数）
-        keywordTotal = 0
-        semanticTotal = 0
-        resultTotal = 0
+        // ⚠️ 下面这些**只在换词时才清零**。
+        // 切分类 / 切语义是同一个词：清了就会看到「数字归零 → 请求回来再填回」，
+        // 顶栏那一闪就是这么来的。保留旧值等新结果覆盖，切换过程零跳变。
+        if newWord {
+            // 计数（/totals 是并发取的，不清的话新词第一屏会顶着上一个词的数字）
+            totals = [:]
+            // 语义那一组也整个作废（旧词的语义结果不能留在新词下面）
+            semanticItems = []
+            keywordTotal = 0
+            semanticTotal = 0
+            resultTotal = 0
+            shownLoaded = 0
+            shownTotal = 0
+        }
         if isSemantic {
             // 语义视图：只跑语义那一路。关键词结果在这页一条都不展示，
             // 再打一次关键词请求纯属浪费（还拖慢出结果的观感）
@@ -842,9 +876,14 @@ struct SearchView: View {
             let isFirstPage = (page == 1)
             if isFirstPage { results = p.items } else { results.append(contentsOf: p.items) }
             keywordTotal = p.total
-            resultTotal = keywordTotal + semanticItems.count
+            // ⚠️ 语义条数只在「会展示语义」的视图里加进总数：切到影视/相册这类
+            // 分类时 semanticItems 是同词保留下来的旧值（不清空是为了顶栏不闪），
+            // 但这一页根本不展示它们，加进去总数就虚高了
+            resultTotal = showsSemantic ? keywordTotal + semanticItems.count : keywordTotal
             page += 1
             hasMore = selectedTab == .all ? false : p.hasMore
+            // 结果落地了才刷新顶栏计数（切 tab 期间顶栏一直挂着上一次的数字）
+            updateCountSnapshot()
             // 语义匹配（CLIP 推理）明显比关键词搜索慢，**异步**跑：
             // 关键词结果先落地渲染，语义结果到了再追加到最后一组 / 最后一段，
             // 不让慢的那一路拖住整页出结果。
@@ -867,12 +906,15 @@ struct SearchView: View {
     /// · 影视/相册/拍摄集分类下不打（那几类没有向量）；
     /// · 失败一律静默（服务端没加载 CLIP 会返回 503），
     ///   绝不能让语义不可用把关键词搜索的结果也拖没了。
+    /// 当前视图会不会展示语义结果：语义视图整页都是它，「全部」是最后那一组。
+    /// 影视 / 相册 / 照片 / 拍摄集这些分类下不展示（也不打语义请求）。
+    private var showsSemantic: Bool { isSemantic || selectedTab == .all }
+
     @MainActor
     private func startSemantic(token: String) {
-        // ⚠️ 括号不能省：&& 优先级高于 ||，而且 guard let 绑定不能只出现在 || 的一侧。
         // ⚠️ 只有「全部」（最后那组语义）和语义视图才打语义请求：
         // 照片 tab 已经不展示语义了，打了也是白打
-        guard let client, (isSemantic || selectedTab == .all) else { return }
+        guard let client, showsSemantic else { return }
         semanticTask?.cancel()
         isSemanticLoading = true
         semanticTask = Task { @MainActor in
@@ -920,6 +962,8 @@ struct SearchView: View {
             // ⚠️ reload 里先把 hasMore 设成了 false（语义视图不打关键词请求），
             // 真正的判断只能等语义响应回来
             if isSemantic { hasMore = !added.isEmpty && added.count < total }
+            // 语义结果落地，顶栏计数跟着刷新
+            updateCountSnapshot()
         }
     }
 
@@ -956,6 +1000,7 @@ struct SearchView: View {
             semanticTotal = p.total
             resultTotal = p.total
             hasMore = !added.isEmpty && semanticItems.count < p.total
+            updateCountSnapshot()
         } catch {
             guard !Task.isCancelled, token == activeQuery else { return }
             // 静默：翻页失败就当作没有更多，不要把整页结果变成错误态
