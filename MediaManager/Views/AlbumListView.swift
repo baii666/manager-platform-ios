@@ -218,13 +218,6 @@ struct AlbumListView: View {
         // sheet 的「完成」按钮由外层 HomeView 的 confirmationAction 提供。
         // ⚠️ 系统返回按钮必须留着：藏了它右滑手势会一起没（见 MediaListView 注释）。
         // 跨库模式是栈底没有上一层，系统不会给返回按钮。
-            // iPadOS 26 会给系统返回按钮套一层玻璃底：这里只去掉外观，
-            // 不动按钮本身（藏掉它右滑返回手势会一起没，见 MediaListView 注释）
-            .background(alignment: .topLeading) {
-                BackButtonGlassHider()
-                    .frame(width: 1, height: 1)
-                    .allowsHitTesting(false)
-            }
         .toolbar {
             ToolbarItem(placement: .principal) {
                 ListSearchBar(text: $viewModel.searchText,
@@ -244,16 +237,16 @@ struct AlbumListView: View {
                          highlighted: layout.landscape) {
                     layout.toggleOrientation()
                 }
-                // 窄屏（iPhone）塞不下：滑块与计数是冗余信息（捏合也能缩放），优先让位
-                if hSizeClass == .regular {
-                    ToolSlider(icon: "arrow.up.left.and.arrow.down.right", layout: layout)
-                }
                 // 固定库模式不显示库筛选
                 if library == nil && viewModel.libraries.count > 1 { libraryMenu }
                 if hSizeClass == .regular {
                     Text("\(viewModel.albums.count) / \(viewModel.totalCount)")
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
+                        // ⚠️ 不加 fixedSize：工具栏空间紧张时 Text 会被压缩换行，
+                        // 变成「1234 / 5678」上下两行，把导航栏撑高
+                        .fixedSize(horizontal: true, vertical: false)
+                        .lineLimit(1)
                 }
             }
             .withoutGlass()

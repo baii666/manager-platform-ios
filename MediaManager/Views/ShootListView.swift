@@ -44,13 +44,6 @@ struct ShootListView: View {
         // push 后不渲染下一层，自定义手势只能推出白屏）。搜索框放 principal 位，
         // 导航栏因而不额外占高度，系统返回按钮正好在搜索框左边。
         // ⚠️ 系统返回按钮必须留着：藏了它右滑手势会一起没（见 MediaListView 注释）
-            // iPadOS 26 会给系统返回按钮套一层玻璃底：这里只去掉外观，
-            // 不动按钮本身（藏掉它右滑返回手势会一起没，见 MediaListView 注释）
-            .background(alignment: .topLeading) {
-                BackButtonGlassHider()
-                    .frame(width: 1, height: 1)
-                    .allowsHitTesting(false)
-            }
         .toolbar {
             ToolbarItem(placement: .principal) {
                 ListSearchBar(text: $viewModel.searchText,
@@ -70,6 +63,10 @@ struct ShootListView: View {
                     Text("\(viewModel.items.count) / \(viewModel.totalCount)")
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
+                        // ⚠️ 不加 fixedSize：工具栏空间紧张时 Text 会被压缩换行，
+                        // 变成「1234 / 5678」上下两行，把导航栏撑高
+                        .fixedSize(horizontal: true, vertical: false)
+                        .lineLimit(1)
                 }
             }
             .withoutGlass()

@@ -234,13 +234,6 @@ struct MediaListView: View {
         // .navigationBarBackButtonHidden(true) 会把 interactivePop 一起禁掉，
         // 而且没有任何可靠手段能单独把手势取回来（自定义位移会白屏，
         // UIKit 桥接在这个场景下也接管不了转场）。样式只能走 tint / appearance。
-            // iPadOS 26 会给系统返回按钮套一层玻璃底：这里只去掉外观，
-            // 不动按钮本身（藏掉它右滑返回手势会一起没，见 MediaListView 注释）
-            .background(alignment: .topLeading) {
-                BackButtonGlassHider()
-                    .frame(width: 1, height: 1)
-                    .allowsHitTesting(false)
-            }
         .toolbar {
             ToolbarItem(placement: .principal) {
                 ListSearchBar(text: $viewModel.searchText,
@@ -259,16 +252,16 @@ struct MediaListView: View {
                          highlighted: layout.landscape) {
                     layout.toggleOrientation()
                 }
-                // 窄屏（iPhone）塞不下：滑块与计数是冗余信息（捏合也能缩放），优先让位
-                if hSizeClass == .regular {
-                    ToolSlider(icon: "arrow.up.left.and.arrow.down.right", layout: layout)
-                }
                 // 固定库模式不显示库筛选（只有一个库）
                 if library == nil && !viewModel.libraries.isEmpty { libraryMenu }
                 if hSizeClass == .regular {
                     Text("\(viewModel.items.count) / \(viewModel.totalCount)")
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
+                        // ⚠️ 不加 fixedSize：工具栏空间紧张时 Text 会被压缩换行，
+                        // 变成「1234 / 5678」上下两行，把导航栏撑高
+                        .fixedSize(horizontal: true, vertical: false)
+                        .lineLimit(1)
                 }
             }
             .withoutGlass()

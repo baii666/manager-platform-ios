@@ -13,6 +13,10 @@ struct MediaManagerApp: App {
         let memory = 128 * 1024 * 1024        // 128 MB 内存
         let disk = 1024 * 1024 * 1024         // 1 GB 磁盘
         URLCache.shared = URLCache(memoryCapacity: memory, diskCapacity: disk, diskPath: "imgcache")
+
+        // 返回按钮样式（只剩箭头 + 品牌色）。必须在这里统一配：它是全局的，
+        // 且 setBackButtonTitlePositionAdjustment 只对 appearance 代理生效。
+        NavigationBarStyle.configure()
     }
 
     var body: some Scene {

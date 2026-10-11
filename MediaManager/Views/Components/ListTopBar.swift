@@ -211,36 +211,6 @@ final class CardLayoutController: ObservableObject {
     }
 }
 
-/// 尺寸滑块：图标 + 滑块 + 数值，对齐网页版顶部 range input
-struct ToolSlider: View {
-    let icon: String
-    @ObservedObject var layout: CardLayoutController
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: icon)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.secondary)
-            Slider(
-                value: Binding(
-                    get: { layout.cardWidth },
-                    set: { layout.resize(to: $0) }
-                ),
-                in: layout.range,
-                onEditingChanged: { editing in
-                    // 拖动中只改内存，松手才落盘
-                    if !editing { layout.commit() }
-                }
-            )
-            .frame(width: 88)
-            Text("\(Int(layout.cardWidth))")
-                .font(.caption2.monospacedDigit())
-                .foregroundStyle(.secondary)
-                .frame(width: 30, alignment: .trailing)
-        }
-    }
-}
-
 // MARK: - 右滑返回（⚠️ 当前停用，保留备用）
 //
 // 列表页以前为了「搜索框贴顶」隐藏导航栏，系统右滑返回随之失效，只能自己兜底。
