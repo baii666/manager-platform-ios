@@ -133,27 +133,25 @@ struct SearchView: View {
                 fieldWidth: hSizeClass == .compact ? Self.compactFieldWidth : nil,
                 focus: $fieldFocused,
                 onSubmit: { runSearch(query) },
-                onClear: { clearAll() }
+                onClear: { clearAll() },
+                // 「🔍搜索」放进搜索框里（对齐网页端样式），点了立刻搜，绕过防抖
+                searchAction: { runSearch(query) },
+                searchDisabled: query.trimmingCharacters(in: .whitespaces).isEmpty
             )
-            // 紧跟搜索框的一组：语义开关 → 搜索按钮 → 分类胶囊组。
+            // 紧跟搜索框的一组：分类胶囊 → 语义开关。
             // ⚠️ 必须全部收进同一个 ToolbarItem：之前分类组单独占一个 leading item，
             // 实测被系统挤到只剩一个圆点（多个 leading item 的宽度分配不可控），
             // 收进一个 HStack 后间距、先后顺序都由我们自己说了算。
+            //
+            // ⚠️ 这些按钮没有各自的特殊逻辑：点了就是「按当前条件搜一次」——
+            // 分类决定搜哪类、语义决定按不按画面搜，都复用同一条搜索链路。
             ToolbarItem(placement: .topBarLeading) {
                 HStack(spacing: 4) {
-                    // 搜索按钮：防抖之外给一个明确的「立刻搜」出口（不用等 350ms，也不用按回车）
-                    ToolChip(label: "搜索", icon: "magnifyingglass") {
-                        runSearch(query)
-                    }
-                    // 空词没什么可搜的，按钮置灰
-                    .disabled(query.trimmingCharacters(in: .whitespaces).isEmpty)
-                    // 分类胶囊组：整组占位始终在。
-                    // ⚠️ 语义模式下**置灰而不是隐藏**（.disabled）—— 隐藏会让后面的
-                    // 语义按钮整体左移，用户要求点它时前面的东西别动。
-                    // 灰掉既保住了位置，也说明了「语义模式不按分类搜」。
+                    // 分类胶囊组：始终可点。语义模式下点分类 = 自动退出语义、按该分类搜
+                    //（分类和语义互斥：语义只出照片，用户点了分类就是想按类型搜）。
+                    // ⚠️ 之前试过语义模式下置灰，用户否了——后面的按钮都要能点、点了就搜。
                     if !activeQuery.isEmpty {
                         categoryChips
-                            .disabled(isSemantic)
                             // ⚠️ 防压缩：这个组之前被系统压到只剩一个圆点，
                             // fixedSize 让按钮文字保持完整，空间不足宁可溢出也不缩成空壳
                             .fixedSize(horizontal: true, vertical: false)
@@ -225,6 +223,16 @@ struct SearchView: View {
         if !activeQuery.isEmpty { startSearch() }
     }
 
+    /// 切分类 = 「回到普通搜索 + 按该类型搜」。
+    /// ⚠️ 顺手把语义关掉：语义只出照片，用户点了某个分类就是想按类型搜，
+    /// 这不是给语义模式做的特殊分支，就是分类本身的使用方式（和其它按钮同一条链路）。
+    @MainActor
+    private func selectTab(_ tab: Tab) {
+        isSemantic = false
+        selectedTab = tab
+        startSearch()
+    }
+
     /// 顶栏搜索框的清除按钮：词和结果一起清，不等防抖
     @MainActor
     private func clearAll() {
@@ -277,8 +285,7 @@ struct SearchView: View {
         HStack(spacing: 6) {
             ForEach(Tab.allCases, id: \.self) { tab in
                 Button {
-                    selectedTab = tab
-                    startSearch()
+                    selectTab(tab)
                 } label: {
                     HStack(spacing: 5) {
                         Text(tab.label)
@@ -392,8 +399,7 @@ struct SearchView: View {
                             Spacer()
                             Button {
                                 // tv 不是 Tab 的 case，「剧集」分组的查看全部落到「影视」
-                                selectedTab = section.type == "tv" ? .movie : (Tab(rawValue: section.type) ?? .all)
-                                startSearch()
+                                selectTab(section.type == "tv" ? .movie : (Tab(rawValue: section.type) ?? .all))
                             } label: {
                                 Text("查看全部").font(.caption)
                             }

@@ -21,12 +21,22 @@ struct ListSearchBar: View {
     /// 回调里再读它可能读到旧值（反而把旧词重搜一遍），所以单独给一个出口，
     /// 让调用方能立刻把结果清掉，不用等防抖那 350ms。
     var onClear: (() -> Void)? = nil
+    /// 搜索框**里面**右侧的「🔍搜索」按钮（带竖线分隔，对齐网页端样式）。
+    /// nil = 不显示（三个列表页都是 nil，外观不变）。
+    /// ⚠️ 有这个按钮时左侧的放大镜图标会隐藏 —— 框里同时出现两个放大镜太重复。
+    var searchAction: (() -> Void)? = nil
+    /// 搜索按钮的禁用态（词为空时置灰）。disabled 环境传不进自定义 Button 样式，
+    /// 颜色得在这里自己处理。
+    var searchDisabled: Bool = false
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(.secondary)
+            if searchAction == nil {
+                // 左侧放大镜只在没有框内搜索按钮时显示，否则一只框里两个放大镜
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
             field
             if !text.isEmpty {
                 Button {
@@ -38,6 +48,23 @@ struct ListSearchBar: View {
                         .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
+            }
+            if let searchAction {
+                // 竖线分隔 + 「🔍搜索」：框内按钮，点了立刻搜（绕过防抖）
+                Divider()
+                    .frame(height: 16)
+                Button(action: searchAction) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 13, weight: .semibold))
+                        Text("搜索")
+                            .font(.subheadline.weight(.semibold))
+                    }
+                    .foregroundStyle(searchDisabled ? Color.secondary.opacity(0.4) : Color.primary)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(searchDisabled)
             }
         }
         .padding(.horizontal, 12)
@@ -112,6 +139,9 @@ struct ListSearchBarItem: ToolbarContent {
     var focus: FocusState<Bool>.Binding? = nil
     var onSubmit: (() -> Void)? = nil
     var onClear: (() -> Void)? = nil
+    /// 透传给 ListSearchBar：框内「🔍搜索」按钮（搜索页用，列表页不传）
+    var searchAction: (() -> Void)? = nil
+    var searchDisabled: Bool = false
 
     /// 固定宽度（宽屏）。想要更长/更短只改这一个数字。
     static let width: CGFloat = 280
@@ -122,7 +152,8 @@ struct ListSearchBarItem: ToolbarContent {
         ToolbarItem(placement: .topBarLeading) {
             HStack(spacing: 10) {
                 ListSearchBar(text: $text, placeholder: placeholder, compact: true,
-                              focus: focus, onSubmit: onSubmit, onClear: onClear)
+                              focus: focus, onSubmit: onSubmit, onClear: onClear,
+                              searchAction: searchAction, searchDisabled: searchDisabled)
                     // ⚠️ 就是死宽：搜索框长度恒定，不随可用空间伸缩
                     //（试过 min/ideal/max 让它可回缩，结果它一缩用户就看出来了 ——
                     //  后面明明还有一大片空位，没必要让搜索框让路）
