@@ -106,7 +106,9 @@ struct ListSearchBarItem: ToolbarContent {
                         // minWidth 120 ≈ 8 个汉字 —— iPad 上随便都够 5 个字以上，
                         // 空间再紧也不会被压没；layoutPriority 高于搜索框（默认 0），
                         // 分配空间时先满足库名，剩下的才轮到前面的搜索框。
-                        .frame(minWidth: 120)
+                        // ⚠️ alignment 必须写 .leading：frame 默认居中，名字短的时候
+                        // 会在那 120pt 里居中摆放，看着离搜索框老远。
+                        .frame(minWidth: 120, alignment: .leading)
                         .layoutPriority(1)
                 }
             }
