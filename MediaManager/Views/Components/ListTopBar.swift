@@ -81,27 +81,36 @@ struct ListSearchBarItem: ToolbarContent {
     /// 窄屏（iPhone）：一行要塞下「返回 + 搜索 + 库名 + 排序 + 横竖版」，搜索框缩短给库名让位
     var narrow: Bool = false
 
-    /// 固定宽度。想要更长/更短只改这一个数字。
+    /// 固定宽度（宽屏）。想要更长/更短只改这一个数字。
     static let width: CGFloat = 280
     /// 窄屏下的搜索框宽度（见 narrow）
     static let narrowWidth: CGFloat = 170
+    /// 空间不足时搜索框能缩到的下限（再窄就没法打字了）
+    static let minSearchWidth: CGFloat = 90
 
     var body: some ToolbarContent {
         ToolbarItem(placement: .topBarLeading) {
             HStack(spacing: 10) {
                 ListSearchBar(text: $text, placeholder: placeholder, compact: true)
-                    // ⚠️ 固定宽度而非 maxWidth：工具栏空间不足时会被压缩，
-                    // 但有了确定值至少三个页面压出来是同一个长度
-                    .frame(width: narrow ? Self.narrowWidth : Self.width)
+                    // ⚠️ 不能写死 .frame(width:)：固定宽的搜索框会把整段 leading 占满，
+                    // 后面的库名被压成 0 宽 —— 库名就是这么「不显示」的。
+                    // 写成 min/ideal/max 三段：空间够就是 width，不够自己往回缩。
+                    .frame(minWidth: Self.minSearchWidth,
+                           idealWidth: narrow ? Self.narrowWidth : Self.width,
+                           maxWidth: narrow ? Self.narrowWidth : Self.width)
                 if let title {
-                    // 库名紧跟搜索框。文字可压缩但不设上限：够宽就整段显示（拉长），
-                    // 不够才尾部省略 —— 不会反过来把右侧的工具按钮挤掉。
+                    // 库名紧跟搜索框。够宽就整段显示（拉长），不够才尾部省略。
                     // 颜色跟计数（"34 / 120"）一致，整条状态栏一个色调。
                     Text(title)
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.tail)
+                        // ⚠️ 这两行是库名「不消失」的保险：
+                        // minWidth 保证再挤也留一截；layoutPriority 高于搜索框（默认 0），
+                        // 空间不够时先压搜索框，库名保住自己的宽度。
+                        .frame(minWidth: 40)
+                        .layoutPriority(1)
                 }
             }
         }
@@ -176,6 +185,10 @@ struct ToolMenuChip<Content: View>: View {
             .padding(.vertical, 6)
             .contentShape(Rectangle())
         }
+        // ⚠️ 光在 label 里写 .foregroundStyle 没用：Menu 是「控件」，页面上的
+        // .tint(Theme.brand) 会把它的标题和展开后的菜单一起染成品牌色。
+        // 必须显式给控件本身换 tint（次级灰 = 与计数同一个颜色）才压得住。
+        .tint(Color.secondary)
     }
 }
 

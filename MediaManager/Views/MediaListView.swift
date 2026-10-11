@@ -352,6 +352,9 @@ struct MediaListView: View {
             // 与整条状态栏（含计数）统一成次级灰
             .foregroundStyle(.secondary)
         }
+        // ⚠️ Menu 是控件，页面上的 .tint(Theme.brand) 会盖掉 label 里的
+        // foregroundStyle（标题和展开后的菜单都变品牌色），必须给控件本身换 tint
+        .tint(Color.secondary)
     }
 }
 
