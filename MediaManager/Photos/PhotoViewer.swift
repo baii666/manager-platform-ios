@@ -76,9 +76,9 @@ struct PhotoViewerView: View {
         GeometryReader { geo in
             // ignoresSafeArea 后 geo.size = 整块屏幕；UI 元素用 safeAreaInsets 避让
             let safe = geo.safeAreaInsets
-            // 缩略图条展开时，顶部让出「顶部栏区(52) + 缩略图条(68)」的高度，
-            // 图片在其下方完整显示、不再被缩略图条盖住。
-            let topReserve: CGFloat = showThumbs ? (52 + 68 + safe.top) : 0
+            // 缩略图条展开时：条直接贴顶盖住顶栏（黑底不透明，计数/关闭本就被挡住），
+            // 图片紧贴条下方，不再额外让出「顶栏 + 状态栏」的黑边
+            let topReserve: CGFloat = showThumbs ? 60 : 0
             let imageSize = CGSize(width: geo.size.width, height: geo.size.height - topReserve)
 
             ZStack {
@@ -97,7 +97,8 @@ struct PhotoViewerView: View {
             .overlay(alignment: .top) {
                 if showThumbs {
                     thumbStrip
-                        .padding(.top, 52 + safe.top)
+                        // 条贴屏幕最顶（状态栏已隐藏），不再给 topBar/灵动岛留黑边
+                        .padding(.top, 0)
                 }
             }
             .onAppear { containerSize = imageSize }
@@ -874,10 +875,10 @@ struct PhotoViewerView: View {
                     }
                 }
                 .padding(.horizontal, 10)
-                .padding(.vertical, 8)
+                .padding(.vertical, 4)
             }
             .frame(maxWidth: .infinity)
-            .frame(height: 68)  // ⚠️ 固定高度：ScrollView 在 overlay 里会被提议全屏高，不加就会撑满、纯黑背景盖住图片/按钮并吃掉点击
+            .frame(height: 60)  // ⚠️ 固定高度：ScrollView 在 overlay 里会被提议全屏高，不加就会撑满、纯黑背景盖住图片/按钮并吃掉点击
             .background(Color.black)  // 纯黑不透明，避免半透明蒙层透出底图
             .onAppear { scrollStrip(proxy) }
             .onChange(of: index) { _, _ in scrollStrip(proxy) }
