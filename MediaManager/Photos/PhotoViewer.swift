@@ -50,14 +50,11 @@ struct PhotoViewerView: View {
     @State private var isLoadingDetail = false
     @State private var detailTask: Task<Void, Never>?
 
-    // 人脸检测 + 相似图片（详情卡片的核心功能，按需展开）
+    // 人脸检测 + 相似图片（详情卡片的核心功能，打开时直接加载）
     @State private var faces: [PhotoFace] = []
     @State private var facesLoading = false
-    @State private var showFaces = false
     @State private var similarPhotos: [SimilarPhoto] = []
     @State private var similarLoading = false
-    @State private var showSimilar = false
-    @State private var similarMethod = "phash"
 
     private var client: APIClient? { AppSession.shared.client }
 
@@ -78,7 +75,7 @@ struct PhotoViewerView: View {
             let safe = geo.safeAreaInsets
             // 缩略图条展开时：条直接贴顶盖住顶栏（黑底不透明，计数/关闭本就被挡住），
             // 图片紧贴条下方，不再额外让出「顶栏 + 状态栏」的黑边
-            let topReserve: CGFloat = showThumbs ? 72 : 0
+            let topReserve: CGFloat = showThumbs ? 136 : 0
             let imageSize = CGSize(width: geo.size.width, height: geo.size.height - topReserve)
 
             // ⚠️ 对齐 .top：ZStack 默认居中会让 imageLayer（高=全屏-topReserve）顶边落在
@@ -332,9 +329,7 @@ struct PhotoViewerView: View {
         if hasMore, index >= photos.count - 3 { onLoadMore?() }
         // 翻页：清掉上一张的人脸/相似结果（避免串图）
         faces = []
-        showFaces = false
         similarPhotos = []
-        showSimilar = false
         // 信息面板开着时，翻页要同步刷新详情（否则会一直显示上一张的 EXIF）
         if showInfo { loadDetail() }
         scheduleIdleHide()
@@ -455,6 +450,7 @@ struct PhotoViewerView: View {
     // MARK: - 信息面板（图片详情卡片）
 
     /// 异步拉取当前图片的详情（EXIF / AI 标注），翻页或点信息按钮时调用。
+    /// 打开详情时**直接并行拉取人脸 + 语义相似**，不再靠按钮按需加载。
     private func loadDetail() {
         guard let client, let photo else { return }
         // 已加载过同一张，直接复用，避免重复请求
@@ -462,6 +458,9 @@ struct PhotoViewerView: View {
         detailTask?.cancel()
         photoDetail = nil
         isLoadingDetail = true
+        // 人脸 / 语义相似与详情并行拉取
+        loadFaces()
+        loadSimilar()
         detailTask = Task { @MainActor in
             do {
                 photoDetail = try await client.fetchPhotoDetail(id: photo.id)
@@ -486,15 +485,14 @@ struct PhotoViewerView: View {
         }
     }
 
-    /// 加载相似图片（method: phash | clip）
-    private func loadSimilar(method: String) {
+    /// 加载语义相似图片（固定 clip 余弦相似度）
+    private func loadSimilar() {
         guard let client, let photo else { return }
-        similarMethod = method
         similarLoading = true
         similarPhotos = []
         Task { @MainActor in
             do {
-                similarPhotos = try await client.fetchSimilarPhotos(photoId: photo.id, method: method)
+                similarPhotos = try await client.fetchSimilarPhotos(photoId: photo.id, method: "clip")
             } catch {
                 similarPhotos = []
             }
@@ -510,39 +508,48 @@ struct PhotoViewerView: View {
         PhotoViewerPresenter.shared.openAlbum(album, libID: libID)
     }
 
+    /// 点击相似图查看：若它正好在当前照片列表里则直接翻页跳转；
+    /// 否则构造一个单图 Photo 重新打开看图器（全局 presenter），跨列表也能看。
+    private func viewSimilarPhoto(_ sp: SimilarPhoto) {
+        showInfo = false
+        if let idx = photos.firstIndex(where: { $0.id == sp.id }) {
+            index = idx
+            resetTransform()
+            imagePixelSize = nil
+            return
+        }
+        // 构造单图：id + 尺寸 + 原图/缩略图 URL 即可驱动 ViewerImageView
+        var p = Photo(id: sp.id)
+        p.fileName = sp.fileName.isEmpty ? nil : sp.fileName
+        p.width = sp.width
+        p.height = sp.height
+        if let full = client?.makeURL("/photo", queryItems: [
+            URLQueryItem(name: "id", value: "\(sp.id)"),
+            URLQueryItem(name: "size", value: "original"),
+        ]) {
+            p.fullURL = full
+        }
+        if let thumb = client?.makeURL("/photo", queryItems: [
+            URLQueryItem(name: "id", value: "\(sp.id)"),
+            URLQueryItem(name: "size", value: "600"),
+        ]) {
+            p.thumbURL = thumb
+        }
+        // 用单图覆盖当前看图器（show 会更新 photos + startIndex，overlay 自动重建到该图）
+        PhotoViewerPresenter.shared.show([p], index: 0, hasMore: false, onLoadMore: nil)
+    }
+
     private func detailSheet(_ photo: Photo) -> some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    // 功能按钮：人脸 / 像素相似 / 语义相似
-                    HStack(spacing: 8) {
-                        actionButton("人脸", active: showFaces) {
-                            withAnimation { showFaces.toggle() }
-                            if showFaces && faces.isEmpty { loadFaces() }
-                        }
-                        actionButton("像素相似", active: showSimilar && similarMethod == "phash") {
-                            if showSimilar && similarMethod == "phash" {
-                                withAnimation { showSimilar = false }
-                            } else {
-                                withAnimation { showSimilar = true }
-                                loadSimilar(method: "phash")
-                            }
-                        }
-                        actionButton("语义相似", active: showSimilar && similarMethod == "clip") {
-                            if showSimilar && similarMethod == "clip" {
-                                withAnimation { showSimilar = false }
-                            } else {
-                                withAnimation { showSimilar = true }
-                                loadSimilar(method: "clip")
-                            }
-                        }
-                    }
+                    // 语义相似图片（打开详情即加载，无需按钮）
+                    sectionTitle("语义相似图片")
+                    similarSection
 
-                    // 相似图片结果
-                    if showSimilar { similarSection }
-
-                    // 人脸列表
-                    if showFaces { facesSection }
+                    // 人脸检测（打开详情即加载）
+                    sectionTitle("人脸检测")
+                    facesSection
 
                     // 基本信息
                     sectionTitle("基本信息")
@@ -673,19 +680,6 @@ struct PhotoViewerView: View {
         (d.gpsLat != nil && d.gpsLng != nil)
     }
 
-    /// 功能按钮（人脸 / 像素相似 / 语义相似）
-    private func actionButton(_ title: String, active: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(title)
-                .font(.caption)
-                .foregroundStyle(active ? Theme.brand : Color.primary)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(active ? Theme.brand.opacity(0.15) : Color(uiColor: .secondarySystemBackground), in: Capsule())
-        }
-        .buttonStyle(.plain)
-    }
-
     /// 相似图片结果网格
     private var similarSection: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -695,28 +689,20 @@ struct PhotoViewerView: View {
                     Text("搜索中…").font(.caption).foregroundStyle(.secondary)
                 }
             } else if similarPhotos.isEmpty {
-                Text(similarMethod == "phash"
-                     ? "未找到相似图片"
-                     : "未找到语义相似图片（可能该图未生成 CLIP embedding）")
+                Text("未找到语义相似图片（可能该图未生成 CLIP embedding）")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 62), spacing: 6)], spacing: 6) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 72), spacing: 8)], spacing: 8) {
                     ForEach(similarPhotos) { sp in
                         Button {
-                            // 相似图在当前列表里则跳转（先关 sheet，看图器翻页后可按需再开）
-                            if let idx = photos.firstIndex(where: { $0.id == sp.id }) {
-                                showInfo = false
-                                index = idx
-                                resetTransform()
-                                imagePixelSize = nil
-                            }
+                            viewSimilarPhoto(sp)
                         } label: {
                             ViewerThumb(url: client?.makeURL("/photo", queryItems: [
                                 URLQueryItem(name: "id", value: "\(sp.id)"),
                                 URLQueryItem(name: "size", value: "600"),
                             ]))
-                            .frame(width: 62, height: 62)
+                            .frame(width: 72, height: 72)
                             .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                             .overlay(alignment: .bottom) {
                                 if let score = sp.scoreText {
@@ -865,10 +851,10 @@ struct PhotoViewerView: View {
                             imagePixelSize = nil
                         } label: {
                             ViewerThumb(url: entry.photo.thumbURL ?? entry.photo.fullURL)
-                                .frame(width: 64, height: 64)
-                                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                                .frame(width: 128, height: 128)
+                                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                                 .overlay {
-                                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
                                         .stroke(entry.index == index ? Color.blue : .clear, lineWidth: 2)
                                 }
                                 .opacity(entry.index == index ? 1 : 0.55)
@@ -881,7 +867,7 @@ struct PhotoViewerView: View {
                 .padding(.vertical, 4)
             }
             .frame(maxWidth: .infinity)
-            .frame(height: 72)  // ⚠️ 固定高度：ScrollView 在 overlay 里会被提议全屏高，不加就会撑满、纯黑背景盖住图片/按钮并吃掉点击
+            .frame(height: 136)  // ⚠️ 固定高度：ScrollView 在 overlay 里会被提议全屏高，不加就会撑满、纯黑背景盖住图片/按钮并吃掉点击
             .background(Color.black)  // 纯黑不透明，避免半透明蒙层透出底图
             .onAppear { scrollStrip(proxy) }
             .onChange(of: index) { _, _ in scrollStrip(proxy) }
