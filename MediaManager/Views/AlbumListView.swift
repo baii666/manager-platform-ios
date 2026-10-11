@@ -278,7 +278,7 @@ struct AlbumListView: View {
 
     /// 排序选择（对齐网页版列表页顶部状态栏）
     private var sortMenu: some View {
-        ToolMenuChip(label: viewModel.sort.label, icon: "arrow.up.arrow.down") {
+        ToolMenuChip(label: viewModel.sort.label) {
             ForEach(AlbumListViewModel.Sort.allCases, id: \.self) { s in
                 Button {
                     Task { await viewModel.setSort(s) }

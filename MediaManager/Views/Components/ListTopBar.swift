@@ -102,10 +102,11 @@ struct ListSearchBarItem: ToolbarContent {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.tail)
-                        // ⚠️ 这两行是库名「不消失」的保险：
-                        // minWidth 保证再挤也留一截；layoutPriority 高于搜索框（默认 0），
-                        // 分配空间时先满足库名。
-                        .frame(minWidth: 40)
+                        // ⚠️ 这两行是库名「不消失 / 不被截太短」的保险：
+                        // minWidth 120 ≈ 8 个汉字 —— iPad 上随便都够 5 个字以上，
+                        // 空间再紧也不会被压没；layoutPriority 高于搜索框（默认 0），
+                        // 分配空间时先满足库名，剩下的才轮到前面的搜索框。
+                        .frame(minWidth: 120)
                         .layoutPriority(1)
                 }
             }
@@ -150,15 +151,14 @@ struct ToolChip: View {
     }
 }
 
-/// 带下拉菜单的工具按钮（排序 / 库筛选），同样不画胶囊底
+/// 带下拉菜单的工具按钮（排序 / 库筛选），同样不画胶囊底。
+/// ⚠️ 前面不再放图标：排序那个「上下箭头」是多余装饰，留文字 + 右侧 chevron 就够了。
 struct ToolMenuChip<Content: View>: View {
     let label: String
-    var icon: String? = nil
     private let menuContent: Content
 
-    init(label: String, icon: String? = nil, @ViewBuilder menuContent: () -> Content) {
+    init(label: String, @ViewBuilder menuContent: () -> Content) {
         self.label = label
-        self.icon = icon
         self.menuContent = menuContent()
     }
 
@@ -167,10 +167,6 @@ struct ToolMenuChip<Content: View>: View {
             menuContent
         } label: {
             HStack(spacing: 5) {
-                if let icon {
-                    Image(systemName: icon)
-                        .font(.system(size: 12, weight: .semibold))
-                }
                 Text(label)
                     .font(.caption.weight(.medium))
                 Image(systemName: "chevron.down")

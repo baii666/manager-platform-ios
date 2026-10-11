@@ -88,7 +88,7 @@ struct ShootListView: View {
 
     /// 排序选择（对齐电影/相册列表页的胶囊样式）
     private var sortMenu: some View {
-        ToolMenuChip(label: viewModel.sort.label, icon: "arrow.up.arrow.down") {
+        ToolMenuChip(label: viewModel.sort.label) {
             ForEach(ShootListViewModel.Sort.allCases, id: \.self) { s in
                 Button {
                     Task { await viewModel.setSort(s) }
