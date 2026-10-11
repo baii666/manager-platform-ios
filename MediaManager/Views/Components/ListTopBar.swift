@@ -127,10 +127,17 @@ enum ToolbarMetrics {
     /// 按钮内容统一高度 —— caption 文字（≈16pt 行高）和 12pt 图标（≈14pt）
     /// 自然高度差 2pt，不钉死的话两个按钮肉眼可见地一高一矮
     static let chipHeight: CGFloat = 22
+    /// 图标固定占宽。⚠️ 必须钉死：SF Symbol 的同族符号宽度并不一致
+    ///（rectangle 比 rectangle.portrait 宽），横竖版切换时按钮宽度一变，
+    /// 右侧整排（锚定在屏幕右缘）就会被推着左右挪，排序下拉跟着抖。
+    static let iconWidth: CGFloat = 16
     /// 按钮之间的间距（TrailingToolsItem 的 HStack spacing）
     static let buttonSpacing: CGFloat = 2
     /// 计数文本与前面按钮的间隔：比按钮间距大一截，让纯文本和可点按钮在视觉上分组
     static let countGap: CGFloat = 10
+    /// 计数文本的最小宽度（右对齐）。整排锚定屏幕右缘，数字位数变化会推动整排按钮，
+    /// 留一个固定槽位后「60 / 588」和「120 / 1200」下按钮位置完全一致。
+    static let countMinWidth: CGFloat = 62
 }
 
 /// 顶部栏 trailing 整组控件：单个 ToolbarItem 包一个自控间距的 HStack。
@@ -195,6 +202,9 @@ struct ToolChip: View {
                         // ⚠️ 图标别用 14：旁边文字是 caption(12pt)，方块会比两边字体大一圈，
                         // 跟文字同号（12）看起来才齐。
                         .font(.system(size: 12, weight: .semibold))
+                        // ⚠️ 固定占宽：符号换了（横/竖版 rectangle ↔ rectangle.portrait）
+                        // 按钮宽度也不能变，否则右侧整排会整体位移
+                        .frame(width: ToolbarMetrics.iconWidth)
                 }
                 if !iconOnly {
                     Text(label)

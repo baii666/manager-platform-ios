@@ -262,6 +262,10 @@ struct MediaListView: View {
                         // 变成「1234 / 5678」上下两行，把导航栏撑高
                         .fixedSize(horizontal: true, vertical: false)
                         .lineLimit(1)
+                        // ⚠️ 给计数留固定槽位：整排锚定在屏幕右缘，数字位数一变
+                        //（60/588 → 120/1200）整排按钮就被推着左右挪。
+                        // 右对齐 + 最小宽度 → 常见位数下按钮位置纹丝不动。
+                        .frame(minWidth: ToolbarMetrics.countMinWidth, alignment: .trailing)
                         // 与前面按钮的间隔独立于按钮间距（见 ToolbarMetrics.countGap）
                         .padding(.leading, ToolbarMetrics.countGap)
                 }
