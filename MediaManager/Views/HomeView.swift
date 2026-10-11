@@ -45,10 +45,11 @@ struct HomeView: View {
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
         }
-        .sheet(isPresented: $showingPhotos) {
-            NavigationStack {
-                PhotoBrowserView()
-            }
+        // 随机照片：push 进全屏页面，不再用 sheet。
+        // 与搜索同理 —— push 后底层首页始终在层级里渲染，全局看图器 overlay 可见，
+        // 点开大图退出时露出的是照片页本身，不会像 sheet 那样盖住全局 overlay。
+        .navigationDestination(isPresented: $showingPhotos) {
+            PhotoBrowserView()
         }
         .sheet(isPresented: $showingAlbums) {
             NavigationStack {
