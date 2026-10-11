@@ -24,6 +24,10 @@ struct HomeView: View {
             // 底部留出底栏高度，滑到底不被底栏盖住
             .bottomBarClearance()
         }
+        // ⚠️ 关掉内容触摸延迟：ScrollView 为了区分「点 TextField」和「开始滚动」，
+        // 默认会 `delaysContentTouches`（等手势判定完才把触摸交给子控件），
+        // 这就是「点搜索框要等 1s 键盘才弹」的根因 —— 在 iPad 上尤其明显。
+        .fixDelaysContentTouches()
         .appBackground()
         .navigationTitle("首页")
         .navigationBarTitleDisplayMode(.inline)

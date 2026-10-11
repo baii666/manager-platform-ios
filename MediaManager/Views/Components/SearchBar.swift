@@ -5,6 +5,7 @@ struct SearchBar: View {
     @Binding var text: String
     @Binding var semantic: Bool
     var onSubmit: () -> Void
+    @FocusState private var focused: Bool
 
     var body: some View {
         HStack(spacing: 8) {
@@ -13,6 +14,7 @@ struct SearchBar: View {
                     .foregroundStyle(.secondary)
                 TextField("搜索片名、演员、文件名…", text: $text)
                     .textFieldStyle(.plain)
+                    .focused($focused)
                     .autocorrectionDisabled()
                     .submitLabel(.search)
                     .onSubmit(onSubmit)
