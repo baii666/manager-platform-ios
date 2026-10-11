@@ -222,6 +222,10 @@ struct Library: Identifiable, Codable, Sendable, Hashable {
     var itemCount: Int = 0
     var albumCount: Int? = nil
     var thumbURL: URL? = nil
+    /// 库设置里的**横版**卡片宽高比（网页端库设置「横版封面」），如 3/2 → 1.5；nil = 没设，用默认 16:9
+    var cardAspectLandscape: CGFloat? = nil
+    /// 库设置里的**竖版**卡片宽高比；nil = 没设，用默认 2:3
+    var cardAspectPortrait: CGFloat? = nil
 
     var displayType: String {
         switch type {
@@ -238,6 +242,23 @@ struct Library: Identifiable, Codable, Sendable, Hashable {
         case itemCount = "item_count"
         case albumCount = "album_count"
         case thumbURL = "thumb_url"
+        case settings
+    }
+
+    /// settings 里只关心这两个键（其它的网页端才用）
+    private enum SettingsKeys: String, CodingKey {
+        case cardAspectRatioLandscape, cardAspectRatioPortrait
+    }
+
+    /// "3/2" → 1.5。网页端只提供 n/h 形式的选项（1/1、5/4、4/3、3/2、16:9…），
+    /// 解析失败 / 为空一律返回 nil（= 用客户端默认比例）
+    private static func aspectRatio(_ raw: String?) -> CGFloat? {
+        guard let raw, !raw.isEmpty else { return nil }
+        let parts = raw.split(separator: "/")
+        guard parts.count == 2,
+              let w = Double(parts[0]), w > 0,
+              let h = Double(parts[1]), h > 0 else { return nil }
+        return CGFloat(w / h)
     }
 
     init(from decoder: Decoder) throws {
@@ -248,6 +269,11 @@ struct Library: Identifiable, Codable, Sendable, Hashable {
         itemCount = optInt(c, .itemCount) ?? 0
         albumCount = optInt(c, .albumCount)
         thumbURL = flexURL(c, .thumbURL)
+        // settings 是个 JSON 对象（后端已 JSON.parse 过）；个别老接口可能给字符串，失败就当没设
+        if let s = try? c.nestedContainer(keyedBy: SettingsKeys.self, forKey: .settings) {
+            cardAspectLandscape = Library.aspectRatio(try? s.decode(String.self, forKey: .cardAspectRatioLandscape))
+            cardAspectPortrait = Library.aspectRatio(try? s.decode(String.self, forKey: .cardAspectRatioPortrait))
+        }
     }
 }
 

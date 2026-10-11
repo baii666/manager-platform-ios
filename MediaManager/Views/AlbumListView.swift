@@ -190,7 +190,12 @@ struct AlbumListView: View {
                         NavigationLink(value: album) {
                             AlbumCard(album: album, coverURL: coverURL(for: album, landscape: layout.landscape),
                                       width: grid.itemWidth, landscape: layout.landscape,
-                                      showInfo: layout.cardWidth >= CardLayoutController.compactThreshold)
+                                      showInfo: layout.cardWidth >= CardLayoutController.compactThreshold,
+                                      // 封面宽高比跟库设置走（与网页端同一份数据）：
+                                      // 横版读 cardAspectRatioLandscape、竖版读 cardAspectRatioPortrait
+                                      aspectOverride: layout.landscape
+                                          ? viewModel.selectedLibrary?.cardAspectLandscape
+                                          : viewModel.selectedLibrary?.cardAspectPortrait)
                         }
                         .buttonStyle(.plain)
                         .task {
@@ -357,8 +362,16 @@ struct AlbumCard: View {
     /// 是否显示下方标题区（卡片够大时）。由外层按 cardWidth 判断传入，而非列宽：
     /// 列宽是均分结果、受屏幕宽度影响，用 cardWidth 才能让「小卡片」状态可预测。
     var showInfo: Bool = true
+    /// 封面宽高比覆盖（w/h，如 1.5 = 3:2）。来自库设置 cardAspectRatioLandscape/Portrait，
+    /// 与网页端同一份数据；nil = 用默认（横 16:9 / 竖 2:3）。
+    /// ⚠️ 16:9 的框装 3:2 的照片会上下各裁掉约 8%——封面顶部的大字标题就是这么被切掉的，
+    /// 库里设了 3:2 就得跟着用，否则 iOS 比网页端多裁一截。
+    var aspectOverride: CGFloat? = nil
 
-    private var coverHeight: CGFloat { width * (landscape ? 9.0 / 16.0 : 3.0 / 2.0) }
+    private var coverHeight: CGFloat {
+        let ratio = aspectOverride ?? (landscape ? 16.0 / 9.0 : 2.0 / 3.0)
+        return width / ratio
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
