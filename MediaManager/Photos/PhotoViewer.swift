@@ -79,8 +79,9 @@ struct PhotoViewerView: View {
                     .offset(y: topReserve)
 
                 topBar(topInset: safe.top)
-                if showInfo, let photo { infoPanel(photo, topInset: safe.top) }
                 bottomBar(bottomInset: safe.bottom)
+                // 详情面板放最后（顶层），底部弹出并盖住工具栏，对标网页版详情弹窗
+                if showInfo, let photo { infoPanel(photo) }
                 if let tip { toast(tip) }
             }
             .frame(width: geo.size.width, height: geo.size.height)
@@ -432,6 +433,8 @@ struct PhotoViewerView: View {
     /// 异步拉取当前图片的详情（EXIF / AI 标注），翻页或点信息按钮时调用。
     private func loadDetail() {
         guard let client, let photo else { return }
+        // 已加载过同一张，直接复用，避免重复请求
+        if photoDetail?.id == photo.id { return }
         detailTask?.cancel()
         photoDetail = nil
         isLoadingDetail = true
@@ -445,96 +448,164 @@ struct PhotoViewerView: View {
         }
     }
 
-    private func infoPanel(_ photo: Photo, topInset: CGFloat) -> some View {
-        ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 10) {
-                Text(photo.fileName ?? "#\(photo.id)")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .lineLimit(3)
+    private func infoPanel(_ photo: Photo) -> some View {
+        VStack(spacing: 0) {
+            // 顶部拖拽指示条
+            Capsule()
+                .fill(.white.opacity(0.3))
+                .frame(width: 36, height: 5)
+                .padding(.top, 10)
+                .padding(.bottom, 6)
 
-                // 基本信息（不依赖详情接口，加载失败也能显示）
-                VStack(alignment: .leading, spacing: 4) {
-                    if let px = imagePixelSize {
-                        infoRow("尺寸", String(format: "%.0f × %.0f", px.width, px.height))
-                    } else if let dimension = photo.dimensionText {
-                        infoRow("尺寸", dimension)
-                    }
-                    if let size = photo.sizeText { infoRow("大小", size) }
-                    if let detail = photoDetail {
-                        if let albumName = detail.album?.folderName, !albumName.isEmpty {
-                            infoRow("相册", albumName)
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 16) {
+                    HStack(alignment: .top) {
+                        Text(photo.fileName ?? "#\(photo.id)")
+                            .font(.headline)
+                            .foregroundStyle(.white)
+                            .lineLimit(2)
+                        Spacer()
+                        Button {
+                            withAnimation { showInfo = false }
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.7))
+                                .frame(width: 30, height: 30)
+                                .background(.white.opacity(0.1), in: Circle())
                         }
-                        if let libName = detail.library?.name, !libName.isEmpty {
-                            infoRow("媒体库", libName)
+                        .buttonStyle(.plain)
+                    }
+
+                    // 基本信息
+                    sectionTitle("基本信息")
+                    VStack(spacing: 6) {
+                        infoRow("ID", "\(photo.id)")
+                        infoRow("文件名", photo.fileName ?? "")
+                        infoRow("大小", photo.sizeText ?? "未知")
+                        if let px = imagePixelSize {
+                            infoRow("尺寸", String(format: "%.0f × %.0f", px.width, px.height))
+                        } else if let dimension = photo.dimensionText {
+                            infoRow("尺寸", dimension)
+                        }
+                        if let d = photoDetail {
+                            infoRow("缩略图", d.hasThumb ? "已生成" : "未生成")
+                        }
+                    }
+
+                    // 拍摄信息（EXIF）
+                    if let d = photoDetail, hasShootInfo(d) {
+                        sectionTitle("拍摄信息")
+                        VStack(spacing: 6) {
+                            if let t = d.takenAt, !t.isEmpty { infoRow("拍摄时间", t) }
+                            let cam = [d.cameraMake, d.cameraModel]
+                                .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " ")
+                            if !cam.isEmpty { infoRow("相机", cam) }
+                            if let f = d.focalLength, f > 0 { infoRow("焦距", "\(f) mm") }
+                            if let a = d.aperture, a > 0 { infoRow("光圈", "f/\(a)") }
+                            if let iso = d.iso, iso > 0 { infoRow("ISO", "\(iso)") }
+                            if let lat = d.gpsLat, let lng = d.gpsLng {
+                                infoRow("GPS", String(format: "%.6f, %.6f", lat, lng))
+                            }
+                        }
+                    }
+
+                    // AI 分析
+                    if let d = photoDetail, d.aestheticScore != nil || !(d.aiCaption ?? "").isEmpty {
+                        sectionTitle("AI 分析")
+                        VStack(alignment: .leading, spacing: 8) {
+                            if let score = d.aestheticScore {
+                                HStack(spacing: 8) {
+                                    Text("美学评分")
+                                        .font(.caption2)
+                                        .foregroundStyle(.white.opacity(0.45))
+                                    ProgressView(value: min(score / 10.0, 1.0))
+                                        .tint(.orange)
+                                    Text(String(format: "%.2f", score))
+                                        .font(.caption2.monospacedDigit())
+                                        .foregroundStyle(.white)
+                                }
+                            }
+                            if let caption = d.aiCaption, !caption.isEmpty {
+                                Text(caption)
+                                    .font(.caption)
+                                    .foregroundStyle(.white.opacity(0.85))
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                if let at = d.captionAt, !at.isEmpty {
+                                    Text("生成于 \(at)")
+                                        .font(.caption2)
+                                        .foregroundStyle(.white.opacity(0.4))
+                                }
+                            }
+                        }
+                    }
+
+                    // 路径信息
+                    if let d = photoDetail {
+                        sectionTitle("路径信息")
+                        VStack(spacing: 6) {
+                            infoRow("文件夹", d.folderName ?? "未知")
+                            infoRow("完整路径", d.filePath)
+                        }
+                    }
+
+                    // 所属信息
+                    if let d = photoDetail {
+                        sectionTitle("所属信息")
+                        VStack(spacing: 6) {
+                            infoRow("媒体库", d.library.map { "\($0.name) (\($0.type))" } ?? "未知")
+                            infoRow("相册", d.album.map { "\($0.folderName ?? "") (\($0.photoCount ?? 0) 张)" } ?? "未知")
+                        }
+                    }
+
+                    if photoDetail == nil && isLoadingDetail {
+                        HStack(spacing: 8) {
+                            ProgressView().controlSize(.small).tint(.white.opacity(0.7))
+                            Text("加载详情…").font(.caption).foregroundStyle(.white.opacity(0.6))
                         }
                     }
                 }
-
-                // EXIF / AI（来自详情接口）
-                if let detail = photoDetail {
-                    if let taken = detail.takenAt, !taken.isEmpty {
-                        infoRow("拍摄时间", taken)
-                    }
-                    let cam = [detail.cameraMake, detail.cameraModel]
-                        .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " ")
-                    if !cam.isEmpty { infoRow("相机", cam) }
-                    if let f = detail.focalLength, f > 0 {
-                        infoRow("焦距", String(format: "%.1f mm", f))
-                    }
-                    if let a = detail.aperture, a > 0 {
-                        infoRow("光圈", "f/\(a)")
-                    }
-                    if let iso = detail.iso, iso > 0 { infoRow("ISO", "\(iso)") }
-                    if let lat = detail.gpsLat, let lng = detail.gpsLng {
-                        infoRow("位置", String(format: "%.4f, %.4f", lat, lng))
-                    }
-                    if let score = detail.aestheticScore {
-                        infoRow("美学评分", String(format: "%.2f", score))
-                    }
-                    if let caption = detail.aiCaption, !caption.isEmpty {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("AI 描述")
-                                .font(.caption2)
-                                .foregroundStyle(.white.opacity(0.45))
-                            Text(caption)
-                                .font(.caption2)
-                                .foregroundStyle(.white.opacity(0.85))
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                    }
-                } else if isLoadingDetail {
-                    HStack(spacing: 6) {
-                        ProgressView().controlSize(.small).tint(.white.opacity(0.7))
-                        Text("加载详情…").font(.caption2).foregroundStyle(.white.opacity(0.6))
-                    }
-                }
-
-                Text("ID: \(photo.id)")
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.white.opacity(0.4))
+                .padding(16)
             }
-            .padding(12)
         }
-        .frame(minWidth: 280, maxWidth: 280, maxHeight: 380, alignment: .topLeading)
-        .background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-        .padding(.trailing, 16)
-        .padding(.top, 60 + topInset)
+        .frame(maxWidth: .infinity)
+        .frame(maxHeight: 560)
+        .background(.black.opacity(0.92))
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .padding(.horizontal, 8)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+        .padding(.bottom, 8)
         .opacity(showUI ? 1 : 0)
         .animation(.easeOut(duration: 0.25), value: showUI)
+        .allowsHitTesting(showUI)
+    }
+
+    /// 拍摄信息区块是否有内容（对标网页版：任一 EXIF 字段存在即显示）
+    private func hasShootInfo(_ d: PhotoDetail) -> Bool {
+        (d.takenAt?.isEmpty == false) ||
+        (d.cameraMake?.isEmpty == false) || (d.cameraModel?.isEmpty == false) ||
+        d.focalLength != nil || d.aperture != nil || d.iso != nil ||
+        (d.gpsLat != nil && d.gpsLng != nil)
+    }
+
+    private func sectionTitle(_ text: String) -> some View {
+        Text(text)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.white.opacity(0.5))
+            .textCase(.uppercase)
+            .tracking(0.5)
     }
 
     /// 详情卡片里的一行「标签 + 值」
     private func infoRow(_ label: String, _ value: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
             Text(label)
                 .font(.caption2)
                 .foregroundStyle(.white.opacity(0.45))
-                .frame(width: 56, alignment: .leading)
+                .frame(width: 64, alignment: .leading)
             Text(value)
                 .font(.caption2)
-                .foregroundStyle(.white.opacity(0.85))
+                .foregroundStyle(.white.opacity(0.88))
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
