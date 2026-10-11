@@ -181,12 +181,12 @@ struct PhotoViewerView: View {
                     if abs(dx) > width * 0.08 {
                         go(dx < 0 ? 1 : -1)
                     } else {
-                        withAnimation(.easeOut(duration: 0.28)) { trackOffset = 0 }
+                        withAnimation(Self.pageSpring) { trackOffset = 0 }
                     }
                 } else if abs(dy) > 150 {
                     close(after: dy)
                 } else {
-                    withAnimation(.easeOut(duration: 0.32)) { dismissY = 0 }
+                    withAnimation(Self.pageSpring) { dismissY = 0 }
                 }
             }
     }
@@ -246,15 +246,19 @@ struct PhotoViewerView: View {
 
     // MARK: - 翻页 / 关闭
 
+    /// 翻页弹簧：松手后「滑到位」用接近临界阻尼的弹簧，干脆利落、不回头，
+    /// 接近系统相册翻页手感（easeOut 结尾减速「拖泥带水」，dampingFraction 过低会 overshoot 回头）。
+    private static let pageSpring = Animation.interactiveSpring(response: 0.32, dampingFraction: 0.92, blendDuration: 0.2)
+
     private func go(_ delta: Int) {
         let next = index + delta
         if next < 0 {
-            withAnimation(.easeOut(duration: 0.28)) { trackOffset = 0 }
+            withAnimation(Self.pageSpring) { trackOffset = 0 }
             return
         }
         if next >= photos.count {
             if hasMore { onLoadMore?() }
-            withAnimation(.easeOut(duration: 0.28)) { trackOffset = 0 }
+            withAnimation(Self.pageSpring) { trackOffset = 0 }
             return
         }
         // 两图连续翻页：先把当前图连同相邻图一起滑到目标位置，动画真正结束后再切 index。
@@ -263,9 +267,11 @@ struct PhotoViewerView: View {
         // 表现为翻页「跳一下」。改用 completionCriteria 等动画逻辑完成后才切。
         let width = containerSize.width
         let target = delta > 0 ? -width : width
-        withAnimation(.easeOut(duration: 0.28), completionCriteria: .logicallyComplete) {
+        withAnimation(Self.pageSpring, completionCriteria: .logicallyComplete) {
             trackOffset = target
         } completion: {
+            // 切 index 时 scale 已随位移过程归位，这里只做一次无动画的收尾复位，
+            // 避免在切图那一帧把 scale 从非 1 值瞬跳（造成「顿一下」）。
             trackOffset = 0
             index = next
             resetTransform()
