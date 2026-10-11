@@ -22,7 +22,7 @@ struct HomeView: View {
             .padding(.vertical, 24)
             .padding(.horizontal, 24)
         }
-        .background(Color(uiColor: .systemBackground))
+        .appBackground()
         .navigationTitle("首页")
         .navigationBarTitleDisplayMode(.inline)
         // 下拉刷新（不显示 loading 遮罩，避免触发 refreshable 取消）

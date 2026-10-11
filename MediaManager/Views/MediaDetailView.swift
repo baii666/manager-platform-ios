@@ -237,7 +237,7 @@ struct MediaDetailView: View {
             }
             .padding(16)
         }
-        .background(Color(uiColor: .systemBackground))
+        .appBackground()
     }
 
     // 把剧照 URL 适配成 Photo（看图器需要）

@@ -60,7 +60,7 @@ struct LoginView: View {
         }
         .padding(32)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(uiColor: .systemBackground))
+        .appBackground()
         .onAppear {
             if server.isEmpty { server = session.baseURL?.absoluteString ?? "" }
         }

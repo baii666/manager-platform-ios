@@ -112,8 +112,10 @@ struct BottomTabBar: View {
         .frame(height: 52)  // 标准 tab bar 高度，不厚
         .padding(.horizontal, 8)
         .background(
-            // 只让背景色延伸到屏幕底覆盖 home indicator 区域，bar 本身保持 52pt 不增高
-            Color(uiColor: .systemBackground)
+            // 只让背景延伸到屏幕底覆盖 home indicator 区域，bar 本身保持 52pt 不增高。
+            // ⚠️ 用 AppBackgroundView 而不是写死 systemBackground：有自定义背景图时
+            // 底栏跟着走同一张图，不然整页有图、只有底栏是一块纯色。
+            AppBackgroundView()
                 .ignoresSafeArea(edges: .bottom)
         )
         .overlay(alignment: .top) {

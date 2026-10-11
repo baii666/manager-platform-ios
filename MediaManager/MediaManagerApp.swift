@@ -4,6 +4,9 @@ import UIKit
 @main
 struct MediaManagerApp: App {
     @ObservedObject private var session = AppSession.shared
+    /// 外观设置（深浅模式 + 背景图）。⚠️ preferredColorScheme 只有挂在 App 根上
+    /// 才对整个 window 生效，所以这里必须订阅它。
+    @ObservedObject private var appearance = AppearanceSettings.shared
 
     init() {
         // 封面图走 AsyncImage（底层 URLSession.shared + URLCache.shared）。
@@ -26,13 +29,17 @@ struct MediaManagerApp: App {
                 if session.isRestoring {
                     ProgressView("正在恢复登录…")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(Color(uiColor: .systemBackground))
+                        .appBackground()
                 } else if session.isLoggedIn {
                     RootView()
                 } else {
                     LoginView(session: session)
                 }
             }
+            // ⚠️ window 默认底色是不透明的，不垫这层背景图根本透不出来
+            .appBackground()
+            // 跟随系统时传 nil；浅色/深色则锁死
+            .preferredColorScheme(appearance.mode.colorScheme)
             .task { await AppSession.shared.restoreSession() }
         }
     }

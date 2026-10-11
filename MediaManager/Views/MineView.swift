@@ -36,6 +36,8 @@ enum MineListRoute: Hashable {
 struct MineView: View {
     @ObservedObject var viewModel: HomeViewModel
     @ObservedObject private var session = AppSession.shared
+    /// 外观设置：这里只用来显示当前主题名（「跟随系统 / 浅色 / 深色」）
+    @ObservedObject private var appearance = AppearanceSettings.shared
 
     @State private var pending: PlaybackRequest?
     @State private var playError: String?
@@ -62,7 +64,7 @@ struct MineView: View {
             .padding(.vertical, 24)
             .padding(.horizontal, 24)
         }
-        .background(Color(uiColor: .systemBackground))
+        .appBackground()
         .navigationTitle("我的")
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await viewModel.load(showSpinner: false) }
@@ -220,6 +222,33 @@ struct MineView: View {
                 Divider().padding(.leading, 44)
                 settingsRow(icon: "person.circle", title: "账号",
                             value: session.user?.username ?? "—")
+                Divider().padding(.leading, 44)
+                // 主题模式 + 背景图。用 destination 版 NavigationLink，
+                // 不用再给 MineListRoute 加 case（那个枚举只管「完整列表」路由）。
+                // ⚠️ 非 List 环境下 NavigationLink 不会自带 chevron，自己补一个，
+                // 否则看不出这一行能点进去
+                NavigationLink {
+                    AppearanceView()
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "paintbrush")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(Theme.brand)
+                            .frame(width: 20)
+                        Text("外观")
+                            .font(.subheadline)
+                        Spacer()
+                        Text(appearance.mode.title)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Image(systemName: "chevron.right")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 13)
+                }
+                .buttonStyle(.plain)
             }
             .background(
                 Color(uiColor: .secondarySystemBackground),
