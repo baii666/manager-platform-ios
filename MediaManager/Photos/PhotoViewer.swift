@@ -124,13 +124,6 @@ struct PhotoViewerView: View {
         .sheet(isPresented: $showInfo) {
             if let photo { detailSheet(photo) }
         }
-        // 相似图蒙层：叠在看图器之上（不顶掉看图器），关掉即回到原位置。
-        .overlay {
-            if let url = similarOverlayURL {
-                SimilarPhotoOverlay(url: url) { similarOverlayURL = nil }
-                    .transition(.opacity)
-            }
-        }
     }
 
     // MARK: - 图片层
@@ -517,9 +510,8 @@ struct PhotoViewerView: View {
         PhotoViewerPresenter.shared.openAlbum(album, libID: libID)
     }
 
-    /// 点击相似图查看：不顶掉当前看图器，用一层简单蒙层看原图（可缩放滚动）。
+    /// 点击相似图查看：详情卡片保持不动，在卡片之上叠一层半透明蒙层看原图（可缩放滑动）。
     private func viewSimilarPhoto(_ sp: SimilarPhoto) {
-        showInfo = false
         similarOverlayURL = client?.makeURL("/photo", queryItems: [
             URLQueryItem(name: "id", value: "\(sp.id)"),
             URLQueryItem(name: "size", value: "original"),
@@ -655,6 +647,13 @@ struct PhotoViewerView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("完成") { showInfo = false }
                 }
+            }
+        }
+        // 相似图蒙层：叠在详情卡片之上（卡片保持不动），可滑动查看原图，关闭回卡片。
+        .overlay {
+            if let url = similarOverlayURL {
+                SimilarPhotoOverlay(url: url) { similarOverlayURL = nil }
+                    .transition(.opacity)
             }
         }
     }
@@ -1058,8 +1057,8 @@ private struct ViewerThumb: View {
 }
 
 // MARK: - 相似图查看蒙层
-// 点相似图时叠在看图器之上的一层半透明灰蒙层：底层看图器原样透出，
-// 蒙层中央显示相似图原图，可捏合缩放、放大后拖动平移。点空白处或右上关闭即回原位。
+// 点相似图时叠在详情卡片之上的一层半透明灰蒙层：底层卡片原样透出，
+// 蒙层中央显示相似图原图，可上下左右滑动查看、捏合缩放，点空白/右上关闭回卡片。
 private struct SimilarPhotoOverlay: View {
     let url: URL?
     var onClose: () -> Void
@@ -1067,52 +1066,42 @@ private struct SimilarPhotoOverlay: View {
     @State private var image: UIImage?
     @State private var scale: CGFloat = 1
     @State private var lastScale: CGFloat = 1
-    @State private var offset: CGSize = .zero
-    @State private var lastOffset: CGSize = .zero
 
     var body: some View {
         ZStack {
-            // 半透明灰蒙层：透出底下的看图器，不整屏盖黑
+            // 半透明灰蒙层：透出底下的详情卡片
             Color.black.opacity(0.62)
                 .ignoresSafeArea()
                 .onTapGesture { onClose() }
 
-            if let image {
-                GeometryReader { geo in
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: geo.size.width, height: geo.size.height)
-                        .scaleEffect(scale)
-                        .offset(offset)
-                        .gesture(
-                            MagnificationGesture()
-                                .onChanged { v in
-                                    scale = max(1, min(8, lastScale * v))
-                                }
-                                .onEnded { _ in
-                                    if scale < 1 { withAnimation { scale = 1 } }
-                                    lastScale = scale
-                                }
-                        )
-                        .simultaneousGesture(
-                            DragGesture()
-                                .onChanged { v in
-                                    guard scale > 1.01 else { return }
-                                    offset = CGSize(width: lastOffset.width + v.translation.width,
-                                                    height: lastOffset.height + v.translation.height)
-                                }
-                                .onEnded { _ in lastOffset = offset }
-                        )
-                        .onTapGesture(count: 2) {
-                            withAnimation(.easeOut(duration: 0.2)) {
-                                scale = 1; lastScale = 1
-                                offset = .zero; lastOffset = .zero
-                            }
+            GeometryReader { geo in
+                ScrollView([.horizontal, .vertical], showsIndicators: false) {
+                    Group {
+                        if let image {
+                            // 按屏幕宽等比缩放：竖图超高可上下滑动看全貌，横图可左右滑动
+                            let aspect = image.size.width > 0 ? image.size.height / image.size.width : 1
+                            Image(uiImage: image)
+                                .resizable()
+                                .scaledToFill()
+                                .frame(width: geo.size.width, height: max(geo.size.height, geo.size.width * aspect))
+                        } else {
+                            ProgressView().tint(.white)
+                                .frame(width: geo.size.width, height: geo.size.height)
                         }
+                    }
+                    .scaleEffect(scale)
                 }
-            } else {
-                ProgressView().tint(.white)
+                .frame(width: geo.size.width, height: geo.size.height)
+                // 捏合缩放：与滚动同时生效
+                .simultaneousGesture(
+                    MagnificationGesture()
+                        .onChanged { v in scale = max(1, min(8, lastScale * v)) }
+                        .onEnded { _ in lastScale = scale }
+                )
+                // 双击复位缩放
+                .onTapGesture(count: 2) {
+                    withAnimation(.easeOut(duration: 0.2)) { scale = 1; lastScale = 1 }
+                }
             }
 
             // 关闭按钮（贴顶右）
