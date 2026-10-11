@@ -127,32 +127,43 @@ struct SearchView: View {
             ListSearchBarItem(
                 text: $query,
                 placeholder: isSemantic ? "用一句话描述画面…" : "搜索影视 / 相册 / 照片 / 拍摄集",
-                // ⚠️ 只传 fieldWidth，不再传 narrow：narrow 是列表页「后面还跟着一整排
-                // 工具按钮」时才用的 170，搜索页右边只有一个语义按钮，宽度自己定。
-                // 宽屏传 nil → 走 ListSearchBarItem.width（280），与列表页完全一致。
+                // ⚠️ 只传 fieldWidth，不传 narrow：宽屏（iPad，本项目主场景）走
+                // ListSearchBarItem.width（280），与列表页完全一致；
+                // 窄屏给 170 只是临时值，iPhone 顶栏塞不下整排按钮，后续统一适配
                 fieldWidth: hSizeClass == .compact ? Self.compactFieldWidth : nil,
                 focus: $fieldFocused,
                 onSubmit: { runSearch(query) },
                 onClear: { clearAll() }
             )
-            // 分类胶囊组也放 leading，紧跟搜索框（筛选就该挨着输入框）。
-            // ⚠️ 没有词 / 语义模式下整组不显示：空态时只有历史记录，语义模式只搜照片
-            if !activeQuery.isEmpty && !isSemantic {
-                ToolbarItem(placement: .topBarLeading) {
-                    categoryChips
+            // 紧跟搜索框的一组：语义开关 → 搜索按钮 → 分类胶囊组。
+            // ⚠️ 必须全部收进同一个 ToolbarItem：之前分类组单独占一个 leading item，
+            // 实测被系统挤到只剩一个圆点（多个 leading item 的宽度分配不可控），
+            // 收进一个 HStack 后间距、先后顺序都由我们自己说了算。
+            ToolbarItem(placement: .topBarLeading) {
+                HStack(spacing: 4) {
+                    // 语义开关：紧挨搜索框（用户指定顺序），紫 = 开
+                    ToolChip(label: "语义", icon: "sparkles", highlighted: isSemantic,
+                             tintColor: isSemantic ? Color.purple : nil) {
+                        toggleSemantic()
+                    }
+                    // 搜索按钮：防抖之外给一个明确的「立刻搜」出口（不用等 350ms，也不用按回车）
+                    ToolChip(label: "搜索", icon: "magnifyingglass") {
+                        runSearch(query)
+                    }
+                    // 空词没什么可搜的，按钮置灰
+                    .disabled(query.trimmingCharacters(in: .whitespaces).isEmpty)
+                    // 分类胶囊组：语义模式下不显示（语义只搜照片，没有分类）
+                    if !activeQuery.isEmpty && !isSemantic {
+                        categoryChips
+                            // ⚠️ 防压缩：这个组之前被系统压到只剩一个圆点，
+                            // fixedSize 让按钮文字保持完整，空间不足宁可溢出也不缩成空壳
+                            .fixedSize(horizontal: true, vertical: false)
+                    }
                 }
-                .withoutGlass()
             }
+            .withoutGlass()
             // 右侧整组：与列表页同一个 TrailingToolsItem，间距/高度由 ToolbarMetrics 统一
             TrailingToolsItem {
-                // 语义开关：与首页搜索框里那个 sparkles 同一套语义（紫 = 开）。
-                // ⚠️ iPhone 只留图标：顶栏这一行要塞「返回 + 搜索框 + 分类 + 语义 + 转圈」，
-                // 文字那两个字符在窄屏上是第一个该让位的（图标 + 紫色足够表意）
-                ToolChip(label: "语义", icon: "sparkles", highlighted: isSemantic,
-                         iconOnly: hSizeClass == .compact,
-                         tintColor: isSemantic ? Color.purple : nil) {
-                    toggleSemantic()
-                }
                 // 转圈：列表页同款槽位思路（固定宽度 + opacity），
                 // 出现/消失不会把左右的控件推着挪
                 ProgressView()
