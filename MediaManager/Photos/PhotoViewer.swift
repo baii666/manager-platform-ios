@@ -55,8 +55,9 @@ struct PhotoViewerView: View {
     @State private var facesLoading = false
     @State private var similarPhotos: [SimilarPhoto] = []
     @State private var similarLoading = false
-    /// 点击相似图后，用简单蒙层看原图（不顶掉当前看图器）。非 nil 时显示蒙层。
-    @State private var similarOverlayURL: URL?
+    /// 点击相似图后，用全屏蒙层左右滚动翻阅整组相似图（不顶掉当前看图器）。
+    /// 非 nil 时显示蒙层；元素为相似图列表 + 起始下标。
+    @State private var similarOverlay: (photos: [SimilarPhoto], index: Int)?
 
     private var client: APIClient? { AppSession.shared.client }
 
@@ -125,13 +126,14 @@ struct PhotoViewerView: View {
             if let photo { detailSheet(photo) }
         }
         // 相似图蒙层：用 fullScreenCover 全屏、最顶层呈现（盖在 sheet 详情卡片之上），
-        // 可滑动查看原图，关闭回卡片。不改 index，避免之前的黑屏/越界问题。
+        // 左右滚动翻阅整组相似图，关闭回卡片。不改 index，避免之前的黑屏/越界问题。
         .fullScreenCover(isPresented: Binding(
-            get: { similarOverlayURL != nil },
-            set: { if !$0 { similarOverlayURL = nil } }
+            get: { similarOverlay != nil },
+            set: { if !$0 { similarOverlay = nil } }
         )) {
-            if let url = similarOverlayURL {
-                SimilarPhotoOverlay(url: url) { similarOverlayURL = nil }
+            if let data = similarOverlay {
+                SimilarPhotoOverlay(photos: data.photos, initialIndex: data.index,
+                                    client: client) { similarOverlay = nil }
             } else {
                 Color.black.ignoresSafeArea()
             }
@@ -522,12 +524,10 @@ struct PhotoViewerView: View {
         PhotoViewerPresenter.shared.openAlbum(album, libID: libID)
     }
 
-    /// 点击相似图查看：详情卡片保持不动，在卡片之上叠一层半透明蒙层看原图（可缩放滑动）。
+    /// 点击相似图查看：全屏蒙层左右翻阅整组相似图，定位到所点那张。
     private func viewSimilarPhoto(_ sp: SimilarPhoto) {
-        similarOverlayURL = client?.makeURL("/photo", queryItems: [
-            URLQueryItem(name: "id", value: "\(sp.id)"),
-            URLQueryItem(name: "size", value: "original"),
-        ])
+        guard let idx = similarPhotos.firstIndex(where: { $0.id == sp.id }) else { return }
+        similarOverlay = (photos: similarPhotos, index: idx)
     }
 
     private func detailSheet(_ photo: Photo) -> some View {
@@ -1062,56 +1062,48 @@ private struct ViewerThumb: View {
 }
 
 // MARK: - 相似图查看蒙层
-// 点相似图时叠在详情卡片之上的一层半透明灰蒙层：底层卡片原样透出，
-// 蒙层中央显示相似图原图，可上下左右滑动查看、捏合缩放，点空白/右上关闭回卡片。
+// 点相似图时全屏、最顶层弹出一层灰蒙层：左右滑动翻阅整组相似图，
+// 每页一张原图（竖图超高可上下滚动看全貌），顶部显示页码，点右上关闭回卡片。
 private struct SimilarPhotoOverlay: View {
-    let url: URL?
+    let photos: [SimilarPhoto]
+    let initialIndex: Int
+    let client: APIClient?
     var onClose: () -> Void
 
-    @State private var image: UIImage?
-    @State private var scale: CGFloat = 1
-    @State private var lastScale: CGFloat = 1
+    @State private var page = 0
+
+    private func url(for sp: SimilarPhoto) -> URL? {
+        client?.makeURL("/photo", queryItems: [
+            URLQueryItem(name: "id", value: "\(sp.id)"),
+            URLQueryItem(name: "size", value: "original"),
+        ])
+    }
 
     var body: some View {
         ZStack {
             // 全屏灰蒙层（贴满整屏）：盖住底下的详情卡片
             Color(white: 0.08).opacity(0.94)
                 .ignoresSafeArea()
-                .onTapGesture { onClose() }
 
-            GeometryReader { geo in
-                ScrollView([.horizontal, .vertical], showsIndicators: false) {
-                    Group {
-                        if let image {
-                            // 按屏幕宽等比缩放：竖图超高可上下滑动看全貌，横图可左右滑动
-                            let aspect = image.size.width > 0 ? image.size.height / image.size.width : 1
-                            Image(uiImage: image)
-                                .resizable()
-                                .scaledToFill()
-                                .frame(width: geo.size.width, height: max(geo.size.height, geo.size.width * aspect))
-                        } else {
-                            ProgressView().tint(.white)
-                                .frame(width: geo.size.width, height: geo.size.height)
-                        }
-                    }
-                    .scaleEffect(scale)
-                }
-                .frame(width: geo.size.width, height: geo.size.height)
-                // 捏合缩放：与滚动同时生效
-                .simultaneousGesture(
-                    MagnificationGesture()
-                        .onChanged { v in scale = max(1, min(8, lastScale * v)) }
-                        .onEnded { _ in lastScale = scale }
-                )
-                // 双击复位缩放
-                .onTapGesture(count: 2) {
-                    withAnimation(.easeOut(duration: 0.2)) { scale = 1; lastScale = 1 }
+            // 左右翻页浏览整组相似图
+            TabView(selection: $page) {
+                ForEach(Array(photos.enumerated()), id: \.element.id) { i, sp in
+                    SimilarPhotoPage(url: url(for: sp))
+                        .tag(i)
                 }
             }
+            .tabViewStyle(.page(indexDisplayMode: .never))
+            .ignoresSafeArea()
 
-            // 关闭按钮（贴顶右）
+            // 顶部：页码 + 关闭
             VStack {
                 HStack {
+                    Text("\(page + 1) / \(photos.count)")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.9))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(.black.opacity(0.35), in: Capsule())
                     Spacer()
                     Button(action: onClose) {
                         Image(systemName: "xmark")
@@ -1121,11 +1113,40 @@ private struct SimilarPhotoOverlay: View {
                             .background(.black.opacity(0.35), in: Circle())
                     }
                     .buttonStyle(.plain)
-                    .padding(.top, 8)
-                    .padding(.trailing, 16)
                 }
+                .padding(.top, 8)
+                .padding(.horizontal, 16)
                 Spacer()
             }
+        }
+        .onAppear { page = initialIndex }
+    }
+}
+
+/// 相似图蒙层里的单页：原图按屏宽等比缩放，竖图超高可上下滚动看全貌。
+private struct SimilarPhotoPage: View {
+    let url: URL?
+    @State private var image: UIImage?
+
+    var body: some View {
+        GeometryReader { geo in
+            ScrollView([.vertical], showsIndicators: false) {
+                Group {
+                    if let image {
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: geo.size.width)
+                            .frame(minHeight: geo.size.height)
+                    } else {
+                        ProgressView().tint(.white)
+                            .frame(width: geo.size.width, height: geo.size.height)
+                    }
+                }
+                .frame(width: geo.size.width)
+                .frame(maxWidth: .infinity)
+            }
+            .frame(width: geo.size.width, height: geo.size.height)
         }
         .task(id: url?.absoluteString ?? "") {
             guard let url, image == nil else { return }
