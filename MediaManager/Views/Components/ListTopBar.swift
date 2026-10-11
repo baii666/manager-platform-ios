@@ -41,7 +41,32 @@ struct ListSearchBar: View {
     }
 }
 
-/// 胶囊工具按钮：图标 + 文字；高亮态用品牌色浅底
+// MARK: - 去掉 iPadOS 26 给 toolbar 项目套的共享玻璃底
+// iOS 26 起导航栏 / 工具栏项目会被系统自动套一层共享的 Liquid Glass 圆弧底；
+// 我们的控件自带样式（或本来就是纯文字/图标），再套一层就变成两层背景，
+// 看着就是一个「半透明圆弧」。官方开关是 .sharedBackgroundVisibility(.hidden)，
+// ⚠️ 必须加在 ToolbarItem 上，加在里面那个视图上是无效的。
+//
+// ⚠️ 该 API 要 iOS 26 SDK（Xcode 26）。CI 的 macos-15 镜像默认 Xcode 16.4 编不过，
+// 所以用 compiler(>=6.2) 做**编译期**开关：老工具链原样返回（iOS 26 以下本来
+// 也没有玻璃底），两边都能编。
+extension ToolbarContent {
+    @ToolbarContentBuilder
+    func withoutGlass() -> some ToolbarContent {
+        #if compiler(>=6.2)
+        if #available(iOS 26.0, *) {
+            self.sharedBackgroundVisibility(.hidden)
+        } else {
+            self
+        }
+        #else
+        self
+        #endif
+    }
+}
+
+/// 纯文字/图标工具按钮（不带任何背景）。高亮态改用文字颜色 + 字重表达，
+/// ⚠️ 不再自己画胶囊底：放进导航栏后系统还会再套一层玻璃底，两层叠一起很难看。
 struct ToolChip: View {
     let label: String
     var icon: String? = nil
@@ -56,21 +81,18 @@ struct ToolChip: View {
                         .font(.system(size: 12, weight: .semibold))
                 }
                 Text(label)
-                    .font(.caption.weight(.medium))
+                    .font(.caption.weight(highlighted ? .semibold : .medium))
             }
-            .foregroundStyle(highlighted ? Theme.brand : Color.primary)
-            .padding(.horizontal, 11)
-            .padding(.vertical, 7)
-            .background(
-                highlighted ? Theme.brand.opacity(0.14) : Color(uiColor: .secondarySystemBackground),
-                in: Capsule()
-            )
+            .foregroundStyle(highlighted ? Theme.brand : Color.secondary)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 6)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
 }
 
-/// 带下拉菜单的工具胶囊（排序 / 尺寸等）
+/// 带下拉菜单的工具按钮（排序 / 库筛选），同样不画胶囊底
 struct ToolMenuChip<Content: View>: View {
     let label: String
     var icon: String? = nil
@@ -96,10 +118,10 @@ struct ToolMenuChip<Content: View>: View {
                 Image(systemName: "chevron.down")
                     .font(.system(size: 8, weight: .semibold))
             }
-            .foregroundStyle(.primary)
-            .padding(.horizontal, 11)
-            .padding(.vertical, 7)
-            .background(Color(uiColor: .secondarySystemBackground), in: Capsule())
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 6)
+            .contentShape(Rectangle())
         }
     }
 }

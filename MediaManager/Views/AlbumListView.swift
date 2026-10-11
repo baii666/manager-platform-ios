@@ -218,12 +218,20 @@ struct AlbumListView: View {
         // sheet 的「完成」按钮由外层 HomeView 的 confirmationAction 提供。
         // ⚠️ 系统返回按钮必须留着：藏了它右滑手势会一起没（见 MediaListView 注释）。
         // 跨库模式是栈底没有上一层，系统不会给返回按钮。
+            // iPadOS 26 会给系统返回按钮套一层玻璃底：这里只去掉外观，
+            // 不动按钮本身（藏掉它右滑返回手势会一起没，见 MediaListView 注释）
+            .background(alignment: .topLeading) {
+                BackButtonGlassHider()
+                    .frame(width: 1, height: 1)
+                    .allowsHitTesting(false)
+            }
         .toolbar {
             ToolbarItem(placement: .principal) {
                 ListSearchBar(text: $viewModel.searchText,
                               placeholder: "搜索相册名…",
                               compact: true)
             }
+            .withoutGlass()
             // 原来网格上方的工具行整行收进导航栏，页面只剩导航栏一行。
             // 跨库模式（sheet）时「完成」按钮来自外层 HomeView，与这里的 trailing 共存。
             ToolbarItemGroup(placement: .topBarTrailing) {
@@ -248,6 +256,7 @@ struct AlbumListView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            .withoutGlass()
         }
         .tint(Theme.brand)
         .navigationBarTitleDisplayMode(.inline)

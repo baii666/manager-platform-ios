@@ -109,10 +109,10 @@ final class MediaListViewModel: ObservableObject {
         hasMore = true
         do {
             let (batch, total) = try await client.fetchMedia(type: type, libID: selectedLibID, page: page, size: pageSize, sort: sort.rawValue, q: searchText.isEmpty ? nil : searchText)
-            totalCount = total
+            applyTotal(total)
             items = batch
             page += 1
-            hasMore = !batch.isEmpty && items.count < total
+            hasMore = !batch.isEmpty && hasMoreAfter(batchCount: batch.count, total: total)
         } catch {
             errorMessage = "加载失败 · \(describe(error))"
         }
@@ -125,17 +125,32 @@ final class MediaListViewModel: ObservableObject {
         defer { isLoading = false }
         do {
             let (batch, total) = try await client.fetchMedia(type: type, libID: selectedLibID, page: page, size: pageSize, sort: sort.rawValue, q: searchText.isEmpty ? nil : searchText)
-            totalCount = total
+            applyTotal(total)
             if replacing {
                 items = batch
             } else {
                 items.append(contentsOf: batch)
             }
             page += 1
-            hasMore = !batch.isEmpty && items.count < total
+            hasMore = !batch.isEmpty && hasMoreAfter(batchCount: batch.count, total: total)
         } catch {
             errorMessage = "加载失败 · \(describe(error))"
         }
+    }
+
+    /// ⚠️ 后端只在第 1 页算总条数，翻页时返回 -1 哨兵
+    ///（task-service/internal/routes/media.go：非首页不跑 COUNT，省一次全表扫描）。
+    /// 直接把 -1 写进 totalCount 就会显示「34 / -1」，所以负数一律视为「未知」并保留旧值。
+    private func applyTotal(_ total: Int) {
+        if total >= 0 { totalCount = total }
+    }
+
+    /// 还能不能继续翻页。总数已知就按总数比；未知（-1）时退回后端自己的判据：
+    /// 本页拉满说明后面可能还有（后端非首页的 hasMore 就是 len(items) == size）。
+    /// ⚠️ 不这么写的话，第 2 页拿到 -1 会让 `items.count < total` 恒为 false，
+    /// 分页在第二页就悄悄停住，列表永远停在前 120 条。
+    private func hasMoreAfter(batchCount: Int, total: Int) -> Bool {
+        total >= 0 ? items.count < total : batchCount >= pageSize
     }
 
     private func describe(_ error: Error) -> String {
@@ -219,12 +234,20 @@ struct MediaListView: View {
         // .navigationBarBackButtonHidden(true) 会把 interactivePop 一起禁掉，
         // 而且没有任何可靠手段能单独把手势取回来（自定义位移会白屏，
         // UIKit 桥接在这个场景下也接管不了转场）。样式只能走 tint / appearance。
+            // iPadOS 26 会给系统返回按钮套一层玻璃底：这里只去掉外观，
+            // 不动按钮本身（藏掉它右滑返回手势会一起没，见 MediaListView 注释）
+            .background(alignment: .topLeading) {
+                BackButtonGlassHider()
+                    .frame(width: 1, height: 1)
+                    .allowsHitTesting(false)
+            }
         .toolbar {
             ToolbarItem(placement: .principal) {
                 ListSearchBar(text: $viewModel.searchText,
                               placeholder: "搜索标题、演员、类型…",
                               compact: true)
             }
+            .withoutGlass()
             // 原来网格上方的工具行整行收进导航栏，页面只剩导航栏一行
             ToolbarItemGroup(placement: .topBarTrailing) {
                 Text(library?.name ?? (type == "tv" ? "剧集" : "电影"))
@@ -248,6 +271,7 @@ struct MediaListView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            .withoutGlass()
         }
         .tint(Theme.brand)
         .navigationBarTitleDisplayMode(.inline)
