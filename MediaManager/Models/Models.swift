@@ -275,6 +275,17 @@ struct Library: Identifiable, Codable, Sendable, Hashable {
             cardAspectPortrait = Library.aspectRatio(try? s.decode(String.self, forKey: .cardAspectRatioPortrait))
         }
     }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(name, forKey: .name)
+        try c.encode(type, forKey: .type)
+        try c.encode(itemCount, forKey: .itemCount)
+        try c.encodeIfPresent(albumCount, forKey: .albumCount)
+        try c.encodeIfPresent(thumbURL, forKey: .thumbURL)
+        // settings 与两个比例字段都是「读进来」用的，编码时跳过
+    }
 }
 
 // MARK: - 首页统计
