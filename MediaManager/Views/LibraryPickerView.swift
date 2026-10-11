@@ -10,6 +10,8 @@ struct LibraryPickerView: View {
     @State private var libraries: [Library] = []
     @State private var isLoading = true
     @State private var errorMessage: String?
+    /// 已加载过的分类。配合 loadIfNeeded 避免返回本页时重复加载
+    @State private var loadedType: String?
 
     private let columns = [GridItem(.adaptive(minimum: 200), spacing: 16)]
 
@@ -37,7 +39,7 @@ struct LibraryPickerView: View {
         // 顶 bar 已显示「电影 / 相册 / 拍摄集」，这里隐藏导航栏
         .toolbar(.hidden, for: .navigationBar)
         // ⚠️ 用 task(id: type)：顶 bar 切换分类时重新加载对应类型的媒体库
-        .task(id: type) { await load() }
+        .task(id: type) { await loadIfNeeded() }
         // 下拉刷新：保留旧数据，加载完替换（避免闪空）
         .refreshable { await load(clear: false) }
     }
@@ -49,6 +51,22 @@ struct LibraryPickerView: View {
         case "shoot": return "photo.on.rectangle.angled"
         default: return "externaldrive"
         }
+    }
+
+    /// 只在「没加载过当前分类」或「加载过但列表是空的（上次失败）」时才请求。
+    ///
+    /// ⚠️ 原来 .task 直接调 `load(clear: true)`，而它第一件事就是 `libraries = []`。
+    /// 本页挂在「媒体库」tab 的 TabView(.page) 里 —— 从内容列表页右滑返回，
+    /// 或在顶 bar 三个分类之间滑动切换，TabView 都会让本页重新 appear 并触发 .task，
+    /// 于是卡片墙被清空再重新拉一次，表现就是「返回时闪一下、白屏一瞬」。
+    /// 现在已有数据就原地不动，滚动位置也保住；真要刷新走下拉（.refreshable）。
+    @MainActor
+    private func loadIfNeeded() async {
+        // 判 loadedType 而不是只判空：万一 SwiftUI 复用本页去显示别的分类，
+        // 光看 libraries.isEmpty 会跳过加载，结果留着上一个分类的库卡片
+        guard loadedType != type || libraries.isEmpty else { return }
+        loadedType = type
+        await load()
     }
 
     @MainActor
