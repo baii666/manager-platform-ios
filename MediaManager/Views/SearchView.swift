@@ -51,9 +51,8 @@ struct SearchView: View {
     @State private var page = 1
     @State private var hasMore = false
     @State private var history: [String] = SearchHistoryStore.load()
-    /// 防抖定时器：敲字停手 debounceInterval 后才发请求
-    @State private var debounceTask: Task<Void, Never>?
-    /// 真正在飞的那次搜索任务。换词时取消它，避免旧请求回来覆盖新结果
+    /// 防抖定时器已移除：现在是**点搜索按钮（或回车）才搜**，敲字不再自动打接口。
+    /// 真正在飞的那次搜索任务。换词后点搜索时取消它，避免旧请求回来覆盖新结果
     @State private var searchTask: Task<Void, Never>?
     /// 正在加载的词。旧请求结束只清自己的标记，不会把新请求的转圈关掉
     @State private var loadingToken = ""
@@ -193,10 +192,8 @@ struct SearchView: View {
                 }
             }
         }
-        .onChange(of: query) { scheduleSearch() }
+        // ⚠️ 敲字不自动搜：只认「点搜索按钮」和「回车」两个入口（用户要求取消防抖）
         .task { applyInitial() }
-        // 离开页面就撤掉还没发出去的防抖请求，别在背后偷偷打接口
-        .onDisappear { debounceTask?.cancel() }
         // ⚠️ 每个 tab / 每个 push 进来的页面都要自己垫一层背景：
         // NavigationStack 只渲染栈顶那一层，App 根的背景透不进来
         .appBackground()
@@ -233,10 +230,9 @@ struct SearchView: View {
         startSearch()
     }
 
-    /// 顶栏搜索框的清除按钮：词和结果一起清，不等防抖
+    /// 顶栏搜索框的清除按钮：词和结果一起清
     @MainActor
     private func clearAll() {
-        debounceTask?.cancel()
         searchTask?.cancel()
         query = ""
         activeQuery = ""
@@ -609,29 +605,15 @@ struct SearchView: View {
         runSearch(q)
     }
 
-    /// 输入防抖：停手 350ms 才发请求。太长会觉得卡，太短每个字都打接口
-    private static let debounceInterval: Duration = .milliseconds(350)
-
-    /// 输入防抖调度器。
-    /// ⚠️ 只管定时器本身；真正的请求由 runSearch 里的 searchTask 负责取消，
-    /// 否则快速打字会有多个请求同时在飞，回来顺序不确定 → 旧结果盖掉新结果。
-    @MainActor
-    private func scheduleSearch() {
-        debounceTask?.cancel()
-        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        // 已经在展示同一个词的结果就别再打一次：程序化赋值 query（比如
-        // applyInitial / 点历史记录）也会触发 onChange，不拦就是重复请求
-        guard q != activeQuery else { return }
-        debounceTask = Task { @MainActor in
-            try? await Task.sleep(for: Self.debounceInterval)
-            guard !Task.isCancelled else { return }
-            runSearch(query)
-        }
-    }
+    // MARK: 搜索入口
+    //
+    // ⚠️ 敲字不自动搜（防抖已取消，用户明确要求）：只有这几个入口会真的打接口 ——
+    // ① 搜索框里的「🔍搜索」按钮  ② 键盘回车  ③ 分类 / 语义按钮（按当前词重搜）
+    // ④ 点最近搜索  ⑤ 首页带词进来（applyInitial）。
+    // 敲字只改 query，不影响正在展示的结果。
 
     @MainActor
     private func runSearch(_ text: String) {
-        debounceTask?.cancel()
         // 取消上一次在飞的请求：换词后旧结果已经没意义，
         // 而且它回来还会把新结果覆盖掉（请求返回顺序不保证）
         searchTask?.cancel()
@@ -646,12 +628,15 @@ struct SearchView: View {
         startSearch()
     }
 
-    /// 统一的请求入口：换词 / 切分类 / 切语义模式都走这里。
+    /// 统一的请求入口：点搜索 / 切分类 / 切语义模式都走这里。
     /// 每次先取消上一次在飞的任务 —— 请求返回顺序不保证，不取消就会出现
     /// 「旧结果盖掉新结果」「两个词的结果混在一屏」。
     @MainActor
     private func startSearch() {
-        debounceTask?.cancel()
+        // ⚠️ 点了按钮就按输入框里**当前的词**搜：用户可能改了词但没点搜索按钮，
+        // 这时若沿用 activeQuery（上一次搜的词），按钮会看起来「点了没反应」
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !q.isEmpty { activeQuery = q }
         searchTask?.cancel()
         searchTask = Task { await reload() }
     }
