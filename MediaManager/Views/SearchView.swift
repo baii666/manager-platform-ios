@@ -48,6 +48,8 @@ struct SearchView: View {
     /// 语义请求在飞（用于最后一组显示「匹配中」占位）
     @State private var isSemanticLoading = false
     @State private var semanticTask: Task<Void, Never>?
+    /// 分类计数（/search/totals）在飞的那次。它并发跑，换词时也要一起作废
+    @State private var totalsTask: Task<Void, Never>?
     /// 真正拿去请求的词（防抖后写入），避免每敲一个字都打接口
     @State private var activeQuery = ""
     @State private var selectedTab: Tab = .all
@@ -264,6 +266,7 @@ struct SearchView: View {
     private func clearAll() {
         searchTask?.cancel()
         semanticTask?.cancel()
+        totalsTask?.cancel()
         query = ""
         activeQuery = ""
         results = []
@@ -709,7 +712,15 @@ struct SearchView: View {
         if semantic { isSemantic = true }
         let q = initialQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else {
-            fieldFocused = true
+            // ⚠️ 键盘要「晚一拍」再弹：搜索框挂在 toolbar 里，视图第一帧导航栏
+            // 还没布局完，这时写 @FocusState 会被丢掉 —— 表现就是点了搜索
+            // 要等老半天（甚至要点第二下）键盘才出来。等一个 runloop 让它挂载
+            // 完成再聚焦，100ms 肉眼无感，但命中率从「时灵时不灵」变确定。
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(100))
+                guard !Task.isCancelled else { return }
+                fieldFocused = true
+            }
             return
         }
         query = q
@@ -750,9 +761,8 @@ struct SearchView: View {
         // 这时若沿用 activeQuery（上一次搜的词），按钮会看起来「点了没反应」
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         if !q.isEmpty { activeQuery = q }
-        searchTask?.cancel()
-        // 语义是异步的，换条件时它在飞的那次也一并作废（reload 里会清空结果）
         semanticTask?.cancel()
+        totalsTask?.cancel()
         searchTask = Task { await reload() }
     }
 
@@ -765,6 +775,8 @@ struct SearchView: View {
         }
         errorMessage = nil
         page = 1; hasMore = true; results = []; similarity = [:]
+        // 计数先清空：它现在是并发取的，不清的话新词第一屏会顶着**上一个词**的数字
+        totals = [:]
         // 换词了，语义那一组也整个作废（旧词的语义结果不能留在新词下面）
         semanticTask?.cancel()
         semanticItems = []
@@ -773,19 +785,36 @@ struct SearchView: View {
         keywordTotal = 0
         semanticTotal = 0
         resultTotal = 0
-        // 分类计数（/totals 有 5s 服务端缓存，切 Tab 不会重复打爆）。
-        // ⚠️ 语义视图下也打：胶囊上的计数要保持准确，点回某个分类时数字才是对的
-        do { totals = try await client.searchTotals(query: token) } catch { totals = [:] }
-        // 计数回来期间词可能已经换了（或这次任务被取消了），别再往下翻页
-        guard !Task.isCancelled, token == activeQuery else { return }
         if isSemantic {
             // 语义视图：只跑语义那一路。关键词结果在这页一条都不展示，
             // 再打一次关键词请求纯属浪费（还拖慢出结果的观感）
             hasMore = false
             startSemantic(token: token)
+            fetchTotals(token: token)
             return
         }
+        // ⚠️ 分类计数并发跑（它只是给胶囊显示数字），不再 await 在关键词搜索前面
+        fetchTotals(token: token)
         await loadMore()
+    }
+
+    /// 分类计数（/api/search/totals）。自己开一个 Task，不占用 reload 的等待时间。
+    ///
+    /// ⚠️ 之前它是 `try await` 串在关键词搜索**前面**的：整页出结果的时间 =
+    /// 两个接口串起来，等于每次搜索都被拖慢一倍 —— 这就是「搜索慢」的主因。
+    /// 计数晚到几十毫秒没人看得出来，结果慢半秒就很明显。
+    /// ⚠️ 语义视图下也打：胶囊上的计数要保持准确，点回某个分类时数字才是对的
+    @MainActor
+    private func fetchTotals(token: String) {
+        guard let client else { return }
+        totalsTask?.cancel()
+        totalsTask = Task { @MainActor in
+            var t: [String: Int] = [:]
+            if let r = try? await client.searchTotals(query: token) { t = r }
+            // 慢一点回来的旧计数不能盖在新词上（词换了 / 任务被取消）
+            guard !Task.isCancelled, token == activeQuery else { return }
+            totals = t
+        }
     }
 
     private let pageSize = 30

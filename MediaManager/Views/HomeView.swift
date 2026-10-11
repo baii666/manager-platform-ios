@@ -117,10 +117,14 @@ struct HomeView: View {
                 text: $viewModel.searchText,
                 semantic: $viewModel.semanticSearch,
                 onSubmit: {
-                    Task {
-                        await viewModel.performSearch()
-                        showingSearch = true
-                    }
+                    // ⚠️ 直接跳转，**不再 await performSearch()**：
+                    // 之前是「先跑完一整次搜索请求，等它回来才 push」，这就是
+                    // 「首页搜完要等半天才跳到搜索页」的根因。
+                    // 而且这一次请求纯属浪费 —— 首页并不展示搜索结果，
+                    // SearchView 进去会用 initialQuery 自己再搜一次。
+                    guard !viewModel.searchText
+                        .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+                    showingSearch = true
                 }
             )
             .frame(maxWidth: 640)

@@ -96,6 +96,11 @@ final class HomeViewModel: ObservableObject {
     }
 
     /// 搜索框提交（影视 / 照片 / 相册 / 拍摄集全类型）
+    ///
+    /// ⚠️ 首页**不再在跳转前调用它**（2026-10-11）：之前是 `await performSearch()`
+    /// 返回后才 push 到搜索页，一次完整请求的时间全算在「跳转慢」上；
+    /// 而且首页并不展示 searchResults —— 搜索页进去会用自己的词再搜一次，
+    /// 那次请求是纯浪费。现在首页提交直接 push，本方法暂留未调用。
     @MainActor
     func performSearch() async {
         let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
