@@ -279,6 +279,9 @@ struct Photo: Identifiable, Codable, Sendable {
     /// 客户端拼好的缩略图 / 原图 URL（不来自后端）
     var thumbURL: URL? = nil
     var fullURL: URL? = nil
+    /// 左下角胶囊角标文案。目前只有语义搜索用它标相似度（"87%"）；
+    /// 默认 nil → 瀑布流 cell 不画角标。⚠️ 纯客户端字段，不在 CodingKeys 里
+    var badge: String? = nil
 
     /// 人类可读的文件大小，信息面板用
     var sizeText: String? {
@@ -820,6 +823,42 @@ struct SearchItem: Identifiable, Codable, Sendable {
     /// 所以要显式提供一个；其余字段用声明时的默认值。
     init(id: Int) {
         self.id = id
+    }
+}
+
+// MARK: - 搜索结果 → 浏览页模型
+// 搜索接口只返回一套扁平字段，而四类内容的展示卡（MediaCard / AlbumCard /
+// ShootCard / 照片瀑布流）分别吃 MediaItem / Album / Shoot / Photo。
+// 转换集中放在这里，搜索页就能**直接复用浏览页的卡片组件**，
+// 不用再维护一版「搜索专用卡」—— 那正是两边观感分叉的根源。
+extension SearchItem {
+    func asMediaItem() -> MediaItem {
+        var m = MediaItem(id: id)
+        m.title = titleText
+        m.year = year
+        m.type = (type == "tv" || type == "series") ? "tv" : "movie"
+        m.posterImageId = posterImageId
+        m.libraryId = libraryId
+        m.rating = rating
+        return m
+    }
+
+    func asAlbum() -> Album {
+        var a = Album(id: id)
+        a.folderName = folderName ?? titleText
+        a.displayName = displayName
+        a.count = photoCount ?? 0
+        a.coverPhotoId = coverPhotoId
+        a.coverPhotoIdPortrait = coverPhotoIdPortrait
+        return a
+    }
+
+    func asShoot() -> Shoot {
+        var s = Shoot(id: id)
+        s.folderName = folderName ?? titleText
+        s.displayName = titleText
+        s.libraryId = libraryId ?? 0
+        return s
     }
 }
 

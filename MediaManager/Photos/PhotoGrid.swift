@@ -110,6 +110,8 @@ final class PhotoCell: UICollectionViewCell {
     static let reuseID = "PhotoCell"
 
     private let imageView = UIImageView()
+    /// 左下角胶囊角标（语义搜索的相似度）。photo.badge 为 nil 时不显示
+    private let badgeLabel = BadgeLabel()
     private var currentURL: URL?
     private var onImageLoaded: ((CGFloat) -> Void)?
 
@@ -135,6 +137,19 @@ final class PhotoCell: UICollectionViewCell {
             imageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             imageView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
         ])
+
+        badgeLabel.font = .systemFont(ofSize: 11, weight: .semibold)
+        badgeLabel.textColor = .white
+        badgeLabel.backgroundColor = UIColor.black.withAlphaComponent(0.55)
+        badgeLabel.layer.cornerRadius = 8
+        badgeLabel.layer.masksToBounds = true
+        badgeLabel.translatesAutoresizingMaskIntoConstraints = false
+        badgeLabel.isHidden = true
+        contentView.addSubview(badgeLabel)
+        NSLayoutConstraint.activate([
+            badgeLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 6),
+            badgeLabel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -6),
+        ])
     }
 
     required init?(coder: NSCoder) {
@@ -146,12 +161,18 @@ final class PhotoCell: UICollectionViewCell {
         currentURL = nil
         onImageLoaded = nil
         imageView.image = nil
+        badgeLabel.text = nil
+        badgeLabel.isHidden = true
     }
 
     func configure(with photo: Photo, onImageLoaded: ((CGFloat) -> Void)? = nil) {
         let url = photo.thumbURL
         currentURL = url
         self.onImageLoaded = onImageLoaded
+
+        // 角标：语义搜索会带相似度（"87%"），普通照片为 nil
+        badgeLabel.text = photo.badge
+        badgeLabel.isHidden = photo.badge == nil
 
         guard let url else {
             imageView.image = nil
@@ -180,5 +201,20 @@ final class PhotoCell: UICollectionViewCell {
         let size = image.size
         guard size.width > 0, size.height > 0 else { return }
         onImageLoaded?(size.width / size.height)
+    }
+}
+
+/// 带内边距的角标 Label：UILabel 没有 padding，只能靠 drawText(in:) + intrinsicContentSize 自己撑
+private final class BadgeLabel: UILabel {
+    var insets = UIEdgeInsets(top: 3, left: 6, bottom: 3, right: 6)
+
+    override func drawText(in rect: CGRect) {
+        super.drawText(in: rect.inset(by: insets))
+    }
+
+    override var intrinsicContentSize: CGSize {
+        let s = super.intrinsicContentSize
+        return CGSize(width: s.width + insets.left + insets.right,
+                      height: s.height + insets.top + insets.bottom)
     }
 }

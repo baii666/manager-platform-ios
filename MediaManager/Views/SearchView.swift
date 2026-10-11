@@ -97,8 +97,6 @@ struct SearchView: View {
         }
     }
 
-    private let columns = [GridItem(.adaptive(minimum: 150), spacing: 16)]
-
     var body: some View {
         VStack(spacing: 0) {
             searchField
@@ -323,8 +321,13 @@ struct SearchView: View {
                         ScrollView(.horizontal, showsIndicators: false) {
                             LazyHStack(spacing: 12) {
                                 ForEach(section.items) { item in
-                                    SearchCard(item: item, client: client, similarity: similarity[item.id]) { route(item) }
-                                        .frame(width: 150)
+                                    // 照片在浏览页是瀑布流（UIKit 组件），横滑预览里
+                                    // 用同款圆角方块缩略图，观感保持一致
+                                    if item.type == "photo" {
+                                        SearchPhotoThumb(photo: makePhoto(item)) { route(item) }
+                                    } else {
+                                        resultCard(item, width: SearchView.previewCardWidth)
+                                    }
                                 }
                             }
                             .padding(.horizontal, 16)
@@ -337,23 +340,139 @@ struct SearchView: View {
         }
     }
 
-    /// 单类型：竖向网格 + 触底加载更多
+    /// 单类型 / 语义模式：
+    /// 照片走瀑布流（复用相册内照片页的 PhotoGrid），其余走各自列表页的卡片组件
+    @ViewBuilder
     private var flatResults: some View {
-        ScrollView {
-            LazyVGrid(columns: columns, spacing: 16) {
-                ForEach(results) { item in
-                    SearchCard(item: item, client: client, similarity: similarity[item.id]) { route(item) }
-                        .task {
-                            if item.id == results.last?.id { await loadMore() }
-                        }
+        if isSemantic || selectedTab == .photo {
+            photoResults
+        } else {
+            cardResults
+        }
+    }
+
+    // MARK: 照片结果（复用 PhotoGrid 瀑布流）
+
+    /// 结果里的照片 → Photo（语义模式把相似度做成角标带进 cell）
+    private var viewerPhotos: [Photo] {
+        results.filter { $0.type == "photo" }.map { item in
+            var p = makePhoto(item)
+            // 语义搜索：让用户看得到「为什么是这张」
+            if isSemantic, let s = similarity[item.id] { p.badge = "\(Int(s * 100))%" }
+            return p
+        }
+    }
+
+    private var photoResults: some View {
+        let photos = viewerPhotos
+        // ⚠️ PhotoGrid 是 UICollectionView，没有 intrinsicContentSize，
+        // 必须由外层给定尺寸（GeometryReader 量剩下的空间），否则高度为 0
+        return GeometryReader { geo in
+            PhotoGrid(photos: photos,
+                      columns: photoColumns(width: geo.size.width),
+                      onSelect: { openViewer(photos: photos, id: $0.id) },
+                      onReachEnd: { Task { await loadMore() } })
+                .frame(width: geo.size.width, height: geo.size.height)
+        }
+    }
+
+    /// 列数随宽度走：窄屏 3 列，宽屏逐步加密（对齐相册照片页的观感）
+    private func photoColumns(width: CGFloat) -> Int {
+        switch width {
+        case ..<500: return 3
+        case ..<800: return 4
+        case ..<1100: return 5
+        default: return 6
+        }
+    }
+
+    private func openViewer(photos: [Photo], id: Int) {
+        let index = photos.firstIndex { $0.id == id } ?? 0
+        // 走全局 overlay：本页是 push 进来的，fullScreenCover 退出会闪白屏
+        PhotoViewerPresenter.shared.show(photos, index: index, hasMore: hasMore, onLoadMore: {
+            Task {
+                await self.loadMore()
+                PhotoViewerPresenter.shared.updatePhotos(self.viewerPhotos)
+            }
+        })
+    }
+
+    // MARK: 卡片结果（复用 MediaCard / AlbumCard / ShootCard）
+
+    /// 分组横滑里的卡片宽度：与列表页默认竖版宽度一致（150）
+    private static let previewCardWidth: CGFloat = 150
+
+    private var cardResults: some View {
+        GeometryReader { geo in
+            let grid = gridLayout(containerWidth: geo.size.width)
+            ScrollView {
+                LazyVGrid(columns: grid.columns, spacing: 18) {
+                    ForEach(results) { item in
+                        resultCard(item, width: grid.itemWidth)
+                            .task {
+                                if item.id == results.last?.id { await loadMore() }
+                            }
+                    }
+                }
+                .padding(16)
+                .bottomBarClearance()
+                if isLoading {
+                    ProgressView().frame(maxWidth: .infinity).padding()
                 }
             }
-            .padding(16)
-            .bottomBarClearance()
-            if isLoading {
-                ProgressView().frame(maxWidth: .infinity).padding()
-            }
         }
+    }
+
+    /// 列数 / 卡片宽度：与影视列表页同一套算法（固定卡片宽 150，均分铺满）
+    private func gridLayout(containerWidth: CGFloat) -> (columns: [GridItem], itemWidth: CGFloat) {
+        let spacing: CGFloat = 18
+        let padding: CGFloat = 16
+        let gridW = max(containerWidth - padding * 2, 0)
+        let cardW: CGFloat = Self.previewCardWidth
+        let n = max(2, Int((gridW + spacing) / (cardW + spacing)))
+        let itemW = (gridW - spacing * CGFloat(n - 1)) / CGFloat(n)
+        let cols = Array(repeating: GridItem(.flexible(), spacing: spacing), count: n)
+        return (cols, itemW)
+    }
+
+    /// 单张结果卡：**按类型派发给浏览页的同款卡片组件**，
+    /// 搜索结果和列表页因此长得一样，改样式也只改一处。
+    @ViewBuilder
+    private func resultCard(_ item: SearchItem, width: CGFloat) -> some View {
+        // 与列表页同一判据：卡片够宽才显示下方标题区，否则标题叠进封面底部渐变
+        let showInfo = width >= CardLayoutController.compactThreshold
+        switch item.type {
+        case "movie", "series", "tv":
+            let m = item.asMediaItem()
+            // 搜索结果只带海报（没有 fanart），封面 URL 用 mediaCoverURL 统一拼
+            MediaCard(item: m,
+                      coverURL: client?.mediaCoverURL(m, landscape: false),
+                      width: width, landscape: false, showInfo: showInfo) { route(item) }
+        case "album":
+            let a = item.asAlbum()
+            // AlbumCard 本身不带点击（列表页是包在 NavigationLink 里的），这里包一层 Button
+            Button { route(item) } label: {
+                AlbumCard(album: a, coverURL: albumCoverURL(a),
+                          width: width, landscape: false, showInfo: showInfo)
+            }
+            .buttonStyle(.plain)
+        case "shoot":
+            ShootCard(shoot: item.asShoot(), client: client) { route(item) }
+        case "photo":
+            // 兜底：单类型结果里混进照片时不留空白格
+            SearchPhotoThumb(photo: makePhoto(item), size: width) { route(item) }
+        default:
+            EmptyView()
+        }
+    }
+
+    /// 相册封面：竖版优先，都没有就退回用相册 id（与列表页 / 原搜索卡一致）
+    private func albumCoverURL(_ album: Album) -> URL? {
+        let id = album.preferredCoverId ?? album.id
+        return client?.makeURL("/photo", queryItems: [
+            URLQueryItem(name: "id", value: "\(id)"),
+            URLQueryItem(name: "size", value: "600"),
+        ])
     }
 
     // MARK: 数据
@@ -546,150 +665,45 @@ struct SearchView: View {
     }
 
     private func route(_ item: SearchItem) {
+        // 各类型都用 Models.swift 里那一份转换（asMediaItem / asAlbum / asShoot），
+        // 卡片和详情拿到的模型完全一致，不会出现「卡片和详情对不上」
         switch item.type {
         case "movie", "series", "tv":
-            var m = MediaItem(id: item.id)
-            m.title = item.titleText
-            m.year = item.year
-            m.type = item.type == "tv" ? "tv" : "movie"
-            m.posterImageId = item.posterImageId
-            m.libraryId = item.libraryId
-            movieTarget = m
+            movieTarget = item.asMediaItem()
         case "album":
-            var a = Album(id: item.id)
-            a.folderName = item.folderName ?? item.titleText
-            a.displayName = item.displayName
-            a.count = item.photoCount ?? 0
-            a.coverPhotoId = item.coverPhotoId
-            a.coverPhotoIdPortrait = item.coverPhotoIdPortrait
             albumLibID = item.libraryId ?? 0
-            albumTarget = a
+            albumTarget = item.asAlbum()
         case "photo":
             // 搜索结果里的照片整批交给看图器，可以左右翻，而不是只能看孤立的一张。
             // ⚠️ 走全局 overlay（PhotoViewerPresenter）：本页是 push 进来的全屏页，
             // 全局 overlay 挂在 RootView 最外层，盖得住整个 App（含底栏）；
             // 用 fullScreenCover 的话底层页面会被移出窗口层级 → 退出闪白屏。
-            let photos = results.filter { $0.type == "photo" }.map { makePhoto($0) }
-            let index = photos.firstIndex { $0.id == item.id } ?? 0
-            PhotoViewerPresenter.shared.show(photos, index: index)
+            openViewer(photos: viewerPhotos, id: item.id)
         case "shoot":
-            var s = Shoot(id: item.id)
-            s.displayName = item.titleText
-            s.folderName = item.folderName ?? item.titleText
-            s.libraryId = item.libraryId ?? 0
-            shootTarget = s
+            shootTarget = item.asShoot()
         default:
             break
         }
     }
 }
 
-// MARK: - 搜索结果卡
-private struct SearchCard: View {
-    let item: SearchItem
-    let client: APIClient?
-    /// 语义搜索的相似度（0…1）。只有语义模式下有值，普通搜索为 nil
-    var similarity: Double? = nil
+// MARK: - 搜索结果里的照片缩略图
+// 照片在浏览页是 PhotoGrid 瀑布流（UIKit 组件），横滑预览里没法直接复用它，
+// 这里用同款圆角 + 满填充的方块，保证与瀑布流里的照片观感一致。
+private struct SearchPhotoThumb: View {
+    let photo: Photo
+    var size: CGFloat = 150
     var onTap: () -> Void
-
-    private var cover: URL? {
-        switch item.type {
-        case "movie", "series", "tv":
-            // .map 已返回可选，别再 ?? nil（no-op，会招警告）
-            return item.posterImageId.flatMap {
-                client?.makeURL("/media-image", queryItems: [
-                    URLQueryItem(name: "id", value: "\($0)"),
-                    URLQueryItem(name: "size", value: "600"),
-                ])
-            }
-        case "album":
-            // 竖版封面优先（相册卡片是 2:3），没有再退回横版
-            let aid = item.coverPhotoIdPortrait ?? item.coverPhotoId ?? item.id
-            return client?.makeURL("/photo", queryItems: [
-                URLQueryItem(name: "id", value: "\(aid)"),
-                URLQueryItem(name: "size", value: "600"),
-            ])
-        case "photo":
-            return client?.makeURL("/photo", queryItems: [
-                URLQueryItem(name: "id", value: "\(item.id)"),
-                URLQueryItem(name: "size", value: "600"),
-            ])
-        default:
-            return nil
-        }
-    }
-
-    private var subtitle: String {
-        switch item.type {
-        case "movie", "series", "tv":
-            return item.year.map { "\($0)" } ?? (item.libraryName ?? "")
-        case "album":
-            return item.photoCount.map { "\($0) 张" } ?? (item.libraryName ?? "")
-        case "photo":
-            return item.libraryName ?? "照片"
-        case "shoot":
-            return item.libraryName ?? "拍摄集"
-        default:
-            return item.libraryName ?? ""
-        }
-    }
-
-    private var fallbackColors: [Color] {
-        switch item.type {
-        case "photo": return Theme.placeholderGradient(for: .photo)
-        case "shoot": return Theme.placeholderGradient(for: .shoot)
-        case "short": return Theme.placeholderGradient(for: .short)
-        default: return Theme.placeholderGradient(for: .media)
-        }
-    }
 
     var body: some View {
         Button(action: onTap) {
-            VStack(alignment: .leading, spacing: 0) {
-                let isPortrait = item.type == "album" || item.type == "movie" || item.type == "series" || item.type == "tv"
-                RemoteImage(url: cover, fallbackIcon: fallbackIcon, fallbackColors: fallbackColors)
-                    // 搜索结果混合了海报/抽帧封面/照片缩略图，尺寸各不相同，
-                    // 必须按容器尺寸渲染，否则会按原图像素撑开、压住相邻卡片
-                    .imageFilled()
-                    .frame(height: isPortrait ? 200 : 150)
-                    .frame(maxWidth: .infinity)
-                    .clipped()
-                    // 语义模式：右上角标相似度，让用户看得到「为什么是这张」
-                    .overlay(alignment: .topTrailing) {
-                        if let similarity {
-                            Text("\(Int(similarity * 100))%")
-                                .font(.caption2.weight(.semibold))
-                                .monospacedDigit()
-                                .foregroundStyle(.white)
-                                .padding(.horizontal, 7)
-                                .padding(.vertical, 3)
-                                .background(.black.opacity(0.55), in: Capsule())
-                                .padding(8)
-                        }
-                    }
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(item.titleText)
-                        .font(.subheadline.weight(.medium))
-                        .lineLimit(1).truncationMode(.tail)
-                    Text(subtitle)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1).truncationMode(.tail)
-                }
-                .padding(10)
-            }
-            .appSurface(in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(.separator))
+            RemoteImage(url: photo.thumbURL, fallbackIcon: "photo",
+                        fallbackColors: Theme.placeholderGradient(for: .photo))
+                .imageFilled()
+                .frame(width: size, height: size)
+                .clipped()
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
         .buttonStyle(.plain)
-    }
-
-    private var fallbackIcon: String {
-        switch item.type {
-        case "photo": return "photo"
-        case "shoot": return "photo.on.rectangle.angled"
-        case "short": return "play.rectangle.fill"
-        default: return "film"
-        }
     }
 }
