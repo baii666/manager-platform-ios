@@ -105,7 +105,13 @@ struct SearchView: View {
             }
             Divider()
             content
+            // ⚠️ 底部必须垫一个 Spacer：历史记录/空态这种内容不满一屏时，
+            // VStack 只占内容自身高度，会被 NavigationStack 垂直居中——
+            // 搜索框跑到屏幕中间，上方一大块空白（iPad 上尤其明显）。
+            // Spacer 撑满剩余高度，让搜索框和内容始终靠顶。
+            Spacer(minLength: 0)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .navigationTitle("搜索")
         .navigationBarTitleDisplayMode(.inline)
         .onChange(of: query) { scheduleSearch() }
