@@ -52,7 +52,7 @@ struct RootView: View {
 
     var body: some View {
         ZStack {
-            NavigationStack(path: $homePath) { HomeView(viewModel: viewModel) }
+            NavigationStack(path: $homePath) { HomeView(viewModel: viewModel, path: $homePath) }
                 .opacity(tab == .home ? 1 : 0)
                 .allowsHitTesting(tab == .home)
 

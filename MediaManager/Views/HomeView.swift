@@ -1,16 +1,24 @@
 import SwiftUI
 import UIKit
 
+// MARK: - 首页导航路由（path-based）
+// 看图器「进入相册」要往当前 tab 的 NavigationPath 里 append 相册目标，
+// 若首页仍用 navigationDestination(isPresented:) 推随机照片/搜索页（不写 path），
+// append 会把这些页面顶掉 → 返回直接回主页。统一改成 for: 类型 + path 驱动。
+enum HomeRoute: Hashable {
+    case photoBrowser
+    case search(initialQuery: String, semantic: Bool)
+}
+
 // MARK: - 首页
 // 信息架构对齐现有 Web 端 HomePageV3 的消费视角：搜索 + 统计 → 最近入库 → 发现。
 // ⚠️「继续观看 / 我的收藏 / 观看记录」已挪到「我的」tab（MineView），首页只管找内容。
 struct HomeView: View {
     @ObservedObject var viewModel: HomeViewModel
+    @Binding var path: NavigationPath
     @Environment(\.horizontalSizeClass) private var hSizeClass
 
-    @State private var showingPhotos = false
     @State private var showingAlbums = false
-    @State private var showingSearch = false
     @State private var selectedRecent: RecentItem?
 
     var body: some View {
@@ -46,11 +54,15 @@ struct HomeView: View {
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
         }
-        // 随机照片：push 进全屏页面，不再用 sheet。
-        // 与搜索同理 —— push 后底层首页始终在层级里渲染，全局看图器 overlay 可见，
-        // 点开大图退出时露出的是照片页本身，不会像 sheet 那样盖住全局 overlay。
-        .navigationDestination(isPresented: $showingPhotos) {
-            PhotoBrowserView()
+        // 随机照片 / 搜索：push 进全屏页面（path-based，配合 NavigationPath）。
+        // push 后底层首页始终在层级里渲染，全局看图器 overlay 可见，退出不闪白。
+        .navigationDestination(for: HomeRoute.self) { route in
+            switch route {
+            case .photoBrowser:
+                PhotoBrowserView()
+            case .search(let q, let semantic):
+                SearchView(initialQuery: q, semantic: semantic)
+            }
         }
         .sheet(isPresented: $showingAlbums) {
             NavigationStack {
@@ -62,14 +74,6 @@ struct HomeView: View {
                         }
                     }
             }
-        }
-        // ⚠️ 搜索是核心功能：push 进**全屏页面**，不再用 sheet。
-        // 两个原因：① sheet 是卡片式半屏，搜索结果多时空间不够；
-        // ② sheet 是 present 出来的层级，会盖住 RootView 最外层的全局看图器 overlay，
-        //    照片只能退回本页 fullScreenCover → 退出时底层页面被移出窗口层级，闪白屏。
-        // push 之后底层的首页始终在层级里渲染，看图器退出露出的就是搜索结果页本身。
-        .navigationDestination(isPresented: $showingSearch) {
-            SearchView(initialQuery: viewModel.searchText, semantic: viewModel.semanticSearch)
         }
         // 最近入库卡片 → 详情页（电影/剧集 → 影视详情；相册 → 相册照片页）
         .navigationDestination(item: $selectedRecent) { item in
@@ -151,7 +155,7 @@ struct HomeView: View {
                     // SearchView 进去会用 initialQuery 自己再搜一次。
                     guard !viewModel.searchText
                         .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-                    showingSearch = true
+                    path.append(HomeRoute.search(initialQuery: viewModel.searchText, semantic: viewModel.semanticSearch))
                 }
             )
             .frame(maxWidth: 640)
@@ -200,7 +204,7 @@ struct HomeView: View {
             SectionHeader(icon: "sparkles", title: "发现")
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 12)], spacing: 12) {
                 DiscoverCard(icon: "shuffle", title: "随机照片", subtitle: "从图库里随便逛", tint: .green) {
-                    showingPhotos = true
+                    path.append(HomeRoute.photoBrowser)
                 }
                 DiscoverCard(icon: "person.2.fill", title: "人物", subtitle: "人脸聚类结果", tint: .cyan)
                 DiscoverCard(icon: "photo.on.rectangle.angled", title: "拍摄集", subtitle: "按拍摄批次浏览", tint: .pink)
