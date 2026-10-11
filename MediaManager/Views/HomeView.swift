@@ -133,14 +133,9 @@ struct HomeView: View {
             )
             .frame(maxWidth: 640)
 
-            // 统计卡：竖屏固定 3 列（6 个正好 2 行 × 3 列，不换行参差），
-            // 横屏固定 6 列（1 行铺满）。用固定列数而非 adaptive —— adaptive 在竖屏
-            // 会算出 4 列，6 个卡片 2 行，第二行只剩 2 个，很散。
-            LazyVGrid(columns: statColumns, spacing: 12) {
-                ForEach(statEntries) { entry in
-                    StatCard(icon: entry.icon, label: entry.label, value: entry.value, tint: entry.tint, action: entry.action)
-                }
-            }
+            // 统计卡：横屏固定 5 列（1 行铺满）；竖屏 5 个卡片若用网格会 3+2 参差，
+            // 改成横向滚动一行（每个卡固定宽度，左右滑）。
+            statGrid
         }
         .frame(maxWidth: .infinity)
         .padding(24)
@@ -194,17 +189,39 @@ struct HomeView: View {
 
     // MARK: 统计配置
 
-    /// 统计卡列数：竖屏 3 列（6 个 = 2 行 × 3 列），横屏 6 列（1 行）
+    /// 统计卡布局：横屏 5 列网格（1 行铺满）；竖屏横向滚动一行（5 个卡片固定宽度）。
+    /// ⚠️ 5 是质数，竖屏任何固定列数都会留下一行参差，横向滚动是最干净的解。
+    @ViewBuilder
+    private var statGrid: some View {
+        if hSizeClass == .compact {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    ForEach(statEntries) { entry in
+                        StatCard(icon: entry.icon, label: entry.label, value: entry.value,
+                                 tint: entry.tint, action: entry.action)
+                            .frame(width: 150)
+                    }
+                }
+            }
+        } else {
+            LazyVGrid(columns: statColumns, spacing: 12) {
+                ForEach(statEntries) { entry in
+                    StatCard(icon: entry.icon, label: entry.label, value: entry.value,
+                             tint: entry.tint, action: entry.action)
+                }
+            }
+        }
+    }
+
+    /// 统计卡列数（仅横屏网格用）：5 列 = 1 行铺满
     private var statColumns: [GridItem] {
-        let count = hSizeClass == .compact ? 3 : 6
-        return Array(repeating: GridItem(.flexible(), spacing: 12), count: count)
+        Array(repeating: GridItem(.flexible(), spacing: 12), count: 5)
     }
 
     private var statEntries: [StatEntry] {
         [
             StatEntry(id: "lib", icon: "folder.fill", label: "媒体库", value: viewModel.stats.libraryCount, tint: Theme.brand),
             StatEntry(id: "movie", icon: "film", label: "电影", value: viewModel.stats.movieCount, tint: .blue),
-            StatEntry(id: "series", icon: "tv", label: "剧集", value: viewModel.stats.seriesCount, tint: .purple),
             StatEntry(id: "photo", icon: "camera", label: "图片", value: viewModel.stats.photoCount, tint: .green) {
                 showingAlbums = true
             },
