@@ -684,31 +684,34 @@ struct PhotoViewerView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 72), spacing: 8)], spacing: 8) {
-                    ForEach(similarPhotos) { sp in
-                        Button {
-                            viewSimilarPhoto(sp)
-                        } label: {
-                            ViewerThumb(url: client?.makeURL("/photo", queryItems: [
-                                URLQueryItem(name: "id", value: "\(sp.id)"),
-                                URLQueryItem(name: "size", value: "600"),
-                            ]))
-                            .frame(width: 72, height: 72)
-                            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                            .overlay(alignment: .bottom) {
-                                if let score = sp.scoreText {
-                                    Text(score)
-                                        .font(.system(size: 9, weight: .semibold))
-                                        .foregroundStyle(.white)
-                                        .padding(.horizontal, 4)
-                                        .padding(.vertical, 1)
-                                        .background(.black.opacity(0.65))
-                                        .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
-                                        .padding(3)
+                // 只显示一排，横向滚动
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(similarPhotos) { sp in
+                            Button {
+                                viewSimilarPhoto(sp)
+                            } label: {
+                                ViewerThumb(url: client?.makeURL("/photo", queryItems: [
+                                    URLQueryItem(name: "id", value: "\(sp.id)"),
+                                    URLQueryItem(name: "size", value: "600"),
+                                ]))
+                                .frame(width: 72, height: 72)
+                                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                                .overlay(alignment: .bottom) {
+                                    if let score = sp.scoreText {
+                                        Text(score)
+                                            .font(.system(size: 9, weight: .semibold))
+                                            .foregroundStyle(.white)
+                                            .padding(.horizontal, 4)
+                                            .padding(.vertical, 1)
+                                            .background(.black.opacity(0.65))
+                                            .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
+                                            .padding(3)
+                                    }
                                 }
                             }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -1123,31 +1126,22 @@ private struct SimilarPhotoOverlay: View {
     }
 }
 
-/// 相似图蒙层里的单页：原图按屏宽等比缩放，竖图超高可上下滚动看全貌。
+/// 相似图蒙层里的单页：原图等比缩放、居中铺满整屏，左右翻页查看。
 private struct SimilarPhotoPage: View {
     let url: URL?
     @State private var image: UIImage?
 
     var body: some View {
-        GeometryReader { geo in
-            ScrollView([.vertical], showsIndicators: false) {
-                Group {
-                    if let image {
-                        Image(uiImage: image)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: geo.size.width)
-                            .frame(minHeight: geo.size.height)
-                    } else {
-                        ProgressView().tint(.white)
-                            .frame(width: geo.size.width, height: geo.size.height)
-                    }
-                }
-                .frame(width: geo.size.width)
-                .frame(maxWidth: .infinity)
+        Group {
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+            } else {
+                ProgressView().tint(.white)
             }
-            .frame(width: geo.size.width, height: geo.size.height)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task(id: url?.absoluteString ?? "") {
             guard let url, image == nil else { return }
             image = await ImageCache.shared.load(from: url)
