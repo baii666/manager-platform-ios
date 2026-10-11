@@ -85,19 +85,15 @@ struct ListSearchBarItem: ToolbarContent {
     static let width: CGFloat = 280
     /// 窄屏下的搜索框宽度（见 narrow）
     static let narrowWidth: CGFloat = 170
-    /// 空间不足时搜索框能缩到的下限（再窄就没法打字了）
-    static let minSearchWidth: CGFloat = 90
 
     var body: some ToolbarContent {
         ToolbarItem(placement: .topBarLeading) {
             HStack(spacing: 10) {
                 ListSearchBar(text: $text, placeholder: placeholder, compact: true)
-                    // ⚠️ 不能写死 .frame(width:)：固定宽的搜索框会把整段 leading 占满，
-                    // 后面的库名被压成 0 宽 —— 库名就是这么「不显示」的。
-                    // 写成 min/ideal/max 三段：空间够就是 width，不够自己往回缩。
-                    .frame(minWidth: Self.minSearchWidth,
-                           idealWidth: narrow ? Self.narrowWidth : Self.width,
-                           maxWidth: narrow ? Self.narrowWidth : Self.width)
+                    // ⚠️ 就是死宽：搜索框长度恒定，不随可用空间伸缩
+                    //（试过 min/ideal/max 让它可回缩，结果它一缩用户就看出来了 ——
+                    //  后面明明还有一大片空位，没必要让搜索框让路）
+                    .frame(width: narrow ? Self.narrowWidth : Self.width)
                 if let title {
                     // 库名紧跟搜索框。够宽就整段显示（拉长），不够才尾部省略。
                     // 颜色跟计数（"34 / 120"）一致，整条状态栏一个色调。
@@ -108,7 +104,7 @@ struct ListSearchBarItem: ToolbarContent {
                         .truncationMode(.tail)
                         // ⚠️ 这两行是库名「不消失」的保险：
                         // minWidth 保证再挤也留一截；layoutPriority 高于搜索框（默认 0），
-                        // 空间不够时先压搜索框，库名保住自己的宽度。
+                        // 分配空间时先满足库名。
                         .frame(minWidth: 40)
                         .layoutPriority(1)
                 }
