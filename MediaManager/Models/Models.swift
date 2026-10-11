@@ -814,4 +814,55 @@ struct SearchItem: Identifiable, Codable, Sendable {
     mutating func fillType(_ fallback: String) {
         if type.isEmpty { type = fallback }
     }
+
+    /// 手工构造（语义搜索结果 → SearchItem）。
+    /// ⚠️ 本 struct 自带 init(from:)，Swift **不再合成** memberwise init，
+    /// 所以要显式提供一个；其余字段用声明时的默认值。
+    init(id: Int) {
+        self.id = id
+    }
+}
+
+// MARK: - CLIP 语义搜索结果（以文搜图）
+// 对应 GET /api/photos/semantic-search 的 results[]。
+// ⚠️ 只在**照片**上工作：语义向量来自 CLIP，影视/相册/拍摄集没有。
+struct SemanticPhotoResult: Identifiable, Decodable, Sendable {
+    let id: Int
+    var fileName: String?
+    var folderPath: String?
+    var libraryId: Int?
+    var albumId: Int?
+    /// 余弦相似度 [0,1]，后端已按它降序排好
+    var similarity: Double?
+    var aestheticScore: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case fileName = "file_name"
+        case folderPath = "folder_path"
+        case libraryId = "library_id"
+        case albumId = "album_id"
+        case similarity
+        case aestheticScore = "aesthetic_score"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        // 同 SearchItem：id 可能是 123 / 123.0 / "123"
+        if let v = try? c.decode(Int.self, forKey: .id) {
+            id = v
+        } else if let d = try? c.decode(Double.self, forKey: .id) {
+            id = Int(d)
+        } else if let s = try? c.decode(String.self, forKey: .id) {
+            id = Int(s) ?? 0
+        } else {
+            id = 0
+        }
+        fileName = try? c.decodeIfPresent(String.self, forKey: .fileName)
+        folderPath = try? c.decodeIfPresent(String.self, forKey: .folderPath)
+        libraryId = try? c.decodeIfPresent(Int.self, forKey: .libraryId)
+        albumId = try? c.decodeIfPresent(Int.self, forKey: .albumId)
+        similarity = try? c.decodeIfPresent(Double.self, forKey: .similarity)
+        aestheticScore = try? c.decodeIfPresent(Double.self, forKey: .aestheticScore)
+    }
 }

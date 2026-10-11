@@ -451,6 +451,35 @@ final class APIClient: DataProviding, @unchecked Sendable {
         return resp
     }
 
+    // MARK: - CLIP 语义搜索（以文搜图）
+
+    /// 语义搜索：把查询文本交给 CLIP 编码，再和照片向量做相似度匹配。
+    /// 支持任意自然语言描述（"海边的日落"、"穿红衣服的人"），不依赖文件名/标签。
+    ///
+    /// ⚠️ 三条前提，缺一不可，否则一定没结果：
+    /// ① 服务端加载了 CLIP 模型 —— 没加载时后端返回
+    ///    503 + {"error":"CLIP 模型未加载，语义搜索不可用"}，request 会把它转成
+    ///    DataError.server(这段话)，UI 直接显示原文最清楚；
+    /// ② 照片已经跑过 AI 分析（CLIP 向量写进 photo_emb_* 表）—— 没跑过的话
+    ///    相似度搜不到任何东西，表现为「零结果」而不是报错；
+    /// ③ 只对照片生效，影视/相册/拍摄集没有语义向量。
+    func semanticSearch(query: String,
+                        libraryId: Int? = nil,
+                        limit: Int = 60,
+                        offset: Int = 0,
+                        threshold: Double = 0.18) async throws -> SemanticSearchPage {
+        var items: [URLQueryItem] = [
+            URLQueryItem(name: "q", value: query),
+            URLQueryItem(name: "limit", value: "\(limit)"),
+            URLQueryItem(name: "offset", value: "\(offset)"),
+            URLQueryItem(name: "threshold", value: "\(threshold)"),
+        ]
+        if let libraryId { items.append(URLQueryItem(name: "library_id", value: "\(libraryId)")) }
+        let resp: SemanticSearchResponse = try await request("/api/photos/semantic-search", queryItems: items)
+        return SemanticSearchPage(results: resp.results ?? [], total: resp.total ?? resp.results?.count ?? 0,
+                                  model: resp.model, annUsed: resp.annUsed)
+    }
+
 
     // MARK: - 结果解析（拼完整 URL）
 
@@ -714,6 +743,30 @@ struct SearchPage {
     let items: [SearchItem]
     let total: Int
     let hasMore: Bool
+}
+
+/// 语义搜索一页。total 是**全部**匹配数（已翻页前），翻页用它判断是否还有
+struct SemanticSearchPage {
+    let results: [SemanticPhotoResult]
+    let total: Int
+    /// 服务端用的 CLIP 模型名（nil = 响应里没带）
+    let model: String?
+    /// 是否走了 ANN 索引加速（nil = 响应里没带）
+    let annUsed: Bool?
+}
+
+/// GET /api/photos/semantic-search 的响应。
+/// 注意字段是 results 不是 items，且全部可选（出错时后端只给 error）
+private struct SemanticSearchResponse: Decodable {
+    let results: [SemanticPhotoResult]?
+    let total: Int?
+    let model: String?
+    let annUsed: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case results, total, model
+        case annUsed = "ann_used"
+    }
 }
 
 /// /api/actions/status 的响应：states 里每项含 id / favorite / rating / position

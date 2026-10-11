@@ -29,8 +29,14 @@ final class SearchHistoryStore {
 struct SearchView: View {
     /// 首页搜索框提交后带进来的关键词；为空则进入后自动聚焦键盘等用户输入
     var initialQuery: String = ""
+    /// 首页的「语义搜索」开关状态（sparkles 按钮）带进来
+    var semantic: Bool = false
 
     @State private var query = ""
+    /// 语义模式（以文搜图）。只对照片生效，由搜索框右侧的 sparkles 按钮切换
+    @State private var isSemantic = false
+    /// 语义结果按 id 存相似度，供卡片角标显示
+    @State private var similarity: [Int: Double] = [:]
     /// 真正拿去请求的词（防抖后写入），避免每敲一个字都打接口
     @State private var activeQuery = ""
     @State private var selectedTab: Tab = .all
@@ -91,7 +97,12 @@ struct SearchView: View {
     var body: some View {
         VStack(spacing: 0) {
             searchField
-            if !totals.isEmpty || selectedTab != .all { categoryBar }
+            // 语义模式只看照片，分类 Tab 无意义（影视/相册/拍摄集没有语义向量）
+            if isSemantic {
+                semanticBanner
+            } else if !totals.isEmpty || selectedTab != .all {
+                categoryBar
+            }
             Divider()
             content
         }
@@ -113,7 +124,8 @@ struct SearchView: View {
     private var searchField: some View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-            TextField("搜索影视 / 相册 / 照片 / 拍摄集", text: $query)
+            TextField(isSemantic ? "用一句话描述画面，例如「海边的日落」" : "搜索影视 / 相册 / 照片 / 拍摄集",
+                      text: $query)
                 .textFieldStyle(.plain)
                 .submitLabel(.search)
                 .autocorrectionDisabled()
@@ -127,14 +139,47 @@ struct SearchView: View {
                     activeQuery = ""
                     results = []
                     totals = [:]
+                    similarity = [:]
                 } label: {
                     Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
                 }
             }
+            // 语义开关（与首页搜索框同一个 sparkles 按钮、同一套配色）
+            Button {
+                isSemantic.toggle()
+                if !activeQuery.isEmpty { Task { await reload() } }
+            } label: {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(isSemantic ? Color.purple : .secondary)
+                    .padding(7)
+                    .background(
+                        isSemantic ? Color.purple.opacity(0.16) : Color.clear,
+                        in: Capsule()
+                    )
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(isSemantic ? "关闭语义搜索" : "开启语义搜索")
         }
         .padding(.horizontal, 12).padding(.vertical, 9)
         .appSurface(in: Capsule())
         .padding(.horizontal, 16).padding(.vertical, 10)
+    }
+
+    /// 语义模式的说明条：说清它只搜照片、且照片要先跑过 AI 分析，
+    /// 否则用户只会看到「零结果」而不知道为什么
+    private var semanticBanner: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "sparkles")
+                .font(.caption)
+                .foregroundStyle(Color.purple)
+            Text("语义搜索：按画面内容匹配照片，需要照片已完成 AI 分析")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
     }
 
     // MARK: 分类 Tab
@@ -177,9 +222,20 @@ struct SearchView: View {
         } else if activeQuery.isEmpty {
             historyList
         } else if results.isEmpty && !isLoading {
-            ContentUnavailableView("没有匹配结果", systemImage: "tray")
-                .frame(maxWidth: .infinity, minHeight: 300)
-        } else if selectedTab == .all {
+            // 语义模式的空结果要解释原因，不然用户只会觉得「语义搜索坏了」
+            Group {
+                if isSemantic {
+                    ContentUnavailableView {
+                        Label("没有语义匹配的照片", systemImage: "sparkles")
+                    } description: {
+                        Text("确认照片已跑过 AI 分析（会生成语义向量），或换个说法、把阈值调低再试。")
+                    }
+                } else {
+                    ContentUnavailableView("没有匹配结果", systemImage: "tray")
+                }
+            }
+            .frame(maxWidth: .infinity, minHeight: 300)
+        } else if selectedTab == .all && !isSemantic {
             groupedResults
         } else {
             flatResults
@@ -254,7 +310,7 @@ struct SearchView: View {
                         ScrollView(.horizontal, showsIndicators: false) {
                             LazyHStack(spacing: 12) {
                                 ForEach(section.items) { item in
-                                    SearchCard(item: item, client: client) { route(item) }
+                                    SearchCard(item: item, client: client, similarity: similarity[item.id]) { route(item) }
                                         .frame(width: 150)
                                 }
                             }
@@ -272,7 +328,7 @@ struct SearchView: View {
         ScrollView {
             LazyVGrid(columns: columns, spacing: 16) {
                 ForEach(results) { item in
-                    SearchCard(item: item, client: client) { route(item) }
+                    SearchCard(item: item, client: client, similarity: similarity[item.id]) { route(item) }
                         .task {
                             if item.id == results.last?.id { await loadMore() }
                         }
@@ -319,6 +375,9 @@ struct SearchView: View {
     private func applyInitial() {
         guard !didApplyInitial else { return }
         didApplyInitial = true
+        // 首页的语义开关状态只在这里同步一次：之后由本页自己的按钮控制，
+        // 否则每次返回首页再进来都会被覆盖掉
+        isSemantic = semantic
         let q = initialQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else {
             fieldFocused = true
@@ -356,12 +415,17 @@ struct SearchView: View {
     @MainActor
     private func reload() async {
         guard let client, !activeQuery.isEmpty else {
-            results = []; totals = [:]; return
+            results = []; totals = [:]; similarity = [:]; return
         }
         errorMessage = nil
-        page = 1; hasMore = true; results = []
-        // 分类计数（/totals 有 5s 服务端缓存，切 Tab 不会重复打爆）
-        do { totals = try await client.searchTotals(query: activeQuery) } catch { totals = [:] }
+        page = 1; hasMore = true; results = []; similarity = [:]
+        if isSemantic {
+            // 语义模式没有分类计数（它只搜照片），别去打 /totals
+            totals = [:]
+        } else {
+            // 分类计数（/totals 有 5s 服务端缓存，切 Tab 不会重复打爆）
+            do { totals = try await client.searchTotals(query: activeQuery) } catch { totals = [:] }
+        }
         await loadMore()
     }
 
@@ -373,19 +437,45 @@ struct SearchView: View {
         isLoading = true
         defer { isLoading = false }
         do {
-            // 「全部」只取每类一批做总览，翻页交给各分类页
-            let size = selectedTab == .all ? 8 : pageSize
-            let p = try await client.searchGrouped(
-                query: activeQuery, types: selectedTab.requestTypes, page: page, size: size)
-            if page == 1 { results = p.items } else { results.append(contentsOf: p.items) }
-            page += 1
-            hasMore = selectedTab == .all ? false : p.hasMore
+            if isSemantic {
+                // 后端用 offset 翻页，page 从 1 起 → offset = (page-1) * pageSize
+                let p = try await client.semanticSearch(
+                    query: activeQuery, limit: pageSize, offset: (page - 1) * pageSize)
+                let items = p.results.map { makeSearchItem($0) }
+                if page == 1 { results = items } else { results.append(contentsOf: items) }
+                var map = similarity
+                for r in p.results { map[r.id] = r.similarity ?? 0 }
+                similarity = map
+                page += 1
+                hasMore = results.count < p.total
+            } else {
+                // 「全部」只取每类一批做总览，翻页交给各分类页
+                let size = selectedTab == .all ? 8 : pageSize
+                let p = try await client.searchGrouped(
+                    query: activeQuery, types: selectedTab.requestTypes, page: page, size: size)
+                if page == 1 { results = p.items } else { results.append(contentsOf: p.items) }
+                page += 1
+                hasMore = selectedTab == .all ? false : p.hasMore
+            }
         } catch {
-            errorMessage = "搜索失败 · \((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)"
+            // 语义模式下最常见的失败是后端没加载 CLIP 模型（503），
+            // 服务端原文（"CLIP 模型未加载，语义搜索不可用"）已经说清楚了，直接透出
+            let msg = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            errorMessage = (isSemantic ? "语义搜索不可用 · " : "搜索失败 · ") + msg
         }
     }
 
     // MARK: 路由
+
+    /// 语义结果 → SearchItem：复用同一张卡片、同一套路由和看图器（语义只出照片）
+    private func makeSearchItem(_ r: SemanticPhotoResult) -> SearchItem {
+        var item = SearchItem(id: r.id)
+        item.fillType("photo")
+        item.fileName = r.fileName
+        item.libraryId = r.libraryId
+        item.albumId = r.albumId
+        return item
+    }
 
     private func makePhoto(_ item: SearchItem) -> Photo {
         var p = Photo(id: item.id)
@@ -446,6 +536,8 @@ struct SearchView: View {
 private struct SearchCard: View {
     let item: SearchItem
     let client: APIClient?
+    /// 语义搜索的相似度（0…1）。只有语义模式下有值，普通搜索为 nil
+    var similarity: Double? = nil
     var onTap: () -> Void
 
     private var cover: URL? {
@@ -510,6 +602,19 @@ private struct SearchCard: View {
                     .frame(height: isPortrait ? 200 : 150)
                     .frame(maxWidth: .infinity)
                     .clipped()
+                    // 语义模式：右上角标相似度，让用户看得到「为什么是这张」
+                    .overlay(alignment: .topTrailing) {
+                        if let similarity {
+                            Text("\(Int(similarity * 100))%")
+                                .font(.caption2.weight(.semibold))
+                                .monospacedDigit()
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 3)
+                                .background(.black.opacity(0.55), in: Capsule())
+                                .padding(8)
+                        }
+                    }
                 VStack(alignment: .leading, spacing: 3) {
                     Text(item.titleText)
                         .font(.subheadline.weight(.medium))

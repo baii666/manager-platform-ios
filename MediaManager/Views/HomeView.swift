@@ -60,7 +60,7 @@ struct HomeView: View {
         //    照片只能退回本页 fullScreenCover → 退出时底层页面被移出窗口层级，闪白屏。
         // push 之后底层的首页始终在层级里渲染，看图器退出露出的就是搜索结果页本身。
         .navigationDestination(isPresented: $showingSearch) {
-            SearchView(initialQuery: viewModel.searchText)
+            SearchView(initialQuery: viewModel.searchText, semantic: viewModel.semanticSearch)
         }
     }
 
