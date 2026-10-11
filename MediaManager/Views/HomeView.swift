@@ -54,15 +54,13 @@ struct HomeView: View {
                     }
             }
         }
-        .sheet(isPresented: $showingSearch) {
-            NavigationStack {
-                SearchView()
-                    .toolbar {
-                        ToolbarItem(placement: .confirmationAction) {
-                            Button("完成") { showingSearch = false }
-                        }
-                    }
-            }
+        // ⚠️ 搜索是核心功能：push 进**全屏页面**，不再用 sheet。
+        // 两个原因：① sheet 是卡片式半屏，搜索结果多时空间不够；
+        // ② sheet 是 present 出来的层级，会盖住 RootView 最外层的全局看图器 overlay，
+        //    照片只能退回本页 fullScreenCover → 退出时底层页面被移出窗口层级，闪白屏。
+        // push 之后底层的首页始终在层级里渲染，看图器退出露出的就是搜索结果页本身。
+        .navigationDestination(isPresented: $showingSearch) {
+            SearchView(initialQuery: viewModel.searchText)
         }
     }
 

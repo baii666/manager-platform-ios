@@ -26,10 +26,8 @@ final class SearchHistoryStore {
 // MARK: - 搜索页
 // 对齐网页端搜索：分类 Tab（全部/影视/相册/照片/拍摄集）+ 每类无限滚动 + 结果直达详情
 struct SearchView: View {
-    /// 看图器走哪条路。默认全局 overlay（PhotoViewerPresenter，退出丝滑）；
-    /// ⚠️ 本页若在 **sheet** 里（首页的搜索按钮就是 sheet），全局 overlay 会被 sheet
-    /// 盖住看不见 —— 此时传 false，退回本页自己的 fullScreenCover。
-    var useGlobalViewer = false
+    /// 首页搜索框提交后带进来的关键词；为空则进入后自动聚焦键盘等用户输入
+    var initialQuery: String = ""
 
     @State private var query = ""
     /// 真正拿去请求的词（防抖后写入），避免每敲一个字都打接口
@@ -43,14 +41,15 @@ struct SearchView: View {
     @State private var hasMore = false
     @State private var history: [String] = SearchHistoryStore.load()
     @State private var debounceTask: Task<Void, Never>?
+    /// 初始词只应用一次：从下级页面返回时会再次 onAppear，不能每次都重搜
+    @State private var didApplyInitial = false
+    @FocusState private var fieldFocused: Bool
 
     // 导航目标
     @State private var movieTarget: MediaItem?
     @State private var albumTarget: Album?
     @State private var albumLibID: Int = 0
     @State private var shootTarget: Shoot?
-    /// sheet 模式（useGlobalViewer = false）下的看图器目标
-    @State private var localPhoto: Photo?
 
     private var client: APIClient? { AppSession.shared.client }
 
@@ -99,15 +98,13 @@ struct SearchView: View {
         .navigationBarTitleDisplayMode(.inline)
         .onChange(of: query) { scheduleSearch() }
         .onSubmit(of: .text) { runSearch(query) }
+        .task { applyInitial() }
         // ⚠️ 每个 tab / 每个 push 进来的页面都要自己垫一层背景：
         // NavigationStack 只渲染栈顶那一层，App 根的背景透不进来
         .appBackground()
         .navigationDestination(item: $movieTarget) { MediaDetailView(media: $0) }
         .navigationDestination(item: $albumTarget) { AlbumPhotosView(album: $0, libID: albumLibID) }
         .navigationDestination(item: $shootTarget) { ShootDetailView(shoot: $0) }
-        .fullScreenCover(item: $localPhoto) { photo in
-            PhotoViewerView(photos: [photo], index: 0, onClose: { localPhoto = nil })
-        }
     }
 
     // MARK: 搜索框
@@ -119,6 +116,7 @@ struct SearchView: View {
                 .textFieldStyle(.plain)
                 .submitLabel(.search)
                 .autocorrectionDisabled()
+                .focused($fieldFocused)
             if isLoading {
                 ProgressView().controlSize(.small)
             }
@@ -315,6 +313,20 @@ struct SearchView: View {
         }
     }
 
+    /// 进入时处理首页带过来的初始词。没带词就自动聚焦键盘，省一次点击。
+    @MainActor
+    private func applyInitial() {
+        guard !didApplyInitial else { return }
+        didApplyInitial = true
+        let q = initialQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else {
+            fieldFocused = true
+            return
+        }
+        query = q
+        runSearch(q)
+    }
+
     /// 输入防抖：350ms 内连续输入只发一次请求
     @MainActor
     private func scheduleSearch() {
@@ -410,14 +422,13 @@ struct SearchView: View {
             albumLibID = item.libraryId ?? 0
             albumTarget = a
         case "photo":
-            // 搜索结果里的照片整批交给看图器，可以左右翻，而不是只能看孤立的一张
+            // 搜索结果里的照片整批交给看图器，可以左右翻，而不是只能看孤立的一张。
+            // ⚠️ 走全局 overlay（PhotoViewerPresenter）：本页是 push 进来的全屏页，
+            // 全局 overlay 挂在 RootView 最外层，盖得住整个 App（含底栏）；
+            // 用 fullScreenCover 的话底层页面会被移出窗口层级 → 退出闪白屏。
             let photos = results.filter { $0.type == "photo" }.map { makePhoto($0) }
             let index = photos.firstIndex { $0.id == item.id } ?? 0
-            if useGlobalViewer {
-                PhotoViewerPresenter.shared.show(photos, index: index)
-            } else {
-                localPhoto = photos[safe: index] ?? makePhoto(item)
-            }
+            PhotoViewerPresenter.shared.show(photos, index: index)
         case "shoot":
             var s = Shoot(id: item.id)
             s.displayName = item.titleText
@@ -427,12 +438,6 @@ struct SearchView: View {
         default:
             break
         }
-    }
-}
-
-private extension Array {
-    subscript(safe index: Int) -> Element? {
-        indices.contains(index) ? self[index] : nil
     }
 }
 
