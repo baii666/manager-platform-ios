@@ -135,7 +135,9 @@ struct ToolChip: View {
             HStack(spacing: 5) {
                 if let icon {
                     Image(systemName: icon)
-                        .font(.system(size: iconOnly ? 14 : 12, weight: .semibold))
+                        // ⚠️ 图标别用 14：旁边文字是 caption(12pt)，方块会比两边字体大一圈，
+                        // 跟文字同号（12）看起来才齐。
+                        .font(.system(size: 12, weight: .semibold))
                 }
                 if !iconOnly {
                     Text(label)
