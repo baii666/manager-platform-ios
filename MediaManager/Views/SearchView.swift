@@ -33,10 +33,16 @@ struct SearchView: View {
     var semantic: Bool = false
 
     @State private var query = ""
-    /// 语义模式（以文搜图）。只对照片生效，由搜索框右侧的 sparkles 按钮切换
-    @State private var isSemantic = false
+    /// **附带**语义匹配的开关（CLIP 以文搜图）。
+    /// ⚠️ 它不再是「模式」：语义结果只是普通搜索的**附加照片**，
+    /// 点了不会把影视/相册/拍摄集的结果清掉（用户明确要求）。默认开 ——
+    /// 执行一次搜索就顺带跑一遍语义匹配。
+    @State private var isSemantic = true
     /// 语义结果按 id 存相似度，供卡片角标显示
     @State private var similarity: [Int: Double] = [:]
+    /// 本轮语义匹配**新增**进来的照片条数（去重后）。
+    /// 顶栏总数是「关键词命中 + 语义命中」，翻页时不能把它算丢
+    @State private var semanticAdded = 0
     /// 真正拿去请求的词（防抖后写入），避免每敲一个字都打接口
     @State private var activeQuery = ""
     @State private var selectedTab: Tab = .all
@@ -103,12 +109,6 @@ struct SearchView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // 语义模式只看照片，分类 Tab 无意义（影视/相册/拍摄集没有语义向量），
-            // 只留一句说明讲清为什么搜出来全是照片
-            if isSemantic {
-                semanticBanner
-                Divider()
-            }
             content
             // ⚠️ 底部必须垫一个 Spacer：历史记录/空态这种内容不满一屏时，
             // VStack 只占内容自身高度，会被 NavigationStack 垂直居中——
@@ -125,7 +125,7 @@ struct SearchView: View {
             // 紧跟系统返回按钮，切页面时位置不跳
             ListSearchBarItem(
                 text: $query,
-                placeholder: isSemantic ? "用一句话描述画面…" : "搜索影视 / 相册 / 照片 / 拍摄集",
+                placeholder: "搜索影视 / 相册 / 照片 / 拍摄集",
                 // ⚠️ 只传 fieldWidth，不传 narrow：宽屏（iPad，本项目主场景）走
                 // ListSearchBarItem.width（280），与列表页完全一致；
                 // 窄屏给 170 只是临时值，iPhone 顶栏塞不下整排按钮，后续统一适配
@@ -213,19 +213,19 @@ struct SearchView: View {
     /// 等 iPhone 适配时分类组会换形态（大概率挪回内容区或改成分段控件），再一起定。
     private static let compactFieldWidth: CGFloat = 170
 
-    /// 语义开关。切完立刻重搜（词没变就不打接口）
+    /// 语义开关：只是决定「这次搜索要不要顺带跑语义匹配」。
+    /// 切完按当前词重搜一次 —— 关键词命中的结果始终都在，不会清掉（与分类按钮同一条链路）
     @MainActor
     private func toggleSemantic() {
         isSemantic.toggle()
         if !activeQuery.isEmpty { startSearch() }
     }
 
-    /// 切分类 = 「回到普通搜索 + 按该类型搜」。
-    /// ⚠️ 顺手把语义关掉：语义只出照片，用户点了某个分类就是想按类型搜，
-    /// 这不是给语义模式做的特殊分支，就是分类本身的使用方式（和其它按钮同一条链路）。
+    /// 切分类：就是一个普通的条件切换 + 重搜。
+    /// ⚠️ 不再动语义开关：语义结果只是附加的照片，和分类不互斥
+    ///（影视/相册/拍摄集分类下本来就不会去打语义请求）。
     @MainActor
     private func selectTab(_ tab: Tab) {
-        isSemantic = false
         selectedTab = tab
         startSearch()
     }
@@ -239,6 +239,7 @@ struct SearchView: View {
         results = []
         totals = [:]
         resultTotal = 0
+        semanticAdded = 0
         similarity = [:]
         page = 1
         hasMore = false
@@ -252,22 +253,6 @@ struct SearchView: View {
     private var currentTotal: Int {
         if resultTotal > 0 { return resultTotal }
         return selectedTab.totalKeys.reduce(0) { $0 + (totals[$1] ?? 0) }
-    }
-
-    /// 语义模式的说明条：说清它只搜照片、且照片要先跑过 AI 分析，
-    /// 否则用户只会看到「零结果」而不知道为什么
-    private var semanticBanner: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "sparkles")
-                .font(.caption)
-                .foregroundStyle(Color.purple)
-            Text("语义搜索：按画面内容匹配照片，需要照片已完成 AI 分析")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Spacer()
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
     }
 
     // MARK: 分类选择（顶栏胶囊组）
@@ -318,20 +303,9 @@ struct SearchView: View {
         } else if activeQuery.isEmpty {
             historyList
         } else if results.isEmpty && !isLoading {
-            // 语义模式的空结果要解释原因，不然用户只会觉得「语义搜索坏了」
-            Group {
-                if isSemantic {
-                    ContentUnavailableView {
-                        Label("没有语义匹配的照片", systemImage: "sparkles")
-                    } description: {
-                        Text("确认照片已跑过 AI 分析（会生成语义向量），或换个说法、把阈值调低再试。")
-                    }
-                } else {
-                    ContentUnavailableView("没有匹配结果", systemImage: "tray")
-                }
-            }
-            .frame(maxWidth: .infinity, minHeight: 300)
-        } else if selectedTab == .all && !isSemantic {
+            ContentUnavailableView("没有匹配结果", systemImage: "tray")
+                .frame(maxWidth: .infinity, minHeight: 300)
+        } else if selectedTab == .all {
             groupedResults
         } else {
             flatResults
@@ -428,7 +402,7 @@ struct SearchView: View {
     /// 照片走瀑布流（复用相册内照片页的 PhotoGrid），其余走各自列表页的卡片组件
     @ViewBuilder
     private var flatResults: some View {
-        if isSemantic || selectedTab == .photo {
+        if selectedTab == .photo {
             photoResults
         } else {
             cardResults
@@ -441,8 +415,8 @@ struct SearchView: View {
     private var viewerPhotos: [Photo] {
         results.filter { $0.type == "photo" }.map { item in
             var p = makePhoto(item)
-            // 语义搜索：让用户看得到「为什么是这张」
-            if isSemantic, let s = similarity[item.id] { p.badge = "\(Int(s * 100))%" }
+            // 语义匹配：让用户看得到「为什么是这张」
+            if let s = similarity[item.id] { p.badge = "\(Int(s * 100))%" }
             return p
         }
     }
@@ -593,9 +567,9 @@ struct SearchView: View {
     private func applyInitial() {
         guard !didApplyInitial else { return }
         didApplyInitial = true
-        // 首页的语义开关状态只在这里同步一次：之后由本页自己的按钮控制，
-        // 否则每次返回首页再进来都会被覆盖掉
-        isSemantic = semantic
+        // 首页的语义开关**只在它打开时**同步过来：本页默认就附带语义匹配，
+        // 首页没开不代表这里要关（用户要的就是「执行一次搜索顺带跑语义」）
+        if semantic { isSemantic = true }
         let q = initialQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else {
             fieldFocused = true
@@ -652,13 +626,9 @@ struct SearchView: View {
         page = 1; hasMore = true; results = []; similarity = [:]
         // 换词了，总数也得跟着重来（否则新词第一页会顶着上一个词的总数）
         resultTotal = 0
-        if isSemantic {
-            // 语义模式没有分类计数（它只搜照片），别去打 /totals
-            totals = [:]
-        } else {
-            // 分类计数（/totals 有 5s 服务端缓存，切 Tab 不会重复打爆）
-            do { totals = try await client.searchTotals(query: token) } catch { totals = [:] }
-        }
+        semanticAdded = 0
+        // 分类计数（/totals 有 5s 服务端缓存，切 Tab 不会重复打爆）
+        do { totals = try await client.searchTotals(query: token) } catch { totals = [:] }
         // 计数回来期间词可能已经换了（或这次任务被取消了），别再往下翻页
         guard !Task.isCancelled, token == activeQuery else { return }
         await loadMore()
@@ -678,40 +648,64 @@ struct SearchView: View {
         loadingToken = token
         defer { if loadingToken == token { isLoading = false } }
         do {
-            if isSemantic {
-                // 后端用 offset 翻页，page 从 1 起 → offset = (page-1) * pageSize
-                let p = try await client.semanticSearch(
-                    query: token, limit: pageSize, offset: (page - 1) * pageSize)
-                // 结果回来时词已经换了 / 任务被取消 → 整批丢弃，不能往列表里写
-                guard !Task.isCancelled, token == activeQuery else { return }
-                let items = p.results.map { makeSearchItem($0) }
-                if page == 1 { results = items } else { results.append(contentsOf: items) }
-                resultTotal = p.total
-                var map = similarity
-                for r in p.results { map[r.id] = r.similarity ?? 0 }
-                similarity = map
-                page += 1
-                hasMore = results.count < p.total
-            } else {
-                // 「全部」只取每类一批做总览，翻页交给各分类页
-                let size = selectedTab == .all ? 8 : pageSize
-                let p = try await client.searchGrouped(
-                    query: token, types: selectedTab.requestTypes, page: page, size: size)
-                guard !Task.isCancelled, token == activeQuery else { return }
-                if page == 1 { results = p.items } else { results.append(contentsOf: p.items) }
-                // searchGrouped 已经把各类型的 total 加过了，直接用
-                resultTotal = p.total
-                page += 1
-                hasMore = selectedTab == .all ? false : p.hasMore
+            // 「全部」只取每类一批做总览，翻页交给各分类页
+            let size = selectedTab == .all ? 8 : pageSize
+            let p = try await client.searchGrouped(
+                query: token, types: selectedTab.requestTypes, page: page, size: size)
+            // 结果回来时词已经换了 / 任务被取消 → 整批丢弃，不能往列表里写
+            guard !Task.isCancelled, token == activeQuery else { return }
+            // 语义匹配是**附加项**：只跟第一页一起取一次，合并进照片那一组。
+            // ⚠️ 不再走「语义模式」那条互斥分支 —— 那样一点语义按钮，
+            // 影视/相册/拍摄集的结果就全没了（用户明确不要这个行为）。
+            let semanticItems = await fetchSemantic(client: client, token: token, existing: p.items)
+            guard !Task.isCancelled, token == activeQuery else { return }
+            var items = p.items
+            if page == 1 {
+                semanticAdded = semanticItems.count
+                // 语义命中的照片排前面：它们才是「按画面内容」匹配上的
+                items = semanticItems + items
             }
+            if page == 1 { results = items } else { results.append(contentsOf: items) }
+            // searchGrouped 已经把各类型的 total 加过了，语义新增的条数补在后面，
+            // 否则顶栏会出现「38 / 30」这种加载数大于总数的倒挂
+            resultTotal = p.total + semanticAdded
+            page += 1
+            hasMore = selectedTab == .all ? false : p.hasMore
         } catch {
             // 旧词的报错也不该弹在新结果上
             guard !Task.isCancelled, token == activeQuery else { return }
-            // 语义模式下最常见的失败是后端没加载 CLIP 模型（503），
-            // 服务端原文（"CLIP 模型未加载，语义搜索不可用"）已经说清楚了，直接透出
             let msg = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-            errorMessage = (isSemantic ? "语义搜索不可用 · " : "搜索失败 · ") + msg
+            errorMessage = "搜索失败 · " + msg
         }
+    }
+
+    /// 语义匹配（CLIP 以文搜图）拿回来的照片。
+    ///
+    /// ⚠️ 它是**附加结果**而不是独立模式：
+    /// · 只在第一页取一次（不参与翻页，翻页交给关键词搜索那一套）；
+    /// · 只在「全部 / 照片」分类下打这个请求 —— 影视/相册/拍摄集没有向量；
+    /// · 失败一律静默（服务端没加载 CLIP 会返回 503），
+    ///   绝不能让语义不可用把关键词搜索的结果也拖没了。
+    @MainActor
+    private func fetchSemantic(client: APIClient, token: String, existing: [SearchItem]) async -> [SearchItem] {
+        guard isSemantic, page == 1, (selectedTab == .all || selectedTab == .photo) else { return [] }
+        // 「全部」只是总览，语义别取太多，免得照片组一家独大
+        let limit = selectedTab == .all ? 12 : pageSize
+        guard let p = try? await client.semanticSearch(query: token, limit: limit, offset: 0) else { return [] }
+        var map = similarity
+        for r in p.results { map[r.id] = r.similarity ?? 0 }
+        similarity = map
+        // 去重：文件名里本来就带关键词的照片，两边都会命中，只留一条。
+        // ⚠️ key 带 type：不同类型之间的 id 是各表自增的，会撞号
+        var seen = Set(existing.map { "\($0.type)-\($0.id)" })
+        var added: [SearchItem] = []
+        for item in p.results.map({ makeSearchItem($0) }) {
+            let key = "\(item.type)-\(item.id)"
+            guard !seen.contains(key) else { continue }
+            seen.insert(key)
+            added.append(item)
+        }
+        return added
     }
 
     // MARK: 路由
