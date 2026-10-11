@@ -21,6 +21,10 @@ final class PhotoViewerPresenter: ObservableObject {
     /// 看图器当前的照片数组。调用方在网格翻页（loadMore）后要调 updatePhotos 同步，
     /// 否则看图器里翻不到新加载的图。
     @Published var photos: [Photo] = []
+    /// 代际令牌：show() 每次自增。PhotoViewerView 的 photos/index 是创建时的快照
+    ///（let + @State initialValue），不响应 presenter.photos 变化；用 .id(generation)
+    /// 强制重建视图，才能正确切换到新的照片数组（例如点击相似图单图覆盖）。
+    @Published var generation = 0
     private(set) var startIndex = 0
     private(set) var hasMore = false
     private(set) var onLoadMore: (() -> Void)?
@@ -33,6 +37,7 @@ final class PhotoViewerPresenter: ObservableObject {
         self.startIndex = index
         self.hasMore = hasMore
         self.onLoadMore = onLoadMore
+        generation += 1
         isVisible = true
     }
 

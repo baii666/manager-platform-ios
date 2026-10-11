@@ -85,6 +85,10 @@ struct RootView: View {
                     onLoadMore: photoViewer.onLoadMore,
                     onClose: { photoViewer.dismiss() }
                 )
+                // ⚠️ 用 generation 驱动重建：photos/index 是 PhotoViewerView 创建时的快照，
+                // 不响应 presenter.photos 变化。点击相似图单图覆盖（show 换照片数组）时，
+                // 必须重建视图才能显示新图，否则状态错乱黑屏。
+                .id(photoViewer.generation)
                 // 打开时淡入（退出本身是内容自己淡出，不依赖 transition）
                 .transition(.opacity)
             }
