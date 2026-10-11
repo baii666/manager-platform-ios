@@ -140,38 +140,34 @@ struct SearchView: View {
         // 再放一个居中标题会跟搜索框抢地方；返回按钮显示上一页标题（"首页"）
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            // 搜索框：与三个列表页同一个 ListSearchBarItem（.topBarLeading + 死宽），
-            // 紧跟系统返回按钮，切页面时位置不跳
-            ListSearchBarItem(
-                text: $query,
-                placeholder: "搜索影视 / 相册 / 照片 / 拍摄集",
-                // ⚠️ 只传 fieldWidth，不传 narrow：宽屏（iPad，本项目主场景）走
-                // ListSearchBarItem.width（280），与列表页完全一致；
-                // 窄屏给 170 只是临时值，iPhone 顶栏塞不下整排按钮，后续统一适配
-                fieldWidth: hSizeClass == .compact ? Self.compactFieldWidth : nil,
-                focus: $fieldFocused,
-                onSubmit: { runSearch(query) },
-                onClear: { clearAll() },
-                // 「🔍搜索」放进搜索框里（对齐网页端样式），点了立刻搜，绕过防抖
-                searchAction: { runSearch(query) },
-                searchDisabled: query.trimmingCharacters(in: .whitespaces).isEmpty
-            )
-            // 紧跟搜索框的一组：分类胶囊 → 语义开关。
-            // ⚠️ 必须全部收进同一个 ToolbarItem：之前分类组单独占一个 leading item，
-            // 实测被系统挤到只剩一个圆点（多个 leading item 的宽度分配不可控），
-            // 收进一个 HStack 后间距、先后顺序都由我们自己说了算。
-            //
-            // ⚠️ 这些按钮没有各自的特殊逻辑：点了就是「按当前条件搜一次」——
-            // 分类决定搜哪类、语义决定按不按画面搜，都复用同一条搜索链路。
+            // ⚠️ 搜索框 + 分类 + 语义必须收进**同一个** ToolbarItem：
+            // 之前搜索框用 ListSearchBarItem（自己占一个 leading item）、分类组占另一个，
+            // 数据量大时系统会把两个 item 的内容**重叠**着摆（多个 leading item 的
+            // 宽度分配不可控，之前的「分类组被挤成圆点」是同一家人）。
+            // 收进一个 HStack 后间距、先后顺序都由我们自己说了算，谁也压不着谁。
             ToolbarItem(placement: .topBarLeading) {
-                HStack(spacing: 4) {
+                HStack(spacing: 10) {
+                    ListSearchBar(
+                        text: $query,
+                        placeholder: "搜索影视 / 相册 / 照片 / 拍摄集",
+                        compact: true,
+                        focus: $fieldFocused,
+                        onSubmit: { runSearch(query) },
+                        onClear: { clearAll() },
+                        // 「🔍搜索」放进搜索框里（对齐网页端样式），点了立刻搜
+                        searchAction: { runSearch(query) },
+                        searchDisabled: query.trimmingCharacters(in: .whitespaces).isEmpty
+                    )
+                    // ⚠️ 死宽：宽屏（iPad，主场景）280 与列表页一致；
+                    // 窄屏 170 只是临时值，iPhone 顶栏塞不下整排按钮，后续统一适配
+                    .frame(width: hSizeClass == .compact
+                           ? Self.compactFieldWidth : ListSearchBarItem.width)
                     // 分类胶囊组：始终可点。
                     // ⚠️ 在语义视图下点分类 = 切回关键词视图、按该分类搜（互斥的两个视图）。
-                    // ⚠️ 之前试过语义模式下置灰，用户否了——后面的按钮都要能点、点了就搜。
                     if !activeQuery.isEmpty {
                         categoryChips
-                            // ⚠️ 防压缩：这个组之前被系统压到只剩一个圆点，
-                            // fixedSize 让按钮文字保持完整，空间不足宁可溢出也不缩成空壳
+                            // ⚠️ 防压缩：fixedSize 让按钮文字保持完整，
+                            // 空间不足宁可溢出也不缩成空壳
                             .fixedSize(horizontal: true, vertical: false)
                     }
                     // 语义：**第 6 个分类**（放在类别最后面，用户指定）。
@@ -313,14 +309,18 @@ struct SearchView: View {
                     HStack(spacing: 5) {
                         Text(tab.label)
                         // 计数直接摊在胶囊里：iPad 横向空间够，不用藏进菜单。
-                        // ⚠️ 恒显（0 也显示）：按条件显示的话胶囊宽度会随计数有无变宽变窄，
-                        // 切分类时整排胶囊跟着左右挪。monospacedDigit 同理，
-                        // 位数变化（9→10）时数字本身不等宽会抖。
-                        Text("\(tab.totalKeys.reduce(0) { $0 + (totals[$1] ?? 0) })")
-                            .font(.caption2.monospacedDigit())
-                            // 计数恒为次级灰：选中项的标题已经是品牌色，
-                            // 数字再跟着变色整颗胶囊就太花了
-                            .foregroundStyle(.secondary)
+                        // ⚠️「全部」不显示：它 = 各分类之和（可能上万），没有一个数
+                        // 能被用户拿去核对什么，纯属占宽度 —— 还会把整排往右顶。
+                        // 其余分类计数恒显（0 也显示）：按条件显示的话胶囊宽度会随
+                        // 计数有无变宽变窄，切分类时整排胶囊跟着左右挪。
+                        // monospacedDigit 同理，位数变化（9→10）时数字本身不等宽会抖。
+                        if tab != .all {
+                            Text("\(tab.totalKeys.reduce(0) { $0 + (totals[$1] ?? 0) })")
+                                .font(.caption2.monospacedDigit())
+                                // 计数恒为次级灰：选中项的标题已经是品牌色，
+                                // 数字再跟着变色整颗胶囊就太花了
+                                .foregroundStyle(.secondary)
+                        }
                     }
                     .font(.subheadline.weight(active == tab ? .semibold : .regular))
                     .padding(.horizontal, 12)
