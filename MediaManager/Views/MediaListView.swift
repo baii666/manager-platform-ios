@@ -243,12 +243,17 @@ struct MediaListView: View {
         // 一片空白（右滑到一半是白屏）。导航栏可见时系统手势和系统 pop 转场
         // 都由 UINavigationController 接管，效果与电影详情页返回列表完全一致。
         .toolbar {
+            // 系统 back button 换成自定义的（样式可调），位置仍在搜索框左边
+            ToolbarItem(placement: .topBarLeading) {
+                NavBackButton()
+            }
             ToolbarItem(placement: .principal) {
                 ListSearchBar(text: $viewModel.searchText,
                               placeholder: "搜索标题、演员、类型…",
                               compact: true)
             }
         }
+        .navigationBarBackButtonHidden(true)
         .navigationBarTitleDisplayMode(.inline)
         // 下拉刷新
         .refreshable { await viewModel.refresh() }
