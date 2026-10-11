@@ -3,7 +3,6 @@ import SwiftUI
 // MARK: - 搜索框
 struct SearchBar: View {
     @Binding var text: String
-    @Binding var semantic: Bool
     var onSubmit: () -> Void
     @FocusState private var focused: Bool
 
@@ -11,9 +10,11 @@ struct SearchBar: View {
         HStack(spacing: 8) {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.brand)
+                    .font(.system(size: 15, weight: .semibold))
                 TextField("搜索片名、演员、文件名…", text: $text)
                     .textFieldStyle(.plain)
+                    .font(.body)
                     .focused($focused)
                     .autocorrectionDisabled()
                     .submitLabel(.search)
@@ -28,30 +29,25 @@ struct SearchBar: View {
                     .buttonStyle(.plain)
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 11)
-            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-
-            Button {
-                semantic.toggle()
-            } label: {
-                Image(systemName: "sparkles")
-                    .foregroundStyle(semantic ? Color.purple : .secondary)
-                    .padding(11)
-                    .background(
-                        semantic ? Color.purple.opacity(0.16) : Color.clear,
-                        in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    )
-            }
-            .buttonStyle(.plain)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Color(.systemBackground))
+                    .shadow(color: .black.opacity(0.08), radius: 6, x: 0, y: 2)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(Theme.brand.opacity(0.35), lineWidth: 1)
+            )
 
             Button(action: onSubmit) {
                 Text("搜索")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.white)
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 11)
-                    .background(Theme.brand, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
+                    .background(Theme.brand, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
             .buttonStyle(.plain)
         }

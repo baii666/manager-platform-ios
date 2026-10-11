@@ -6,6 +6,7 @@ import UIKit
 // ⚠️「继续观看 / 我的收藏 / 观看记录」已挪到「我的」tab（MineView），首页只管找内容。
 struct HomeView: View {
     @ObservedObject var viewModel: HomeViewModel
+    @Environment(\.horizontalSizeClass) private var hSizeClass
 
     @State private var showingPhotos = false
     @State private var showingAlbums = false
@@ -119,7 +120,6 @@ struct HomeView: View {
 
             SearchBar(
                 text: $viewModel.searchText,
-                semantic: $viewModel.semanticSearch,
                 onSubmit: {
                     // ⚠️ 直接跳转，**不再 await performSearch()**：
                     // 之前是「先跑完一整次搜索请求，等它回来才 push」，这就是
@@ -133,7 +133,10 @@ struct HomeView: View {
             )
             .frame(maxWidth: 640)
 
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], spacing: 12) {
+            // 统计卡：竖屏固定 3 列（6 个正好 2 行 × 3 列，不换行参差），
+            // 横屏固定 6 列（1 行铺满）。用固定列数而非 adaptive —— adaptive 在竖屏
+            // 会算出 4 列，6 个卡片 2 行，第二行只剩 2 个，很散。
+            LazyVGrid(columns: statColumns, spacing: 12) {
                 ForEach(statEntries) { entry in
                     StatCard(icon: entry.icon, label: entry.label, value: entry.value, tint: entry.tint, action: entry.action)
                 }
@@ -190,6 +193,12 @@ struct HomeView: View {
     }
 
     // MARK: 统计配置
+
+    /// 统计卡列数：竖屏 3 列（6 个 = 2 行 × 3 列），横屏 6 列（1 行）
+    private var statColumns: [GridItem] {
+        let count = hSizeClass == .compact ? 3 : 6
+        return Array(repeating: GridItem(.flexible(), spacing: 12), count: count)
+    }
 
     private var statEntries: [StatEntry] {
         [

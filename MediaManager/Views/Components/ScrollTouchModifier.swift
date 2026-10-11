@@ -11,7 +11,7 @@ import UIKit
 // 注意：只关 delays，不动 `canCancelContentTouches`（保留滚动手势对内容的取消），
 // 这样既让按钮/输入框点击即时响应，又不影响正常滚动。
 
-private struct DelaysContentTouchesFix: UIViewRepresentable {
+struct DelaysContentTouchesFix: UIViewRepresentable {
     func makeUIView(context: Context) -> UIView {
         let view = UIView()
         view.isUserInteractionEnabled = false
