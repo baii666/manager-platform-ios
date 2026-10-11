@@ -28,6 +28,20 @@ struct MockDataProvider: DataProviding {
         return Self.favoriteAssets.prefix(limit).map { $0 }
     }
 
+    func fetchHistory(limit: Int) async throws -> [UnifiedAsset] {
+        try await Task.sleep(nanoseconds: 360_000_000)
+        return Self.historyAssets.prefix(limit).map { $0 }
+    }
+
+    func fetchActionAssets(action: AssetActionKind, page: Int, size: Int) async throws -> (items: [UnifiedAsset], total: Int) {
+        try await Task.sleep(nanoseconds: 300_000_000)
+        let pool = action == .history ? Self.historyAssets : Self.favoriteAssets
+        let start = max(0, (page - 1) * size)
+        guard start < pool.count else { return ([], pool.count) }
+        let end = min(start + size, pool.count)
+        return (Array(pool[start..<end]), pool.count)
+    }
+
     func fetchRecent(limit: Int) async throws -> [RecentItem] {
         try await Task.sleep(nanoseconds: 320_000_000)
         return Self.recentItems.prefix(limit).map { $0 }
@@ -86,6 +100,15 @@ struct MockDataProvider: DataProviding {
         UnifiedAsset(id: 8, type: .short, title: "短视频 · 城市夜景", subtitle: "短视频",
                      position: 0, duration: 30, playbackURL: Self.demoHLS),
     ]
+
+    /// 观看记录：进度类资产倒着排一份（与收藏区分开，便于看两种列表）
+    static var historyAssets: [UnifiedAsset] {
+        Array(resumeAssets.reversed()) + [
+            UnifiedAsset(id: 301, type: .photo, title: "写真 · 镰仓高校前", subtitle: "相册 · 64 张"),
+            UnifiedAsset(id: 302, type: .shoot, title: "2026-08-21 旅拍", subtitle: "拍摄集 · 210 张"),
+            UnifiedAsset(id: 303, type: .media, title: "降临", subtitle: "电影 · 2016"),
+        ]
+    }
 
     static let favoriteAssets: [UnifiedAsset] = [
         UnifiedAsset(id: 101, type: .media, title: "盗梦空间", subtitle: "电影 · 2010"),

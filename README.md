@@ -11,10 +11,21 @@
 | 区块 | 说明 |
 |---|---|
 | Hero 搜索 | 统一搜索框 + 语义搜索切换 + 六张统计卡（媒体库/电影/剧集/图片/拍摄集/短视频） |
-| 继续观看 | 16:9 横版卡片 + 播放进度条 + hover 播放按钮，跨「影视/写真/短视频/拍摄集」四类 |
-| 我的收藏 | 3:4 竖版海报卡，带类型标签与底部渐变标题 |
 | 最近入库 | 2:3 海报卡，覆盖电影/剧集/相册 |
 | 发现 | 随机照片 / 人物 / 拍摄集 / 短视频连播 四个入口卡 |
+
+## 底 bar 四个 tab
+
+| Tab | 说明 |
+|---|---|
+| 首页 | Hero 搜索 + 统计 → 最近入库 → 发现（只管「找内容」） |
+| 媒体库 | 顶 bar 切换电影 / 相册 / 拍摄集，可左右滑动 |
+| 短视频 | 封面墙 + 全屏刷流（刷流时底 bar 自动隐藏） |
+| 我的 | 账户卡（显示名 / 账号 / 角色）+ 继续观看 + 观看记录 + 我的收藏 + 服务器地址 + **退出登录** |
+
+> 「继续观看 / 观看记录 / 我的收藏」属于私人数据，统一收在「我的」tab，
+> 首页保持「找内容」的单一职责。三个列表的横滑行都可点「查看全部」进全量分页页。
+> 退出登录是 iOS 端唯一的账户出口 —— 之前想换账号只能杀 App 重进。
 
 其余侧边栏入口（电影/剧集/相册/拍摄集/短视频等）为占位页，供后续迭代。
 
@@ -28,10 +39,13 @@ MediaManager/
 │   ├── DataProvider.swift       # 数据提供协议（UI 只依赖它）
 │   ├── MockDataProvider.swift   # Mock 实现（离线可跑）
 │   └── APIClient.swift          # 真实后端客户端（预留，未启用）
-├── ViewModels/HomeViewModel.swift
+├── ViewModels/
+│   ├── HomeViewModel.swift           # 首页 + 我的共用（收藏/观看记录只拉一次）
+│   └── ActionAssetListViewModel.swift # 收藏 / 观看记录全量分页列表
 ├── Views/
-│   ├── RootView.swift           # NavigationSplitView 三栏骨架
+│   ├── RootView.swift           # 底 bar 四 tab 骨架（每个 tab 一个 NavigationStack）
 │   ├── HomeView.swift           # 首页主视图
+│   ├── MineView.swift           # 我的：账户卡 + 继续观看/观看记录/收藏 + 退出登录（含全量列表页）
 │   └── Components/              # 搜索框 / 统计卡 / 海报卡 / 进度卡 / 发现卡 / 区块头 / 远程图
 ├── Theme/Theme.swift            # 品牌色 + 四类内容配色
 └── Assets.xcassets

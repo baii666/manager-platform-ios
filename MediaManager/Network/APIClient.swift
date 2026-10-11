@@ -275,10 +275,23 @@ final class APIClient: DataProviding, @unchecked Sendable {
     }
 
     func fetchFavorites(limit: Int) async throws -> [UnifiedAsset] {
-        let resp: ItemsResponse<UnifiedAsset> = try await request(
-            "/api/actions/list?action=favorite&type=all&page=1&size=\(limit)"
-        )
-        return resp.items.map { resolveAsset($0) }
+        let (items, _) = try await fetchActionAssets(action: .favorite, page: 1, size: limit)
+        return items
+    }
+
+    func fetchHistory(limit: Int) async throws -> [UnifiedAsset] {
+        let (items, _) = try await fetchActionAssets(action: .history, page: 1, size: limit)
+        return items
+    }
+
+    func fetchActionAssets(action: AssetActionKind, page: Int, size: Int) async throws -> (items: [UnifiedAsset], total: Int) {
+        let resp: ActionListResponse = try await request("/api/actions/list", queryItems: [
+            URLQueryItem(name: "action", value: action.rawValue),
+            URLQueryItem(name: "type", value: "all"),
+            URLQueryItem(name: "page", value: "\(page)"),
+            URLQueryItem(name: "size", value: "\(size)"),
+        ])
+        return (resp.items.map { resolveAsset($0) }, resp.total)
     }
 
     func fetchRecent(limit: Int) async throws -> [RecentItem] {
@@ -616,6 +629,12 @@ private struct ActionAck: Decodable {
 
 private struct ItemsResponse<T: Decodable>: Decodable {
     let items: [T]
+}
+
+/// /api/actions/list 的响应：items + total（分页列表要 total 才知道还有没有下一页）
+private struct ActionListResponse: Decodable {
+    let items: [UnifiedAsset]
+    let total: Int
 }
 
 private struct ShootListResponse: Decodable {

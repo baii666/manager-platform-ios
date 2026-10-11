@@ -7,6 +7,7 @@ final class HomeViewModel: ObservableObject {
     @Published var stats = HomeStats()
     @Published var resume: [UnifiedAsset] = []
     @Published var favorites: [UnifiedAsset] = []
+    @Published var history: [UnifiedAsset] = []
     @Published var recent: [RecentItem] = []
 
     @Published var isLoading = false
@@ -29,6 +30,18 @@ final class HomeViewModel: ObservableObject {
     /// 记录每个板块的失败原因，便于首页提示（不再静默变空白）
     @Published var failures: [String] = []
 
+    /// 首页和「我的」共用同一份 viewModel，而 RootView 是四个 NavigationStack 同时
+    /// 挂载（opacity 切换），两边的 .task 会一起触发 —— 不加这道闸就会在启动时
+    /// 打两整套请求。闸在第一次进入时落下，谁先跑到谁负责加载。
+    private var didAutoLoad = false
+
+    @MainActor
+    func loadIfNeeded() async {
+        guard !didAutoLoad else { return }
+        didAutoLoad = true
+        await load()
+    }
+
     @MainActor
     func load(showSpinner: Bool = true) async {
         // 下拉刷新期间绝不碰任何 @Published（isLoading / failures / stats… 都会触发
@@ -42,6 +55,7 @@ final class HomeViewModel: ObservableObject {
         async let statsTask = provider.fetchStats()
         async let resumeTask = provider.fetchResume(limit: 14)
         async let favTask = provider.fetchFavorites(limit: 24)
+        async let histTask = provider.fetchHistory(limit: 24)
         async let recentTask = provider.fetchRecent(limit: 24)
 
         // 先把结果收进局部变量，等四个请求全部结束后再一次性提交，
@@ -49,6 +63,7 @@ final class HomeViewModel: ObservableObject {
         var newStats = stats
         var newResume = resume
         var newFavorites = favorites
+        var newHistory = history
         var newRecent = recent
         var newFailures: [String] = []
 
@@ -61,12 +76,16 @@ final class HomeViewModel: ObservableObject {
         do { newFavorites = try await favTask }
         catch { newFavorites = []; newFailures.append("我的收藏 · \(describe(error))") }
 
+        do { newHistory = try await histTask }
+        catch { newHistory = []; newFailures.append("观看记录 · \(describe(error))") }
+
         do { newRecent = try await recentTask }
         catch { newRecent = []; newFailures.append("最近入库 · \(describe(error))") }
 
         stats = newStats
         resume = newResume
         favorites = newFavorites
+        history = newHistory
         recent = newRecent
         failures = newFailures
         errorMessage = newFailures.isEmpty ? nil : "部分数据加载失败"

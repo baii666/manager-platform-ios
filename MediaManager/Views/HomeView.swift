@@ -2,15 +2,11 @@ import SwiftUI
 import UIKit
 
 // MARK: - 首页
-// 信息架构对齐现有 Web 端 HomePageV3 的消费视角：
-// 搜索 + 统计 → 继续观看 → 我的收藏 → 最近入库 → 发现
+// 信息架构对齐现有 Web 端 HomePageV3 的消费视角：搜索 + 统计 → 最近入库 → 发现。
+// ⚠️「继续观看 / 我的收藏 / 观看记录」已挪到「我的」tab（MineView），首页只管找内容。
 struct HomeView: View {
     @ObservedObject var viewModel: HomeViewModel
 
-    /// 点开之后交给 PlayerHostView 去拿地址：它自己会立刻全屏并把等待过程摊开给人看
-    @State private var pending: PlaybackRequest?
-    /// 点开却拿不到播放地址时给出明确原因，而不是「点了没反应」
-    @State private var playError: String?
     @State private var showingPhotos = false
     @State private var showingAlbums = false
     @State private var showingSearch = false
@@ -20,8 +16,6 @@ struct HomeView: View {
             VStack(alignment: .leading, spacing: 28) {
                 hero
                 if !viewModel.failures.isEmpty { errorBanner }
-                if !viewModel.resume.isEmpty { resumeSection }
-                if !viewModel.favorites.isEmpty { favoritesSection }
                 if !viewModel.recent.isEmpty { recentSection }
                 discoverSection
             }
@@ -34,9 +28,8 @@ struct HomeView: View {
         // 下拉刷新（不显示 loading 遮罩，避免触发 refreshable 取消）
         .refreshable { await viewModel.load(showSpinner: false) }
         .task {
-            if viewModel.stats.libraryCount == 0 {
-                await viewModel.load()
-            }
+            // 与「我的」tab 共用同一份 viewModel，闸在 HomeViewModel 里，不会重复拉
+            await viewModel.loadIfNeeded()
         }
         .overlay {
             if viewModel.isLoading {
@@ -70,17 +63,6 @@ struct HomeView: View {
                         }
                     }
             }
-        }
-        .alert("无法播放", isPresented: Binding(
-            get: { playError != nil },
-            set: { if !$0 { playError = nil } }
-        )) {
-            Button("好", role: .cancel) { playError = nil }
-        } message: {
-            Text(playError ?? "")
-        }
-        .fullScreenCover(item: $pending) { request in
-            PlayerHostView(request: request)
         }
     }
 
@@ -154,35 +136,9 @@ struct HomeView: View {
         .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
     }
 
-    // MARK: 继续观看
-
-    private var resumeSection: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            SectionHeader(icon: "clock.fill", title: "继续观看")
-            horizontalRow {
-                ForEach(viewModel.resume) { asset in
-                    ResumeCard(asset: asset) {
-                        handleAssetTap(asset)
-                    }
-                }
-            }
-        }
-    }
-
-    // MARK: 我的收藏
-
-    private var favoritesSection: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            SectionHeader(icon: "heart.fill", title: "我的收藏")
-            horizontalRow {
-                ForEach(viewModel.favorites) { asset in
-                    AssetPosterCard(asset: asset) {
-                        handleAssetTap(asset)
-                    }
-                }
-            }
-        }
-    }
+    // MARK: 继续观看 / 我的收藏 / 观看记录
+    // ⚠️ 这三个区块已经挪到「我的」tab（MineView）—— 它们是私人数据，
+    // 首页回到「找内容」的定位。viewModel 仍然一次性把它们拉好，两边共用。
 
     // MARK: 最近入库
 
@@ -215,26 +171,7 @@ struct HomeView: View {
 
     // MARK: 交互
 
-    private func handleAssetTap(_ asset: UnifiedAsset) {
-        guard let path = asset.playablePath else {
-            if asset.type == .photo {
-                showingPhotos = true
-            } else {
-                playError = "《\(asset.title)》没有可播放的文件路径"
-            }
-            return
-        }
-        // 只负责把「要播什么」交出去，不做任何网络请求。
-        // 拿地址的等待由 PlayerHostView 接手，它一弹出就有片名和进度反馈。
-        pending = PlaybackRequest(path: path,
-                                  title: asset.title,
-                                  assetType: asset.type.rawValue,
-                                  assetID: asset.id,
-                                  startAt: asset.position,
-                                  knownDuration: asset.duration)
-    }
-
-    /// 统一的行容器：继续观看 / 收藏 / 最近入库都用它，卡片各自固定尺寸，不再铺满多行
+    /// 统一的行容器：卡片各自固定尺寸，横向滚动
     @ViewBuilder
     private func horizontalRow<Content: View>(@ViewBuilder content: () -> Content) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {

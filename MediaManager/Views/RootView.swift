@@ -10,7 +10,7 @@ final class FullscreenOverlay: ObservableObject {
 
 // MARK: - 根 tab（底 bar）
 enum RootTab: String, CaseIterable, Identifiable {
-    case home, library, short
+    case home, library, short, mine
 
     var id: String { rawValue }
 
@@ -19,6 +19,7 @@ enum RootTab: String, CaseIterable, Identifiable {
         case .home: return "首页"
         case .library: return "媒体库"
         case .short: return "短视频"
+        case .mine: return "我的"
         }
     }
 
@@ -27,14 +28,17 @@ enum RootTab: String, CaseIterable, Identifiable {
         case .home: return "house.fill"
         case .library: return "square.grid.2x2.fill"
         case .short: return "play.rectangle.fill"
+        case .mine: return "person.fill"
         }
     }
 }
 
-// MARK: - 根视图：底 bar 三 tab 骨架
-// 改版：去掉侧边栏（NavigationSplitView），改常驻底 bar 三个 tab ——
-// 首页 / 媒体库 / 短视频。每个 tab 各自持有一个 NavigationStack，
+// MARK: - 根视图：底 bar 四 tab 骨架
+// 改版：去掉侧边栏（NavigationSplitView），改常驻底 bar ——
+// 首页 / 媒体库 / 短视频 / 我的。每个 tab 各自持有一个 NavigationStack，
 // 用 opacity + allowsHitTesting 切换，保留各 tab 的导航栈状态。
+// 「我的」tab 是 iOS 端唯一的账户入口（服务器信息 + 退出登录），
+// 之前想换账号只能杀 App 重进。
 struct RootView: View {
     @StateObject private var viewModel = HomeViewModel()
     @ObservedObject private var overlay = FullscreenOverlay.shared
@@ -53,6 +57,11 @@ struct RootView: View {
             NavigationStack { ShortsView() }
                 .opacity(tab == .short ? 1 : 0)
                 .allowsHitTesting(tab == .short)
+
+            // 与首页共用同一份 viewModel：收藏 / 观看记录只拉一次，两边都能用
+            NavigationStack { MineView(viewModel: viewModel) }
+                .opacity(tab == .mine ? 1 : 0)
+                .allowsHitTesting(tab == .mine)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             BottomTabBar(selection: $tab)
@@ -67,7 +76,9 @@ struct BottomTabBar: View {
     @Binding var selection: RootTab
 
     var body: some View {
-        HStack(spacing: 44) {
+        // ⚠️ 别写死 spacing：三个 tab 时 44 还够，四个 tab 在窄屏（iPhone）上
+        // 会挤出屏幕外。改成每格 maxWidth:.infinity 均分，tab 增减都不用调数字。
+        HStack(spacing: 0) {
             ForEach(RootTab.allCases) { tab in
                 Button {
                     selection = tab
@@ -77,9 +88,11 @@ struct BottomTabBar: View {
                             .font(.system(size: 21, weight: .semibold))
                         Text(tab.title)
                             .font(.caption2.weight(.medium))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
                     }
                     .foregroundStyle(selection == tab ? Theme.brand : Color.secondary)
-                    .frame(minWidth: 60, maxHeight: .infinity, alignment: .center)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -87,7 +100,7 @@ struct BottomTabBar: View {
         }
         .frame(maxWidth: .infinity)
         .frame(height: 52)  // 标准 tab bar 高度，不厚
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 8)
         .background(
             // 只让背景色延伸到屏幕底覆盖 home indicator 区域，bar 本身保持 52pt 不增高
             Color(uiColor: .systemBackground)
