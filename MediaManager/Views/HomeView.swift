@@ -88,6 +88,10 @@ struct HomeView: View {
                 AlbumPhotosView(album: albumForRecent(item), libID: item.libraryId)
             }
         }
+        // 看图器「进入相册」的深链目标：push 到当前 tab 栈顶（从哪进的返回到哪）
+        .navigationDestination(for: AlbumOpenTarget.self) { target in
+            AlbumPhotosView(album: target.album, libID: target.libID)
+        }
     }
 
     // MARK: 失败提示

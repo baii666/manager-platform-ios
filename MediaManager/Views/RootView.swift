@@ -46,12 +46,13 @@ struct RootView: View {
     //（fullScreen 呈现会把底层页面移出窗口层级，退出时露出的不是上一级而是空窗口 → 闪白）
     @ObservedObject private var photoViewer = PhotoViewerPresenter.shared
     @State private var tab: RootTab = .home
-    // 媒体库 tab 的导航栈（看图器「进入相册」要跨 tab 深链跳转）
+    // 各 tab 的导航栈（看图器「进入相册」要跨 overlay 深链跳转，push 到当前 tab 栈顶）
+    @State private var homePath = NavigationPath()
     @State private var libraryPath = NavigationPath()
 
     var body: some View {
         ZStack {
-            NavigationStack { HomeView(viewModel: viewModel) }
+            NavigationStack(path: $homePath) { HomeView(viewModel: viewModel) }
                 .opacity(tab == .home ? 1 : 0)
                 .allowsHitTesting(tab == .home)
 
@@ -91,13 +92,16 @@ struct RootView: View {
         .animation(.easeIn(duration: 0.15), value: photoViewer.isVisible)
         // overlay 里 .statusBarHidden 可能不生效，在根上按看图器显隐统一控制
         .statusBarHidden(photoViewer.isVisible)
-        // 看图器「进入相册」→ 切到媒体库 tab 并深链 push 相册页
+        // 看图器「进入相册」→ 不切 tab，push 到「当前 tab」的导航栈顶，
+        // 返回时回到打开看图器的那个页面（从哪进的返回到哪）。
         .onChange(of: photoViewer.openAlbumTarget) { _, target in
             guard let target else { return }
             photoViewer.openAlbumTarget = nil
-            tab = .library
-            libraryPath = NavigationPath()
-            libraryPath.append(target)
+            switch tab {
+            case .home: homePath.append(target)
+            case .library: libraryPath.append(target)
+            default: break
+            }
         }
     }
 }
