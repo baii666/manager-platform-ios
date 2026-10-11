@@ -300,8 +300,9 @@ final class APIClient: DataProviding, @unchecked Sendable {
     }
 
     func fetchPhotos(limit: Int, offset: Int, exclude: [Int] = []) async throws -> [Photo] {
-        let libID = try await photoLibraryID()
-        var url = "/api/photos/random?lib=\(libID)&size=\(limit)"
+        // ⚠️ 不传 lib：后端会在「当前用户有权限的所有照片库」里随机，
+        // 而不是只抽某一个照片库（此前 photoLibraryID() 只取第一个 photo 库）。
+        var url = "/api/photos/random?size=\(limit)"
         if !exclude.isEmpty {
             url += "&exclude=\(exclude.map(String.init).joined(separator: ","))"
         }
