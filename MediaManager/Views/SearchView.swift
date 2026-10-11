@@ -56,6 +56,7 @@ struct SearchView: View {
     /// 初始词只应用一次：从下级页面返回时会再次 onAppear，不能每次都重搜
     @State private var didApplyInitial = false
     @FocusState private var fieldFocused: Bool
+    @Environment(\.horizontalSizeClass) private var hSizeClass
 
     // 导航目标
     @State private var movieTarget: MediaItem?
@@ -99,26 +100,55 @@ struct SearchView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            searchField
             // 语义模式只看照片，分类 Tab 无意义（影视/相册/拍摄集没有语义向量）
             if isSemantic {
                 semanticBanner
+                Divider()
             } else if !totals.isEmpty || selectedTab != .all {
                 categoryBar
+                Divider()
             }
-            Divider()
             content
             // ⚠️ 底部必须垫一个 Spacer：历史记录/空态这种内容不满一屏时，
             // VStack 只占内容自身高度，会被 NavigationStack 垂直居中——
-            // 搜索框跑到屏幕中间，上方一大块空白（iPad 上尤其明显）。
-            // Spacer 撑满剩余高度，让搜索框和内容始终靠顶。
+            // 内容跑到屏幕中间，上方一大块空白（iPad 上尤其明显）。
+            // Spacer 撑满剩余高度，让内容始终靠顶。
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .navigationTitle("搜索")
+        // ⚠️ 不设 navigationTitle：顶栏被搜索框占满（和三个列表页同一套规范），
+        // 再放一个居中标题会跟搜索框抢地方；返回按钮显示上一页标题（"首页"）
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            // 搜索框：与三个列表页同一个 ListSearchBarItem（.topBarLeading + 死宽），
+            // 紧跟系统返回按钮，切页面时位置不跳
+            ListSearchBarItem(
+                text: $query,
+                placeholder: isSemantic ? "用一句话描述画面…" : "搜索影视 / 相册 / 照片 / 拍摄集",
+                // ⚠️ 只传 fieldWidth，不再传 narrow：narrow 是列表页「后面还跟着一整排
+                // 工具按钮」时才用的 170，搜索页右边只有一个语义按钮，宽度自己定。
+                // 宽屏传 nil → 走 ListSearchBarItem.width（280），与列表页完全一致。
+                fieldWidth: hSizeClass == .compact ? Self.compactFieldWidth : nil,
+                focus: $fieldFocused,
+                onSubmit: { runSearch(query) },
+                onClear: { clearAll() }
+            )
+            // 右侧整组：与列表页同一个 TrailingToolsItem，间距/高度由 ToolbarMetrics 统一
+            TrailingToolsItem {
+                // ⚠️ 用 opacity 而不是 if：转圈出现/消失会把右边的语义按钮推着左右跳，
+                // 留一个固定槽位（宽度 16）就纹丝不动
+                ProgressView()
+                    .controlSize(.small)
+                    .frame(width: 16)
+                    .opacity(isLoading ? 1 : 0)
+                // 语义开关：与首页搜索框里那个 sparkles 同一套语义（紫 = 开）
+                ToolChip(label: "语义", icon: "sparkles", highlighted: isSemantic,
+                         tintColor: isSemantic ? Color.purple : nil) {
+                    toggleSemantic()
+                }
+            }
+        }
         .onChange(of: query) { scheduleSearch() }
-        .onSubmit(of: .text) { runSearch(query) }
         .task { applyInitial() }
         // 离开页面就撤掉还没发出去的防抖请求，别在背后偷偷打接口
         .onDisappear { debounceTask?.cancel() }
@@ -130,51 +160,35 @@ struct SearchView: View {
         .navigationDestination(item: $shootTarget) { ShootDetailView(shoot: $0) }
     }
 
-    // MARK: 搜索框
+    // MARK: 搜索框（在顶栏里，见 body 的 .toolbar）
+    // 这里只留搜索框相关的两个动作 + 宽度常量。
+    // ⚠️ 搜索框本体不再画在内容区：三个列表页已经把它放进了 navigationBar
+    //（ListSearchBarItem，紧跟系统返回按钮），搜索页跟着同一套规范走。
 
-    private var searchField: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-            TextField(isSemantic ? "用一句话描述画面，例如「海边的日落」" : "搜索影视 / 相册 / 照片 / 拍摄集",
-                      text: $query)
-                .textFieldStyle(.plain)
-                .submitLabel(.search)
-                .autocorrectionDisabled()
-                .focused($fieldFocused)
-            if isLoading {
-                ProgressView().controlSize(.small)
-            }
-            if !query.isEmpty {
-                Button {
-                    query = ""
-                    activeQuery = ""
-                    results = []
-                    totals = [:]
-                    similarity = [:]
-                } label: {
-                    Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
-                }
-            }
-            // 语义开关（与首页搜索框同一个 sparkles 按钮、同一套配色）
-            Button {
-                isSemantic.toggle()
-                if !activeQuery.isEmpty { startSearch() }
-            } label: {
-                Image(systemName: "sparkles")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(isSemantic ? Color.purple : .secondary)
-                    .padding(7)
-                    .background(
-                        isSemantic ? Color.purple.opacity(0.16) : Color.clear,
-                        in: Capsule()
-                    )
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(isSemantic ? "关闭语义搜索" : "开启语义搜索")
-        }
-        .padding(.horizontal, 12).padding(.vertical, 9)
-        .appSurface(in: Capsule())
-        .padding(.horizontal, 16).padding(.vertical, 10)
+    /// iPhone 上的搜索框宽度。列表页窄屏是 170（后面还跟着库名 + 排序 + 横竖版
+    /// 一整排），搜索页右边只有一个语义按钮，可以放宽到 210 仍然留得下返回按钮。
+    private static let compactFieldWidth: CGFloat = 210
+
+    /// 语义开关。切完立刻重搜（词没变就不打接口）
+    @MainActor
+    private func toggleSemantic() {
+        isSemantic.toggle()
+        if !activeQuery.isEmpty { startSearch() }
+    }
+
+    /// 顶栏搜索框的清除按钮：词和结果一起清，不等防抖
+    @MainActor
+    private func clearAll() {
+        debounceTask?.cancel()
+        searchTask?.cancel()
+        query = ""
+        activeQuery = ""
+        results = []
+        totals = [:]
+        similarity = [:]
+        page = 1
+        hasMore = false
+        errorMessage = nil
     }
 
     /// 语义模式的说明条：说清它只搜照片、且照片要先跑过 AI 分析，

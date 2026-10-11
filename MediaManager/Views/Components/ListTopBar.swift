@@ -11,21 +11,27 @@ struct ListSearchBar: View {
     var placeholder: String = "搜索…"
     /// 放进导航栏时用：纵向 padding 收紧，避免撑高 navigationBar（inline 只有 44pt）
     var compact: Bool = false
+    /// 需要程序化聚焦时传入（搜索页进入后自动弹键盘）。列表页不需要，默认 nil
+    var focus: FocusState<Bool>.Binding? = nil
+    /// 回车提交回调。
+    /// ⚠️ 必须走这里而不是外层的 .onSubmit(of: .text)：搜索框一旦放进 toolbar，
+    /// 它就挂在导航栏那一支上，外层视图的 onSubmit 不一定收得到（实测不保险）。
+    var onSubmit: (() -> Void)? = nil
+    /// 点清除按钮的回调。onSubmit 不够用：清空时输入框里的词刚被置空，
+    /// 回调里再读它可能读到旧值（反而把旧词重搜一遍），所以单独给一个出口，
+    /// 让调用方能立刻把结果清掉，不用等防抖那 350ms。
+    var onClear: (() -> Void)? = nil
 
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(.secondary)
-            TextField(placeholder, text: $text)
-                .textFieldStyle(.plain)
-                .font(.subheadline)
-                .autocorrectionDisabled()
-                .textInputAutocapitalization(.never)
-                .submitLabel(.search)
+            field
             if !text.isEmpty {
                 Button {
                     text = ""
+                    self.onClear?()
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 14))
@@ -37,6 +43,24 @@ struct ListSearchBar: View {
         .padding(.horizontal, 12)
         .padding(.vertical, compact ? 6 : 9)
         .appSurface(in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+    }
+
+    /// 输入框本体。focus 是可选的，只能在 ViewBuilder 里分两支挂修饰符
+    @ViewBuilder
+    private var field: some View {
+        let base = TextField(placeholder, text: $text)
+            .textFieldStyle(.plain)
+            .font(.subheadline)
+            .autocorrectionDisabled()
+            .textInputAutocapitalization(.never)
+            .submitLabel(.search)
+        if let focus {
+            // ⚠️ onSubmit 前的 self. 不能省：这是 escaping 闭包，值类型捕获属性要显式 self；
+            // 而且不带 self 会和同名的 .onSubmit modifier 撞名字
+            base.focused(focus).onSubmit { self.onSubmit?() }
+        } else {
+            base.onSubmit { self.onSubmit?() }
+        }
     }
 }
 
@@ -79,6 +103,15 @@ struct ListSearchBarItem: ToolbarContent {
     var title: String? = nil
     /// 窄屏（iPhone）：一行要塞下「返回 + 搜索 + 库名 + 排序 + 横竖版」，搜索框缩短给库名让位
     var narrow: Bool = false
+    /// 覆盖宽度（nil = 用 narrow/width 那套默认）。搜索页的搜索框是主角，
+    /// 右边只有一个按钮，比列表页宽一些；但仍然是**死宽**，不做自适应伸缩。
+    /// ⚠️ 故意不叫 width：本类型已经有 static let width 这个默认值常量，
+    /// 同名实例属性会让 Self.width 和 width 在 body 里读起来分不清。
+    var fieldWidth: CGFloat? = nil
+    /// 透传给 ListSearchBar：程序化聚焦（搜索页进入自动弹键盘）
+    var focus: FocusState<Bool>.Binding? = nil
+    var onSubmit: (() -> Void)? = nil
+    var onClear: (() -> Void)? = nil
 
     /// 固定宽度（宽屏）。想要更长/更短只改这一个数字。
     static let width: CGFloat = 280
@@ -88,11 +121,12 @@ struct ListSearchBarItem: ToolbarContent {
     var body: some ToolbarContent {
         ToolbarItem(placement: .topBarLeading) {
             HStack(spacing: 10) {
-                ListSearchBar(text: $text, placeholder: placeholder, compact: true)
+                ListSearchBar(text: $text, placeholder: placeholder, compact: true,
+                              focus: focus, onSubmit: onSubmit, onClear: onClear)
                     // ⚠️ 就是死宽：搜索框长度恒定，不随可用空间伸缩
                     //（试过 min/ideal/max 让它可回缩，结果它一缩用户就看出来了 ——
                     //  后面明明还有一大片空位，没必要让搜索框让路）
-                    .frame(width: narrow ? Self.narrowWidth : Self.width)
+                    .frame(width: fieldWidth ?? (narrow ? Self.narrowWidth : Self.width))
                 if let title {
                     // 库名紧跟搜索框。够宽就整段显示（拉长），不够才尾部省略。
                     // 颜色跟计数（"34 / 120"）一致，整条状态栏一个色调。
@@ -192,6 +226,11 @@ struct ToolChip: View {
     var highlighted: Bool = false
     /// 只显示图标、不显示文字（横竖版切换这类图标本身够直观的按钮）
     var iconOnly: Bool = false
+    /// 覆盖前景色（nil = 次级灰）。
+    /// ⚠️ 不要指望外层 .tint()：本按钮内部已经显式 .foregroundStyle，
+    /// 显式样式压过 environment 的 tint（Menu 那种「父层 tint 赢」的规律对它不成立），
+    /// 真要换个颜色只能从这里传进来。语义搜索开关开着就靠它上紫色。
+    var tintColor: Color? = nil
     var action: () -> Void
 
     var body: some View {
@@ -213,7 +252,7 @@ struct ToolChip: View {
             }
             // 内容高度钉死成 chipHeight：图标按钮和文字按钮从此一样高
             .frame(height: ToolbarMetrics.chipHeight)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(tintColor ?? .secondary)
             .padding(.horizontal, ToolbarMetrics.chipPaddingH)
             .contentShape(Rectangle())
         }
