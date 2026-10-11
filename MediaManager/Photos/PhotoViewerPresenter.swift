@@ -6,6 +6,14 @@ import SwiftUI
 // 改用 RootView 顶层的 overlay 呈现：底层页面始终在层级里渲染，
 // 黑底一渐隐，露出的就是照片网格本身，退出全程无跳变。
 // （短视频刷流的 FullscreenOverlay 是同一个思路的先例。）
+// MARK: - 相册跳转目标
+// 看图器里点「进入相册」→ 关闭看图器 + 通过此目标让 RootView 切到媒体库 tab 并 push 相册页。
+struct AlbumOpenTarget: Hashable, Identifiable {
+    let album: Album
+    let libID: Int
+    var id: Int { album.id }
+}
+
 final class PhotoViewerPresenter: ObservableObject {
     static let shared = PhotoViewerPresenter()
 
@@ -16,6 +24,9 @@ final class PhotoViewerPresenter: ObservableObject {
     private(set) var startIndex = 0
     private(set) var hasMore = false
     private(set) var onLoadMore: (() -> Void)?
+
+    /// 「进入相册」跳转目标：看图器里点进入所在相册时设置，RootView 监听后切 tab + push。
+    @Published var openAlbumTarget: AlbumOpenTarget?
 
     func show(_ photos: [Photo], index: Int, hasMore: Bool = false, onLoadMore: (() -> Void)? = nil) {
         self.photos = photos
@@ -28,4 +39,10 @@ final class PhotoViewerPresenter: ObservableObject {
     func updatePhotos(_ photos: [Photo]) { self.photos = photos }
 
     func dismiss() { isVisible = false }
+
+    /// 关闭看图器并请求跳转到相册。
+    func openAlbum(_ album: Album, libID: Int) {
+        openAlbumTarget = AlbumOpenTarget(album: album, libID: libID)
+        isVisible = false
+    }
 }

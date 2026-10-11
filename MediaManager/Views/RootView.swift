@@ -46,6 +46,8 @@ struct RootView: View {
     //（fullScreen 呈现会把底层页面移出窗口层级，退出时露出的不是上一级而是空窗口 → 闪白）
     @ObservedObject private var photoViewer = PhotoViewerPresenter.shared
     @State private var tab: RootTab = .home
+    // 媒体库 tab 的导航栈（看图器「进入相册」要跨 tab 深链跳转）
+    @State private var libraryPath = NavigationPath()
 
     var body: some View {
         ZStack {
@@ -53,7 +55,7 @@ struct RootView: View {
                 .opacity(tab == .home ? 1 : 0)
                 .allowsHitTesting(tab == .home)
 
-            NavigationStack { LibraryHomeView() }
+            NavigationStack(path: $libraryPath) { LibraryHomeView() }
                 .opacity(tab == .library ? 1 : 0)
                 .allowsHitTesting(tab == .library)
 
@@ -89,6 +91,14 @@ struct RootView: View {
         .animation(.easeIn(duration: 0.15), value: photoViewer.isVisible)
         // overlay 里 .statusBarHidden 可能不生效，在根上按看图器显隐统一控制
         .statusBarHidden(photoViewer.isVisible)
+        // 看图器「进入相册」→ 切到媒体库 tab 并深链 push 相册页
+        .onChange(of: photoViewer.openAlbumTarget) { _, target in
+            guard let target else { return }
+            photoViewer.openAlbumTarget = nil
+            tab = .library
+            libraryPath = NavigationPath()
+            libraryPath.append(target)
+        }
     }
 }
 
@@ -234,6 +244,10 @@ struct LibraryHomeView: View {
             case .photo: AlbumListView(library: lib)
             case .shoot: ShootListView(library: lib)
             }
+        }
+        // 看图器「进入相册」的深链目标：直接 push 相册页（跳过相册列表）
+        .navigationDestination(for: AlbumOpenTarget.self) { target in
+            AlbumPhotosView(album: target.album, libID: target.libID)
         }
         // ⚠️ TabView(.page) 底层是 UIPageViewController，它自带不透明底色，
         // 只靠 App 根的那层背景透不出来 —— 本页必须自己垫一层

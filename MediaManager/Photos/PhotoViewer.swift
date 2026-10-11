@@ -492,6 +492,13 @@ struct PhotoViewerView: View {
         }
     }
 
+    /// 进入所在相册：关闭看图器 + 通过全局 presenter 让 RootView 切 tab 并 push 相册页。
+    private func openInAlbum(_ albumRef: PhotoDetail.AlbumRef, libID: Int) {
+        var album = Album(id: albumRef.id)
+        album.folderName = albumRef.folderName ?? ""
+        PhotoViewerPresenter.shared.openAlbum(album, libID: libID)
+    }
+
     private func infoPanel(_ photo: Photo) -> some View {
         VStack(spacing: 0) {
             // 顶部拖拽指示条
@@ -632,7 +639,31 @@ struct PhotoViewerView: View {
                         sectionTitle("所属信息")
                         VStack(spacing: 6) {
                             infoRow("媒体库", d.library.map { "\($0.name) (\($0.type))" } ?? "未知")
-                            infoRow("相册", d.album.map { "\($0.folderName ?? "") (\($0.photoCount ?? 0) 张)" } ?? "未知")
+                            if let albumRef = d.album, let libRef = d.library {
+                                HStack(spacing: 10) {
+                                    Text("相册")
+                                        .font(.caption2)
+                                        .foregroundStyle(.white.opacity(0.45))
+                                        .frame(width: 64, alignment: .leading)
+                                    Text("\(albumRef.folderName ?? "") (\(albumRef.photoCount ?? 0) 张)")
+                                        .font(.caption2)
+                                        .foregroundStyle(.white.opacity(0.88))
+                                    Spacer()
+                                    Button {
+                                        openInAlbum(albumRef, libID: libRef.id)
+                                    } label: {
+                                        Text("进入")
+                                            .font(.caption2.weight(.medium))
+                                            .foregroundStyle(Theme.brand)
+                                            .padding(.horizontal, 10)
+                                            .padding(.vertical, 4)
+                                            .background(Theme.brand.opacity(0.15), in: Capsule())
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            } else {
+                                infoRow("相册", d.album.map { "\($0.folderName ?? "") (\($0.photoCount ?? 0) 张)" } ?? "未知")
+                            }
                         }
                     }
 
