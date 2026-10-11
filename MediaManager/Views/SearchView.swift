@@ -100,12 +100,10 @@ struct SearchView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // 语义模式只看照片，分类 Tab 无意义（影视/相册/拍摄集没有语义向量）
+            // 语义模式只看照片，分类 Tab 无意义（影视/相册/拍摄集没有语义向量），
+            // 只留一句说明讲清为什么搜出来全是照片
             if isSemantic {
                 semanticBanner
-                Divider()
-            } else if !totals.isEmpty || selectedTab != .all {
-                categoryBar
                 Divider()
             }
             content
@@ -135,17 +133,23 @@ struct SearchView: View {
             )
             // 右侧整组：与列表页同一个 TrailingToolsItem，间距/高度由 ToolbarMetrics 统一
             TrailingToolsItem {
+                // 分类选择：和搜索框同一行。做成下拉菜单而不是一排胶囊 ——
+                // 五个胶囊各带计数塞不进导航栏，会跟搜索框抢宽度
+                if !activeQuery.isEmpty && !isSemantic { categoryMenu }
+                // 语义开关：与首页搜索框里那个 sparkles 同一套语义（紫 = 开）。
+                // ⚠️ iPhone 只留图标：顶栏这一行要塞「返回 + 搜索框 + 分类 + 语义 + 转圈」，
+                // 文字那两个字符在窄屏上是第一个该让位的（图标 + 紫色足够表意）
+                ToolChip(label: "语义", icon: "sparkles", highlighted: isSemantic,
+                         iconOnly: hSizeClass == .compact,
+                         tintColor: isSemantic ? Color.purple : nil) {
+                    toggleSemantic()
+                }
                 // ⚠️ 用 opacity 而不是 if：转圈出现/消失会把右边的语义按钮推着左右跳，
                 // 留一个固定槽位（宽度 16）就纹丝不动
                 ProgressView()
                     .controlSize(.small)
                     .frame(width: 16)
                     .opacity(isLoading ? 1 : 0)
-                // 语义开关：与首页搜索框里那个 sparkles 同一套语义（紫 = 开）
-                ToolChip(label: "语义", icon: "sparkles", highlighted: isSemantic,
-                         tintColor: isSemantic ? Color.purple : nil) {
-                    toggleSemantic()
-                }
             }
         }
         .onChange(of: query) { scheduleSearch() }
@@ -165,9 +169,11 @@ struct SearchView: View {
     // ⚠️ 搜索框本体不再画在内容区：三个列表页已经把它放进了 navigationBar
     //（ListSearchBarItem，紧跟系统返回按钮），搜索页跟着同一套规范走。
 
-    /// iPhone 上的搜索框宽度。列表页窄屏是 170（后面还跟着库名 + 排序 + 横竖版
-    /// 一整排），搜索页右边只有一个语义按钮，可以放宽到 210 仍然留得下返回按钮。
-    private static let compactFieldWidth: CGFloat = 210
+    /// iPhone 上的搜索框宽度。⚠️ 数值是「顶栏一行塞得下」倒推出来的：
+    /// 返回按钮(~44) + 搜索框 + 分类菜单(~50) + 语义图标(~28) + 转圈槽位(16) + 系统间距(~20)
+    /// ≈ 343 < 375（最小机型），再宽就会把右边那组挤没。
+    /// 列表页窄屏是 170（后面还跟着库名 + 排序 + 横竖版），搜索页比它略宽。
+    private static let compactFieldWidth: CGFloat = 185
 
     /// 语义开关。切完立刻重搜（词没变就不打接口）
     @MainActor
@@ -207,34 +213,30 @@ struct SearchView: View {
         .padding(.vertical, 8)
     }
 
-    // MARK: 分类 Tab
-
-    private var categoryBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(Tab.allCases, id: \.self) { tab in
+    // MARK: 分类选择（顶栏下拉菜单）
+    //
+    // ⚠️ 之前是一排横滑胶囊（categoryBar），在内容区单独占一行；现在整页控件都收进顶栏，
+    // 五个胶囊还各带计数，塞不进导航栏那一行 —— 改成下拉菜单：
+    // 收起时只显示当前分类，展开后每一项带自己的结果数。
+    private var categoryMenu: some View {
+        ToolMenuChip(label: selectedTab.label) {
+            ForEach(Tab.allCases, id: \.self) { tab in
+                Button {
+                    selectedTab = tab
+                    startSearch()
+                } label: {
                     let count = tab.totalKeys.reduce(0) { $0 + (totals[$1] ?? 0) }
-                    Button {
-                        selectedTab = tab
-                        startSearch()
-                    } label: {
-                        HStack(spacing: 5) {
-                            Text(tab.label)
-                            if count > 0 {
-                                Text("\(count)").font(.caption2).foregroundStyle(.secondary)
-                            }
-                        }
-                        .font(.subheadline.weight(selectedTab == tab ? .semibold : .regular))
-                        .padding(.horizontal, 14).padding(.vertical, 7)
-                        .background(selectedTab == tab ? Theme.brand.opacity(0.15) : .clear,
-                                    in: Capsule())
-                        .foregroundStyle(selectedTab == tab ? Theme.brand : .primary)
+                    if tab == selectedTab {
+                        Label(tab.label, systemImage: "checkmark")
+                    } else if count > 0 {
+                        // 计数只在展开的菜单里出现：顶栏 label 变了宽会推动左边整排按钮
+                        Text("\(tab.label)  \(count)")
+                    } else {
+                        Text(tab.label)
                     }
                 }
             }
-            .padding(.horizontal, 16)
         }
-        .padding(.vertical, 6)
     }
 
     // MARK: 结果区
