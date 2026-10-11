@@ -20,7 +20,8 @@ final class SearchHistoryStore {
         UserDefaults.standard.set(list, forKey: key)
     }
 
-    static func clear() { UserDefaults.standard.removeItem(forKey: key) }
+    // ⚠️ 是 removeObject(forKey:)，不是 removeItem —— UserDefaults 没有 removeItem
+    static func clear() { UserDefaults.standard.removeObject(forKey: key) }
 }
 
 // MARK: - 搜索页
