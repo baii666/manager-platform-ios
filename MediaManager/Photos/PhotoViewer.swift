@@ -255,11 +255,15 @@ struct PhotoViewerView: View {
             withAnimation(.easeOut(duration: 0.28)) { trackOffset = 0 }
             return
         }
-        // 两图连续翻页：先把当前图连同相邻图一起滑到目标位置，动画结束后再切 index
+        // 两图连续翻页：先把当前图连同相邻图一起滑到目标位置，动画真正结束后再切 index。
+        // ⚠️ 不能用 DispatchQueue.asyncAfter(0.29) 兜「0.28s 动画结束」——那是 wall-clock 定时，
+        // 主线程被原图解码卡一下就会让「动画还没滑到位就被强制切 index」，
+        // 表现为翻页「跳一下」。改用 completionCriteria 等动画逻辑完成后才切。
         let width = containerSize.width
         let target = delta > 0 ? -width : width
-        withAnimation(.easeOut(duration: 0.28)) { trackOffset = target }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.29) {
+        withAnimation(.easeOut(duration: 0.28), completionCriteria: .logicallyComplete) {
+            trackOffset = target
+        } completion: {
             trackOffset = 0
             index = next
             resetTransform()
