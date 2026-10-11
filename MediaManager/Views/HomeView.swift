@@ -11,6 +11,7 @@ struct HomeView: View {
     @State private var showingPhotos = false
     @State private var showingAlbums = false
     @State private var showingSearch = false
+    @State private var selectedRecent: RecentItem?
 
     var body: some View {
         ScrollView {
@@ -69,6 +70,23 @@ struct HomeView: View {
         // push 之后底层的首页始终在层级里渲染，看图器退出露出的就是搜索结果页本身。
         .navigationDestination(isPresented: $showingSearch) {
             SearchView(initialQuery: viewModel.searchText, semantic: viewModel.semanticSearch)
+        }
+        // 最近入库卡片 → 详情页（电影/剧集 → 影视详情；相册 → 相册照片页）
+        .navigationDestination(item: $selectedRecent) { item in
+            switch item.kind {
+            case .movie, .series:
+                MediaDetailView(media: MediaItem(
+                    id: item.id,
+                    title: item.title,
+                    year: item.year,
+                    type: item.kind.rawValue,
+                    posterImageId: item.posterImageId,
+                    fanartImageId: item.fanartImageId,
+                    libraryId: item.libraryId
+                ))
+            case .album:
+                AlbumPhotosView(album: albumForRecent(item), libID: item.libraryId)
+            }
         }
     }
 
@@ -154,10 +172,21 @@ struct HomeView: View {
             SectionHeader(icon: "bolt.fill", title: "最近入库")
             horizontalRow {
                 ForEach(viewModel.recent) { item in
-                    RecentPosterCard(item: item)
+                    RecentPosterCard(item: item) {
+                        selectedRecent = item
+                    }
                 }
             }
         }
+    }
+
+    /// 由「最近入库」的相册条目构造 Album：后端 /api/recent 不返回相册的
+    /// folder_path / cover 等完整字段，但 AlbumPhotosView 只需 id（拉照片）+ title（标题），
+    /// 其余用占位，标题靠 displayName 回填。
+    private func albumForRecent(_ item: RecentItem) -> Album {
+        var album = Album(id: item.id)
+        album.displayName = item.title
+        return album
     }
 
     // MARK: 发现

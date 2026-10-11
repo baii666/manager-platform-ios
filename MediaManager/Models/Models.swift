@@ -159,7 +159,7 @@ fileprivate func flexURL<K: CodingKey>(_ c: KeyedDecodingContainer<K>, _ key: K)
 
 // MARK: - 最近入库
 // 对应 /api/recent 返回的条目：电影 / 剧集 / 相册
-struct RecentItem: Identifiable, Codable, Sendable {
+struct RecentItem: Identifiable, Codable, Sendable, Hashable {
     enum Kind: String, Codable, Sendable {
         case movie
         case series

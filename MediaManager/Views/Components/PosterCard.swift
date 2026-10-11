@@ -60,11 +60,14 @@ struct RecentPosterCard: View {
     let item: RecentItem
     var width: CGFloat = 150
     var aspectRatio: CGFloat = 2.0 / 3.0
+    var onTap: () -> Void = {}
 
     var body: some View {
         cover
             .frame(width: width, height: width / aspectRatio)
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .contentShape(Rectangle())
+            .onTapGesture(perform: onTap)
     }
 
     private var cover: some View {
