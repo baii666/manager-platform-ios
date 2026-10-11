@@ -16,7 +16,6 @@ struct SearchView: View {
     @State private var albumTarget: Album?
     @State private var albumLibID: Int = 0
     @State private var shootTarget: Shoot?
-    @State private var photoTarget: Photo?
 
     private var client: APIClient? { AppSession.shared.client }
 
@@ -131,9 +130,7 @@ struct SearchView: View {
         .navigationDestination(item: $movieTarget) { MediaDetailView(media: $0) }
         .navigationDestination(item: $albumTarget) { AlbumPhotosView(album: $0, libID: albumLibID) }
         .navigationDestination(item: $shootTarget) { ShootDetailView(shoot: $0) }
-        .fullScreenCover(item: $photoTarget) { photo in
-            PhotoViewerView(photos: [photo], index: 0, onClose: { photoTarget = nil })
-        }
+        // 看图器走全局 overlay（PhotoViewerPresenter），不再用 fullScreenCover
     }
 
     // MARK: 数据
@@ -209,7 +206,7 @@ struct SearchView: View {
                 URLQueryItem(name: "id", value: "\(item.id)"),
                 URLQueryItem(name: "size", value: "original"),
             ])
-            photoTarget = p
+            PhotoViewerPresenter.shared.show([p], index: 0)
         case "shoot":
             var s = Shoot(id: item.id)
             s.displayName = item.titleText

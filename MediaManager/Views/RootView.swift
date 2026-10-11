@@ -42,6 +42,9 @@ enum RootTab: String, CaseIterable, Identifiable {
 struct RootView: View {
     @StateObject private var viewModel = HomeViewModel()
     @ObservedObject private var overlay = FullscreenOverlay.shared
+    // 全局看图器：挂在最外层 overlay，替代各页面的 .fullScreenCover
+    //（fullScreen 呈现会把底层页面移出窗口层级，退出时露出的不是上一级而是空窗口 → 闪白）
+    @ObservedObject private var photoViewer = PhotoViewerPresenter.shared
     @State private var tab: RootTab = .home
 
     var body: some View {
@@ -68,6 +71,24 @@ struct RootView: View {
                 .opacity(overlay.active ? 0 : 1)
                 .allowsHitTesting(!overlay.active)
         }
+        // ⚠️ overlay 必须挂在 safeAreaInset **之后**（外层）：safeAreaInset 的内容
+        // 合成在主内容之上，挂在它里面/之前会被底栏压住。看图器要盖住底栏。
+        .overlay {
+            if photoViewer.isVisible {
+                PhotoViewerView(
+                    photos: photoViewer.photos,
+                    index: photoViewer.startIndex,
+                    hasMore: photoViewer.hasMore,
+                    onLoadMore: photoViewer.onLoadMore,
+                    onClose: { photoViewer.dismiss() }
+                )
+                // 打开时淡入（退出本身是内容自己淡出，不依赖 transition）
+                .transition(.opacity)
+            }
+        }
+        .animation(.easeIn(duration: 0.15), value: photoViewer.isVisible)
+        // overlay 里 .statusBarHidden 可能不生效，在根上按看图器显隐统一控制
+        .statusBarHidden(photoViewer.isVisible)
     }
 }
 

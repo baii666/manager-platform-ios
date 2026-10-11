@@ -36,16 +36,30 @@ final class PhotoBrowserViewModel: ObservableObject {
 
 // MARK: - 照片浏览页（瀑布流 + 懒加载 + 大图查看）
 struct PhotoBrowserView: View {
+    /// 看图器走哪条路。默认全局 overlay（PhotoViewerPresenter，退出丝滑）；
+    /// ⚠️ 但本页若被装在 **sheet** 里（「我的 → 照片」），全局 overlay 会被 sheet
+    /// 盖在下面看不见 —— 此时传 false，退回本页自己的 fullScreenCover。
+    var useGlobalViewer = true
+    @State private var localViewerIndex: Int?
+
     @StateObject private var viewModel = PhotoBrowserViewModel()
-    /// 记住下标而不是 Photo：看图器要按当前下标左右翻页、预取前后各 3 张
-    @State private var selectedIndex: Int?
 
     var body: some View {
         PhotoGrid(
             photos: viewModel.photos,
             columns: 4,
             onSelect: { photo in
-                selectedIndex = viewModel.photos.firstIndex(where: { $0.id == photo.id })
+                guard let i = viewModel.photos.firstIndex(where: { $0.id == photo.id }) else { return }
+                if useGlobalViewer {
+                    PhotoViewerPresenter.shared.show(viewModel.photos, index: i, hasMore: true, onLoadMore: {
+                        Task {
+                            await viewModel.loadMore()
+                            PhotoViewerPresenter.shared.updatePhotos(viewModel.photos)
+                        }
+                    })
+                } else {
+                    localViewerIndex = i
+                }
             },
             onReachEnd: {
                 Task { await viewModel.loadMore() }
@@ -60,23 +74,22 @@ struct PhotoBrowserView: View {
             }
         }
         .task { await viewModel.loadInitial() }
-        // ⚠️ 每个 tab / 每个 push 进来的页面都要自己垫一层背景：
-        // NavigationStack 只渲染栈顶那一层，App 根的背景透不进来。
-        // 缺了它，退出看图器（fullScreenCover）时露出的是一片白底。
-        .appBackground()
         .fullScreenCover(isPresented: Binding(
-            get: { selectedIndex != nil },
-            set: { if !$0 { selectedIndex = nil } }
+            get: { localViewerIndex != nil },
+            set: { if !$0 { localViewerIndex = nil } }
         )) {
-            if let index = selectedIndex {
+            if let index = localViewerIndex {
                 PhotoViewerView(
                     photos: viewModel.photos,
                     index: index,
                     hasMore: true,
                     onLoadMore: { Task { await viewModel.loadMore() } },
-                    onClose: { selectedIndex = nil }
+                    onClose: { localViewerIndex = nil }
                 )
             }
         }
+        // ⚠️ 每个 tab / 每个 push 进来的页面都要自己垫一层背景：
+        // NavigationStack 只渲染栈顶那一层，App 根的背景透不进来。
+        .appBackground()
     }
 }

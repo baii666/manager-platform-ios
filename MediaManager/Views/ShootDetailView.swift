@@ -8,8 +8,6 @@ struct ShootDetailView: View {
     @StateObject private var viewModel: ShootDetailViewModel
     /// 同 ShortsView：地址挂 item 上，不用 isPresented + 分离 URL 状态
     @State private var playTarget: PlayerTarget?
-    @State private var showViewer = false
-    @State private var viewerIndex = 0
 
     private var client: APIClient? { AppSession.shared.client }
 
@@ -47,10 +45,15 @@ struct ShootDetailView: View {
                 if viewModel.activeTab == .photos || viewModel.activeTab == .all {
                     if !viewModel.photos.isEmpty {
                         PhotoGrid(photos: viewModel.viewerPhotos, columns: 3, onSelect: { photo in
-                            if let idx = viewModel.viewerPhotos.firstIndex(where: { $0.id == photo.id }) {
-                                viewerIndex = idx
-                            }
-                            showViewer = true
+                            guard let idx = viewModel.viewerPhotos.firstIndex(where: { $0.id == photo.id }) else { return }
+                            PhotoViewerPresenter.shared.show(
+                                viewModel.viewerPhotos, index: idx,
+                                hasMore: viewModel.photoHasMore, onLoadMore: {
+                                    Task {
+                                        await viewModel.loadMorePhotos()
+                                        PhotoViewerPresenter.shared.updatePhotos(viewModel.viewerPhotos)
+                                    }
+                                })
                         }) {
                             Task { await viewModel.loadMorePhotos() }
                         }
@@ -81,13 +84,7 @@ struct ShootDetailView: View {
                     } }
             }
         }
-        .fullScreenCover(isPresented: $showViewer) {
-            if !viewModel.viewerPhotos.isEmpty {
-                PhotoViewerView(photos: viewModel.viewerPhotos, index: viewerIndex, hasMore: viewModel.photoHasMore) {
-                    Task { await viewModel.loadMorePhotos() }
-                } onClose: { showViewer = false }
-            }
-        }
+        // 看图器走全局 overlay（PhotoViewerPresenter），不再用 fullScreenCover
     }
 }
 

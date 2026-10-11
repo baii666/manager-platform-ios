@@ -13,8 +13,6 @@ struct MediaDetailView: View {
     @State private var overviewExpanded = false
     @State private var playRequest: PlaybackRequest?
     @State private var playError: String?
-    @State private var showViewer = false
-    @State private var viewerIndex = 0
     @State private var isFavorite = false
     @State private var favLoading = false
 
@@ -44,11 +42,7 @@ struct MediaDetailView: View {
         } message: {
             Text(playError ?? "")
         }
-        .fullScreenCover(isPresented: $showViewer) {
-            if !stillsPhotos.isEmpty {
-                PhotoViewerView(photos: stillsPhotos, index: viewerIndex, onClose: { showViewer = false })
-            }
-        }
+        // 剧照看图器走全局 overlay（PhotoViewerPresenter），不再用 fullScreenCover
     }
 
     // MARK: 内容
@@ -218,8 +212,7 @@ struct MediaDetailView: View {
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 110), spacing: 8)], spacing: 8) {
                             ForEach(stillsPhotos.indices, id: \.self) { i in
                                 Button {
-                                    viewerIndex = i
-                                    showViewer = true
+                                    PhotoViewerPresenter.shared.show(stillsPhotos, index: i)
                                 } label: {
                                     RemoteImage(url: stillsPhotos[i].thumbURL, fallbackIcon: "photo",
                                                 fallbackColors: Theme.placeholderGradient(for: .media))

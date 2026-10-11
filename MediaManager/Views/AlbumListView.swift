@@ -437,8 +437,6 @@ struct AlbumPhotosView: View {
 
     @State private var photos: [Photo] = []
     @State private var isLoading = false
-    /// 存下标而不是 Photo：看图器要按当前下标左右翻页
-    @State private var selectedIndex: Int?
     @State private var page = 1
     @State private var hasMore = true
     @State private var errorMessage: String?
@@ -448,7 +446,15 @@ struct AlbumPhotosView: View {
             photos: photos,
             columns: 4,
             onSelect: { photo in
-                selectedIndex = photos.firstIndex(where: { $0.id == photo.id })
+                guard let i = photos.firstIndex(where: { $0.id == photo.id }) else { return }
+                // 全局 overlay 呈现（见 PhotoViewerPresenter 注释）。
+                // 网格翻页后要把新数组同步给看图器，否则翻不到新加载的图
+                PhotoViewerPresenter.shared.show(photos, index: i, hasMore: hasMore, onLoadMore: {
+                    Task {
+                        await loadMore()
+                        PhotoViewerPresenter.shared.updatePhotos(photos)
+                    }
+                })
             },
             onReachEnd: { Task { await loadMore() } }
         )
@@ -468,22 +474,7 @@ struct AlbumPhotosView: View {
         // ⚠️ 每个 tab / 每个 push 进来的页面都要自己垫一层背景：
         // NavigationStack 只渲染栈顶那一层，App 根的背景透不进来。
         // 缺了它，退出看图器（fullScreenCover）时露出的是一片白底。
-        .appBackground()
-        .fullScreenCover(isPresented: Binding(
-            get: { selectedIndex != nil },
-            set: { if !$0 { selectedIndex = nil } }
-        )) {
-            if let index = selectedIndex {
-                PhotoViewerView(
-                    photos: photos,
-                    index: index,
-                    hasMore: hasMore,
-                    onLoadMore: { Task { await loadMore() } },
-                    onClose: { selectedIndex = nil }
-                )
-            }
-        }
-    }
+        .appBackground()    }
 
     @MainActor
     private func loadMore() async {

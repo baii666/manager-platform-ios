@@ -74,7 +74,9 @@ struct MineView: View {
             ActionAssetListView(route: route)
         }
         .sheet(isPresented: $showingPhotos) {
-            NavigationStack { PhotoBrowserView() }
+            // sheet 里的照片页必须用本地 fullScreenCover 看图器：
+            // 全局 overlay 在 RootView 层，会被这个 sheet 盖住看不见
+            NavigationStack { PhotoBrowserView(useGlobalViewer: false) }
         }
         .alert("无法播放", isPresented: Binding(
             get: { playError != nil },
@@ -375,7 +377,9 @@ struct ActionAssetListView: View {
         .task { await viewModel.loadIfNeeded() }
         .refreshable { await viewModel.reload() }
         .sheet(isPresented: $showingPhotos) {
-            NavigationStack { PhotoBrowserView() }
+            // sheet 里的照片页必须用本地 fullScreenCover 看图器：
+            // 全局 overlay 在 RootView 层，会被这个 sheet 盖住看不见
+            NavigationStack { PhotoBrowserView(useGlobalViewer: false) }
         }
         .alert("无法播放", isPresented: Binding(
             get: { playError != nil },
