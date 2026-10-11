@@ -89,8 +89,6 @@ struct PhotoViewerView: View {
 
                 topBar(topInset: safe.top)
                 bottomBar(bottomInset: safe.bottom)
-                // 详情面板放最后（顶层），底部弹出并盖住工具栏，对标网页版详情弹窗
-                if showInfo, let photo { infoPanel(photo) }
                 if let tip { toast(tip) }
             }
             .frame(width: geo.size.width, height: geo.size.height)
@@ -118,6 +116,11 @@ struct PhotoViewerView: View {
         // 否则 closingFade 还停在 0，重新打开就是一片空白
         .onAppear { isClosing = false; closingFade = 1; scheduleIdleHide() }
         .onDisappear { idleTask?.cancel(); tipTask?.cancel(); detailTask?.cancel() }
+        // 详情用 sheet 弹出：独立于 showUI（点图隐藏工具栏不影响），下滑关闭，
+        // 不再是之前那个跟随状态栏一起消失的底部面板。
+        .sheet(isPresented: $showInfo) {
+            if let photo { detailSheet(photo) }
+        }
     }
 
     // MARK: - 图片层
@@ -492,42 +495,18 @@ struct PhotoViewerView: View {
         }
     }
 
-    /// 进入所在相册：关闭看图器 + 通过全局 presenter 让 RootView 切 tab 并 push 相册页。
+    /// 进入所在相册：先关详情 sheet，再关闭看图器 + 通过全局 presenter 让 RootView 跳转。
     private func openInAlbum(_ albumRef: PhotoDetail.AlbumRef, libID: Int) {
+        showInfo = false
         var album = Album(id: albumRef.id)
         album.folderName = albumRef.folderName ?? ""
         PhotoViewerPresenter.shared.openAlbum(album, libID: libID)
     }
 
-    private func infoPanel(_ photo: Photo) -> some View {
-        VStack(spacing: 0) {
-            // 顶部拖拽指示条
-            Capsule()
-                .fill(.white.opacity(0.3))
-                .frame(width: 36, height: 5)
-                .padding(.top, 10)
-                .padding(.bottom, 6)
-
-            ScrollView(showsIndicators: false) {
+    private func detailSheet(_ photo: Photo) -> some View {
+        NavigationStack {
+            ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    HStack(alignment: .top) {
-                        Text(photo.fileName ?? "#\(photo.id)")
-                            .font(.headline)
-                            .foregroundStyle(.white)
-                            .lineLimit(2)
-                        Spacer()
-                        Button {
-                            withAnimation { showInfo = false }
-                        } label: {
-                            Image(systemName: "xmark")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.7))
-                                .frame(width: 30, height: 30)
-                                .background(.white.opacity(0.1), in: Circle())
-                        }
-                        .buttonStyle(.plain)
-                    }
-
                     // 功能按钮：人脸 / 像素相似 / 语义相似
                     HStack(spacing: 8) {
                         actionButton("人脸", active: showFaces) {
@@ -553,14 +532,10 @@ struct PhotoViewerView: View {
                     }
 
                     // 相似图片结果
-                    if showSimilar {
-                        similarSection
-                    }
+                    if showSimilar { similarSection }
 
                     // 人脸列表
-                    if showFaces {
-                        facesSection
-                    }
+                    if showFaces { facesSection }
 
                     // 基本信息
                     sectionTitle("基本信息")
@@ -603,23 +578,21 @@ struct PhotoViewerView: View {
                                 HStack(spacing: 8) {
                                     Text("美学评分")
                                         .font(.caption2)
-                                        .foregroundStyle(.white.opacity(0.45))
+                                        .foregroundStyle(.secondary)
                                     ProgressView(value: min(score / 10.0, 1.0))
                                         .tint(.orange)
                                     Text(String(format: "%.2f", score))
                                         .font(.caption2.monospacedDigit())
-                                        .foregroundStyle(.white)
                                 }
                             }
                             if let caption = d.aiCaption, !caption.isEmpty {
                                 Text(caption)
                                     .font(.caption)
-                                    .foregroundStyle(.white.opacity(0.85))
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                 if let at = d.captionAt, !at.isEmpty {
                                     Text("生成于 \(at)")
                                         .font(.caption2)
-                                        .foregroundStyle(.white.opacity(0.4))
+                                        .foregroundStyle(.secondary)
                                 }
                             }
                         }
@@ -643,11 +616,10 @@ struct PhotoViewerView: View {
                                 HStack(spacing: 10) {
                                     Text("相册")
                                         .font(.caption2)
-                                        .foregroundStyle(.white.opacity(0.45))
+                                        .foregroundStyle(.secondary)
                                         .frame(width: 64, alignment: .leading)
                                     Text("\(albumRef.folderName ?? "") (\(albumRef.photoCount ?? 0) 张)")
                                         .font(.caption2)
-                                        .foregroundStyle(.white.opacity(0.88))
                                     Spacer()
                                     Button {
                                         openInAlbum(albumRef, libID: libRef.id)
@@ -669,24 +641,21 @@ struct PhotoViewerView: View {
 
                     if photoDetail == nil && isLoadingDetail {
                         HStack(spacing: 8) {
-                            ProgressView().controlSize(.small).tint(.white.opacity(0.7))
-                            Text("加载详情…").font(.caption).foregroundStyle(.white.opacity(0.6))
+                            ProgressView().controlSize(.small)
+                            Text("加载详情…").font(.caption).foregroundStyle(.secondary)
                         }
                     }
                 }
                 .padding(16)
             }
+            .navigationTitle("图片详情")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") { showInfo = false }
+                }
+            }
         }
-        .frame(maxWidth: .infinity)
-        .frame(maxHeight: 560)
-        .background(.black.opacity(0.92))
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .padding(.horizontal, 8)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-        .padding(.bottom, 8)
-        .opacity(showUI ? 1 : 0)
-        .animation(.easeOut(duration: 0.25), value: showUI)
-        .allowsHitTesting(showUI)
     }
 
     /// 拍摄信息区块是否有内容（对标网页版：任一 EXIF 字段存在即显示）
@@ -702,10 +671,10 @@ struct PhotoViewerView: View {
         Button(action: action) {
             Text(title)
                 .font(.caption)
-                .foregroundStyle(active ? Theme.brand : Color.white.opacity(0.75))
+                .foregroundStyle(active ? Theme.brand : Color.primary)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
-                .background(active ? Theme.brand.opacity(0.18) : Color.white.opacity(0.08), in: Capsule())
+                .background(active ? Theme.brand.opacity(0.15) : Color(uiColor: .secondarySystemBackground), in: Capsule())
         }
         .buttonStyle(.plain)
     }
@@ -715,21 +684,22 @@ struct PhotoViewerView: View {
         VStack(alignment: .leading, spacing: 8) {
             if similarLoading {
                 HStack(spacing: 8) {
-                    ProgressView().controlSize(.small).tint(.white.opacity(0.7))
-                    Text("搜索中…").font(.caption).foregroundStyle(.white.opacity(0.6))
+                    ProgressView().controlSize(.small)
+                    Text("搜索中…").font(.caption).foregroundStyle(.secondary)
                 }
             } else if similarPhotos.isEmpty {
                 Text(similarMethod == "phash"
                      ? "未找到相似图片"
                      : "未找到语义相似图片（可能该图未生成 CLIP embedding）")
                     .font(.caption)
-                    .foregroundStyle(.white.opacity(0.5))
+                    .foregroundStyle(.secondary)
             } else {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 62), spacing: 6)], spacing: 6) {
                     ForEach(similarPhotos) { sp in
                         Button {
-                            // 相似图在当前列表里则跳转
+                            // 相似图在当前列表里则跳转（先关 sheet，看图器翻页后可按需再开）
                             if let idx = photos.firstIndex(where: { $0.id == sp.id }) {
+                                showInfo = false
                                 index = idx
                                 resetTransform()
                                 imagePixelSize = nil
@@ -766,11 +736,11 @@ struct PhotoViewerView: View {
         VStack(alignment: .leading, spacing: 8) {
             if facesLoading {
                 HStack(spacing: 8) {
-                    ProgressView().controlSize(.small).tint(.white.opacity(0.7))
-                    Text("检测中…").font(.caption).foregroundStyle(.white.opacity(0.6))
+                    ProgressView().controlSize(.small)
+                    Text("检测中…").font(.caption).foregroundStyle(.secondary)
                 }
             } else if faces.isEmpty {
-                Text("该图片未检测到人脸").font(.caption).foregroundStyle(.white.opacity(0.5))
+                Text("该图片未检测到人脸").font(.caption).foregroundStyle(.secondary)
             } else {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 62), spacing: 6)], spacing: 6) {
                     ForEach(faces) { face in
@@ -780,7 +750,7 @@ struct PhotoViewerView: View {
                                 .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                             Text(face.scoreText)
                                 .font(.system(size: 9))
-                                .foregroundStyle(.white.opacity(0.6))
+                                .foregroundStyle(.secondary)
                         }
                     }
                 }
@@ -791,7 +761,7 @@ struct PhotoViewerView: View {
     private func sectionTitle(_ text: String) -> some View {
         Text(text)
             .font(.caption.weight(.semibold))
-            .foregroundStyle(.white.opacity(0.5))
+            .foregroundStyle(.secondary)
             .textCase(.uppercase)
             .tracking(0.5)
     }
@@ -801,11 +771,11 @@ struct PhotoViewerView: View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
             Text(label)
                 .font(.caption2)
-                .foregroundStyle(.white.opacity(0.45))
+                .foregroundStyle(.secondary)
                 .frame(width: 64, alignment: .leading)
             Text(value)
                 .font(.caption2)
-                .foregroundStyle(.white.opacity(0.88))
+                .foregroundStyle(.primary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
@@ -830,9 +800,9 @@ struct PhotoViewerView: View {
                     showUI = true
                     scheduleIdleHide()
                 }
-                toolButton("info.circle", active: showInfo) {
-                    withAnimation { showInfo.toggle() }
-                    if showInfo { loadDetail() }
+                toolButton("info.circle") {
+                    showInfo = true
+                    loadDetail()
                 }
                 toolButton(isFavorite ? "heart.fill" : "heart", active: isFavorite, tint: .red) {
                     toggleFavorite()
