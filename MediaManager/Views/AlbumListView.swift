@@ -459,6 +459,10 @@ struct AlbumPhotosView: View {
     /// 看图器里点了封面按钮 → 回本页时刷新计数
     private let coverChanged = NotificationCenter.default.publisher(for: .coverTaskDidChange)
 
+    /// 顶栏分母（相册总张数）。相册接口没给 count 时退回已加载张数，
+    /// 免得顶栏出现「120 / 0」这种明显不对的分母。
+    private var totalCount: Int { album.count > 0 ? album.count : photos.count }
+
     var body: some View {
         PhotoGrid(
             photos: photos,
@@ -477,22 +481,42 @@ struct AlbumPhotosView: View {
             onReachEnd: { Task { await loadMore() } }
         )
         .ignoresSafeArea(edges: .bottom)
-        .navigationTitle(album.title)
         .navigationBarTitleDisplayMode(.inline)
-        // 顶栏右侧：本相册的封面生成数量。格式对齐相册列表页的计数规范
-        //（caption.monospacedDigit + 次级灰 + fixedSize + 固定槽位）
+        // ⚠️ 相册名**不**用 navigationTitle：它是居中的，而且要跟系统返回按钮抢位。
+        // 改放 leading 位 —— 紧跟返回按钮右边，跟相册列表页「库名在左、计数在右」同一套排版。
         .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Text(album.title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    // 与 ListSearchBarItem 里库名同一套保险：至少 120pt（≈8 个汉字），
+                    // 空间再紧也不会被压没；layoutPriority 让相册名优先拿到宽度。
+                    // ⚠️ alignment 必须 .leading：frame 默认居中，名字短时会离返回按钮老远。
+                    .frame(minWidth: 120, alignment: .leading)
+                    .layoutPriority(1)
+            }
+            .withoutGlass()
+
             TrailingToolsItem {
+                // AI 封面个数（可点：手动刷新一次，看图器里改过也能立刻对上）
                 if let n = coverCount {
-                    Text("封面 \(n)")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                        // ⚠️ 不加 fixedSize：工具栏空间紧张时会被压缩换行，撑高导航栏
-                        .fixedSize(horizontal: true, vertical: false)
-                        .lineLimit(1)
-                        .frame(minWidth: ToolbarMetrics.countMinWidth, alignment: .trailing)
-                        .padding(.leading, ToolbarMetrics.countGap)
+                    ToolChip(label: "封面 \(n)", icon: "photo.on.rectangle",
+                             // 有封面就绿 —— 与看图器里那个封面标记同一个颜色语义
+                             tintColor: n > 0 ? .green : nil) {
+                        Task { await loadCoverCount() }
+                    }
                 }
+                // 已加载 / 本相册总数。格式与相册列表页的计数完全一致
+                Text("\(photos.count) / \(totalCount)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    // ⚠️ 不加 fixedSize：工具栏空间紧张时会被压缩换行，撑高导航栏
+                    .fixedSize(horizontal: true, vertical: false)
+                    .lineLimit(1)
+                    .frame(minWidth: ToolbarMetrics.countMinWidth, alignment: .trailing)
+                    .padding(.leading, ToolbarMetrics.countGap)
             }
         }
         .overlay {
