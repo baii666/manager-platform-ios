@@ -47,7 +47,12 @@ struct SearchView: View {
     @State private var page = 1
     @State private var hasMore = false
     @State private var history: [String] = SearchHistoryStore.load()
+    /// 防抖定时器：敲字停手 debounceInterval 后才发请求
     @State private var debounceTask: Task<Void, Never>?
+    /// 真正在飞的那次搜索任务。换词时取消它，避免旧请求回来覆盖新结果
+    @State private var searchTask: Task<Void, Never>?
+    /// 正在加载的词。旧请求结束只清自己的标记，不会把新请求的转圈关掉
+    @State private var loadingToken = ""
     /// 初始词只应用一次：从下级页面返回时会再次 onAppear，不能每次都重搜
     @State private var didApplyInitial = false
     @FocusState private var fieldFocused: Bool
@@ -117,6 +122,8 @@ struct SearchView: View {
         .onChange(of: query) { scheduleSearch() }
         .onSubmit(of: .text) { runSearch(query) }
         .task { applyInitial() }
+        // 离开页面就撤掉还没发出去的防抖请求，别在背后偷偷打接口
+        .onDisappear { debounceTask?.cancel() }
         // ⚠️ 每个 tab / 每个 push 进来的页面都要自己垫一层背景：
         // NavigationStack 只渲染栈顶那一层，App 根的背景透不进来
         .appBackground()
@@ -153,7 +160,7 @@ struct SearchView: View {
             // 语义开关（与首页搜索框同一个 sparkles 按钮、同一套配色）
             Button {
                 isSemantic.toggle()
-                if !activeQuery.isEmpty { Task { await reload() } }
+                if !activeQuery.isEmpty { startSearch() }
             } label: {
                 Image(systemName: "sparkles")
                     .font(.system(size: 13, weight: .semibold))
@@ -197,7 +204,7 @@ struct SearchView: View {
                     let count = tab.totalKeys.reduce(0) { $0 + (totals[$1] ?? 0) }
                     Button {
                         selectedTab = tab
-                        Task { await reload() }
+                        startSearch()
                     } label: {
                         HStack(spacing: 5) {
                             Text(tab.label)
@@ -306,7 +313,7 @@ struct SearchView: View {
                             Button {
                                 // tv 不是 Tab 的 case，「剧集」分组的查看全部落到「影视」
                                 selectedTab = section.type == "tv" ? .movie : (Tab(rawValue: section.type) ?? .all)
-                                Task { await reload() }
+                                startSearch()
                             } label: {
                                 Text("查看全部").font(.caption)
                             }
@@ -395,12 +402,21 @@ struct SearchView: View {
         runSearch(q)
     }
 
-    /// 输入防抖：350ms 内连续输入只发一次请求
+    /// 输入防抖：停手 350ms 才发请求。太长会觉得卡，太短每个字都打接口
+    private static let debounceInterval: Duration = .milliseconds(350)
+
+    /// 输入防抖调度器。
+    /// ⚠️ 只管定时器本身；真正的请求由 runSearch 里的 searchTask 负责取消，
+    /// 否则快速打字会有多个请求同时在飞，回来顺序不确定 → 旧结果盖掉新结果。
     @MainActor
     private func scheduleSearch() {
         debounceTask?.cancel()
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        // 已经在展示同一个词的结果就别再打一次：程序化赋值 query（比如
+        // applyInitial / 点历史记录）也会触发 onChange，不拦就是重复请求
+        guard q != activeQuery else { return }
         debounceTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 350_000_000)
+            try? await Task.sleep(for: Self.debounceInterval)
             guard !Task.isCancelled else { return }
             runSearch(query)
         }
@@ -409,20 +425,35 @@ struct SearchView: View {
     @MainActor
     private func runSearch(_ text: String) {
         debounceTask?.cancel()
+        // 取消上一次在飞的请求：换词后旧结果已经没意义，
+        // 而且它回来还会把新结果覆盖掉（请求返回顺序不保证）
+        searchTask?.cancel()
         let q = text.trimmingCharacters(in: .whitespacesAndNewlines)
         activeQuery = q
         selectedTab = .all
         guard !q.isEmpty else {
-            results = []; totals = [:]; return
+            results = []; totals = [:]; similarity = [:]; return
         }
         SearchHistoryStore.add(q)
         history = SearchHistoryStore.load()
-        Task { await reload() }
+        startSearch()
+    }
+
+    /// 统一的请求入口：换词 / 切分类 / 切语义模式都走这里。
+    /// 每次先取消上一次在飞的任务 —— 请求返回顺序不保证，不取消就会出现
+    /// 「旧结果盖掉新结果」「两个词的结果混在一屏」。
+    @MainActor
+    private func startSearch() {
+        debounceTask?.cancel()
+        searchTask?.cancel()
+        searchTask = Task { await reload() }
     }
 
     @MainActor
     private func reload() async {
-        guard let client, !activeQuery.isEmpty else {
+        // 词在这里定格：请求期间用户可能又改了词，回来时用它判断结果是否还有效
+        let token = activeQuery
+        guard let client, !token.isEmpty else {
             results = []; totals = [:]; similarity = [:]; return
         }
         errorMessage = nil
@@ -432,8 +463,10 @@ struct SearchView: View {
             totals = [:]
         } else {
             // 分类计数（/totals 有 5s 服务端缓存，切 Tab 不会重复打爆）
-            do { totals = try await client.searchTotals(query: activeQuery) } catch { totals = [:] }
+            do { totals = try await client.searchTotals(query: token) } catch { totals = [:] }
         }
+        // 计数回来期间词可能已经换了（或这次任务被取消了），别再往下翻页
+        guard !Task.isCancelled, token == activeQuery else { return }
         await loadMore()
     }
 
@@ -441,14 +474,22 @@ struct SearchView: View {
 
     @MainActor
     private func loadMore() async {
-        guard let client, !isLoading, hasMore else { return }
+        // 和 reload 同理：把这次翻页针对的词定格，回来时比对才知道结果还有没有效
+        let token = activeQuery
+        guard let client, hasMore, !token.isEmpty else { return }
+        // 同一个词的重复触底（列表在滚动时会连发好几次）才算并发，要互斥；
+        // 换了词就直接放行 —— 旧请求的 defer 也不会把新请求的 isLoading 关掉
+        guard !(isLoading && loadingToken == token) else { return }
         isLoading = true
-        defer { isLoading = false }
+        loadingToken = token
+        defer { if loadingToken == token { isLoading = false } }
         do {
             if isSemantic {
                 // 后端用 offset 翻页，page 从 1 起 → offset = (page-1) * pageSize
                 let p = try await client.semanticSearch(
-                    query: activeQuery, limit: pageSize, offset: (page - 1) * pageSize)
+                    query: token, limit: pageSize, offset: (page - 1) * pageSize)
+                // 结果回来时词已经换了 / 任务被取消 → 整批丢弃，不能往列表里写
+                guard !Task.isCancelled, token == activeQuery else { return }
                 let items = p.results.map { makeSearchItem($0) }
                 if page == 1 { results = items } else { results.append(contentsOf: items) }
                 var map = similarity
@@ -460,12 +501,15 @@ struct SearchView: View {
                 // 「全部」只取每类一批做总览，翻页交给各分类页
                 let size = selectedTab == .all ? 8 : pageSize
                 let p = try await client.searchGrouped(
-                    query: activeQuery, types: selectedTab.requestTypes, page: page, size: size)
+                    query: token, types: selectedTab.requestTypes, page: page, size: size)
+                guard !Task.isCancelled, token == activeQuery else { return }
                 if page == 1 { results = p.items } else { results.append(contentsOf: p.items) }
                 page += 1
                 hasMore = selectedTab == .all ? false : p.hasMore
             }
         } catch {
+            // 旧词的报错也不该弹在新结果上
+            guard !Task.isCancelled, token == activeQuery else { return }
             // 语义模式下最常见的失败是后端没加载 CLIP 模型（503），
             // 服务端原文（"CLIP 模型未加载，语义搜索不可用"）已经说清楚了，直接透出
             let msg = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
