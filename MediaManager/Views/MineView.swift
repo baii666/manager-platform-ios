@@ -63,6 +63,8 @@ struct MineView: View {
             }
             .padding(.vertical, 24)
             .padding(.horizontal, 24)
+            // 底部留出底栏高度：退出登录按钮滑到底会被底栏盖住
+            .bottomBarClearance()
         }
         .appBackground()
         .navigationTitle("我的")
@@ -362,6 +364,8 @@ struct ActionAssetListView: View {
                         }
                     }
                     .padding(16)
+                    // 全量列表同样滑到底会被底栏盖住
+                    .bottomBarClearance()
 
                     if viewModel.isLoadingMore {
                         ProgressView()

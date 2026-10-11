@@ -68,6 +68,9 @@ struct ShootDetailView: View {
                     ContentUnavailableView("暂无内容", systemImage: "photo.on.rectangle.angled")
                         .padding(.top, 60)
                 }
+
+                // 底部净空：滑到底时最后的内容不被底栏盖住
+                Spacer().frame(height: BottomTabBar.height)
             }
         }
         .navigationTitle(shoot.title)

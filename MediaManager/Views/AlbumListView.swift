@@ -202,6 +202,7 @@ struct AlbumListView: View {
                     }
                 }
                 .padding(16)
+                .bottomBarClearance()
                 // 列数跳变时用弹簧动画平滑过渡
                 .animation(.spring(response: 0.28, dampingFraction: 0.85), value: grid.columns.count)
                 if viewModel.isLoading {

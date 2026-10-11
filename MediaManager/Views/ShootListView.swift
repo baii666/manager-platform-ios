@@ -35,6 +35,7 @@ struct ShootListView: View {
                     }
                 }
                 .padding(16)
+                .bottomBarClearance()
                 if viewModel.isLoading {
                     ProgressView().frame(maxWidth: .infinity).padding()
                 }

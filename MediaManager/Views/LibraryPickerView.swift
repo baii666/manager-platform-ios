@@ -31,6 +31,7 @@ struct LibraryPickerView: View {
                     }
                 }
                 .padding(24)
+                .bottomBarClearance()
                 if isLoading {
                     ProgressView().frame(maxWidth: .infinity).padding()
                 }

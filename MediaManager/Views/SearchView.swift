@@ -320,6 +320,7 @@ struct SearchView: View {
                 }
             }
             .padding(.vertical, 16)
+            .bottomBarClearance()
         }
     }
 
@@ -335,6 +336,7 @@ struct SearchView: View {
                 }
             }
             .padding(16)
+            .bottomBarClearance()
             if isLoading {
                 ProgressView().frame(maxWidth: .infinity).padding()
             }

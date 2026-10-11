@@ -101,6 +101,10 @@ struct BottomTabBar: View {
     /// 收到 360（每格 90）居中，既聚拢又不至于挤到「短视频」这种三字标签。
     private static let maxContentWidth: CGFloat = 360
 
+    /// 底栏高度。页面滚动内容的底部净空（bottomBarClearance）引用它，
+    /// 改这里一处，所有页面的避让高度跟着变。
+    static let height: CGFloat = 52
+
     var body: some View {
         // ⚠️ 别写死 spacing：三个 tab 时 44 还够，四个 tab 在窄屏（iPhone）上
         // 会挤出屏幕外。改成每格 maxWidth:.infinity 均分，tab 增减都不用调数字。
@@ -130,7 +134,7 @@ struct BottomTabBar: View {
         //    不会因为撑不下而溢出去。要再紧一点就把这个数字调小。
         .frame(maxWidth: Self.maxContentWidth)
         .frame(maxWidth: .infinity)
-        .frame(height: 52)  // 标准 tab bar 高度，不厚
+        .frame(height: Self.height)  // 标准 tab bar 高度，不厚
         .padding(.horizontal, 8)
         .background(
             // 底栏毛玻璃：直接用材质。它会自动模糊身后 App 根的那张背景图
@@ -147,6 +151,21 @@ struct BottomTabBar: View {
                 .fill(Color(uiColor: .separator).opacity(0.5))
                 .frame(height: 0.5)
         }
+    }
+}
+
+// MARK: - 底栏净空
+// ⚠️ 为什么需要它：RootView 用 safeAreaInset 挂底栏，理论上滚动内容会自动避让，
+// 但实测滚动内容滑到底还是会被底栏盖住（「我的」页的退出登录按钮尤其明显）——
+// 页面根上的 .appBackground()（背景层 ignoresSafeArea）会让 NavigationStack 里的
+// UIScrollView 丢掉底部安全区避让，safeAreaInset 的附加安全区也传不进去。
+//
+// 所以给每个竖向滚动页的内容加一段纯布局 padding 兜底：不依赖安全区机制，
+// 任何机型都不会失手。加在滚动内容**里面**（而不是 ScrollView 上），
+// 不影响页面自身的背景铺满，也不影响页面内的横滑行。
+extension View {
+    func bottomBarClearance() -> some View {
+        padding(.bottom, BottomTabBar.height)
     }
 }
 

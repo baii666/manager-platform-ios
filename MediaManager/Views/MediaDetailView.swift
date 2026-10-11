@@ -229,6 +229,7 @@ struct MediaDetailView: View {
                 Spacer(minLength: 20)
             }
             .padding(16)
+            .bottomBarClearance()
         }
         .appBackground()
     }

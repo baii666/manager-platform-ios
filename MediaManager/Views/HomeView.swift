@@ -21,6 +21,8 @@ struct HomeView: View {
             }
             .padding(.vertical, 24)
             .padding(.horizontal, 24)
+            // 底部留出底栏高度，滑到底不被底栏盖住
+            .bottomBarClearance()
         }
         .appBackground()
         .navigationTitle("首页")
