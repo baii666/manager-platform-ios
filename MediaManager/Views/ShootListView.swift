@@ -7,6 +7,8 @@ struct ShootListView: View {
 
     @StateObject private var viewModel: ShootListViewModel
     @State private var selected: Shoot?
+    /// 窄屏（iPhone）下隐藏计数，避免导航栏一行塞不下
+    @Environment(\.horizontalSizeClass) private var hSizeClass
 
     private let columns = [GridItem(.adaptive(minimum: 200), spacing: 16)]
 
@@ -16,46 +18,25 @@ struct ShootListView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            // 工具行。搜索框已挪进导航栏的 principal 位（见下方 .toolbar）
-            VStack(spacing: 10) {
-                HStack(spacing: 8) {
-                    Text(library?.name ?? "拍摄集")
-                        .font(.subheadline.weight(.semibold))
-                        .lineLimit(1)
-                    sortMenu
-                    Spacer()
-                    // 固定库模式不显示库筛选
-                    if library == nil && !viewModel.libraries.isEmpty { libraryMenu }
-                    Text("\(viewModel.items.count) / \(viewModel.totalCount)")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 10)
-            .padding(.bottom, 4)
-
-            ScrollView {
-                if viewModel.items.isEmpty && !viewModel.isLoading {
-                    ContentUnavailableView(viewModel.errorMessage ?? "暂无拍摄集",
-                                           systemImage: viewModel.errorMessage == nil ? "photo.on.rectangle.angled" : "exclamationmark.triangle")
-                        .frame(maxWidth: .infinity, minHeight: 400)
-                } else {
-                    LazyVGrid(columns: columns, spacing: 16) {
-                        ForEach(viewModel.items) { shoot in
-                            ShootCard(shoot: shoot, client: viewModel.client) {
-                                selected = shoot
-                            }
-                            .task {
-                                if shoot.id == viewModel.items.last?.id { await viewModel.loadMore() }
-                            }
+        ScrollView {
+            if viewModel.items.isEmpty && !viewModel.isLoading {
+                ContentUnavailableView(viewModel.errorMessage ?? "暂无拍摄集",
+                                       systemImage: viewModel.errorMessage == nil ? "photo.on.rectangle.angled" : "exclamationmark.triangle")
+                    .frame(maxWidth: .infinity, minHeight: 400)
+            } else {
+                LazyVGrid(columns: columns, spacing: 16) {
+                    ForEach(viewModel.items) { shoot in
+                        ShootCard(shoot: shoot, client: viewModel.client) {
+                            selected = shoot
+                        }
+                        .task {
+                            if shoot.id == viewModel.items.last?.id { await viewModel.loadMore() }
                         }
                     }
-                    .padding(16)
-                    if viewModel.isLoading {
-                        ProgressView().frame(maxWidth: .infinity).padding()
-                    }
+                }
+                .padding(16)
+                if viewModel.isLoading {
+                    ProgressView().frame(maxWidth: .infinity).padding()
                 }
             }
         }
@@ -68,6 +49,20 @@ struct ShootListView: View {
                 ListSearchBar(text: $viewModel.searchText,
                               placeholder: "搜索拍摄集…",
                               compact: true)
+            }
+            // 原来网格上方的工具行整行收进导航栏，页面只剩导航栏一行
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                Text(library?.name ?? "拍摄集")
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                sortMenu
+                // 固定库模式不显示库筛选
+                if library == nil && !viewModel.libraries.isEmpty { libraryMenu }
+                if hSizeClass == .regular {
+                    Text("\(viewModel.items.count) / \(viewModel.totalCount)")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .tint(Theme.brand)

@@ -153,6 +153,8 @@ struct MediaListView: View {
     @State private var selected: MediaItem?
     /// 捏合手势起始宽度（MagnificationGesture 的 scale 相对手势开始，需记下起始值）
     @State private var pinchStartWidth: CGFloat = 0
+    /// 窄屏（iPhone）下隐藏滑块与计数 —— 一行塞不下时优先让出冗余信息（捏合也能缩放）
+    @Environment(\.horizontalSizeClass) private var hSizeClass
 
     /// 根据容器宽算列布局：列数 + 每列宽。
     /// 对齐网页版 `grid-template-columns: repeat(auto-fill, minmax(size, 1fr))`：
@@ -180,63 +182,34 @@ struct MediaListView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            // 工具行。搜索框已挪进导航栏的 principal 位（见下方 .toolbar），
-            // 这样导航栏不额外占高度，左边缘的系统返回按钮正好在搜索框左边。
-            VStack(spacing: 10) {
-                HStack(spacing: 8) {
-                    // 库名（从导航栏挪到这里）
-                    Text(library?.name ?? (type == "tv" ? "剧集" : "电影"))
-                        .font(.subheadline.weight(.semibold))
-                        .lineLimit(1)
-                    sortMenu
-                    ToolChip(label: layout.landscape ? "横版" : "竖版",
-                             icon: layout.landscape ? "rectangle" : "rectangle.portrait",
-                             highlighted: layout.landscape) {
-                        layout.toggleOrientation()
-                    }
-                    ToolSlider(icon: "arrow.up.left.and.arrow.down.right", layout: layout)
-                    Spacer()
-                    // 固定库模式不显示库筛选（只有一个库）
-                    if library == nil && !viewModel.libraries.isEmpty { libraryMenu }
-                    Text("\(viewModel.items.count) / \(viewModel.totalCount)")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 10)
-            .padding(.bottom, 4)
-
-            // 网格：用 GeometryReader 测容器宽（稳定值，非 cell 高度），
-            // 自己算列数让卡片填满列宽，捏合时列数跳变但卡片始终铺满、无间隙。
-            GeometryReader { geo in
-                let grid = gridLayout(containerWidth: geo.size.width)
-                ScrollView {
-                    LazyVGrid(columns: grid.columns, spacing: 18) {
-                        ForEach(viewModel.items) { item in
-                            let cover = AppSession.shared.client?.mediaCoverURL(item, landscape: layout.landscape)
-                            MediaCard(item: item, coverURL: cover, width: grid.itemWidth, landscape: layout.landscape,
-                                      showInfo: layout.cardWidth >= CardLayoutController.compactThreshold) {
-                                selected = item
-                            }
-                            .task {
-                                if item.id == viewModel.items.last?.id {
-                                    await viewModel.loadMore()
-                                }
+        // 网格：用 GeometryReader 测容器宽（稳定值，非 cell 高度），
+        // 自己算列数让卡片填满列宽，捏合时列数跳变但卡片始终铺满、无间隙。
+        GeometryReader { geo in
+            let grid = gridLayout(containerWidth: geo.size.width)
+            ScrollView {
+                LazyVGrid(columns: grid.columns, spacing: 18) {
+                    ForEach(viewModel.items) { item in
+                        let cover = AppSession.shared.client?.mediaCoverURL(item, landscape: layout.landscape)
+                        MediaCard(item: item, coverURL: cover, width: grid.itemWidth, landscape: layout.landscape,
+                                  showInfo: layout.cardWidth >= CardLayoutController.compactThreshold) {
+                            selected = item
+                        }
+                        .task {
+                            if item.id == viewModel.items.last?.id {
+                                await viewModel.loadMore()
                             }
                         }
                     }
-                    .padding(16)
-                    // 列数跳变时用弹簧动画平滑过渡，别让卡片尺寸「突然跳」
-                    .animation(.spring(response: 0.28, dampingFraction: 0.85), value: grid.columns.count)
-                    if viewModel.isLoading {
-                        ProgressView().frame(maxWidth: .infinity).padding()
-                    }
                 }
-                // 双指捏合缩放卡片大小（对齐网页版 usePinchToResize）
-                .simultaneousGesture(pinchGesture)
+                .padding(16)
+                // 列数跳变时用弹簧动画平滑过渡，别让卡片尺寸「突然跳」
+                .animation(.spring(response: 0.28, dampingFraction: 0.85), value: grid.columns.count)
+                if viewModel.isLoading {
+                    ProgressView().frame(maxWidth: .infinity).padding()
+                }
             }
+            // 双指捏合缩放卡片大小（对齐网页版 usePinchToResize）
+            .simultaneousGesture(pinchGesture)
         }
         // ⚠️ 导航栏必须保持可见。隐藏它会让系统的右滑返回失效，而 SwiftUI 的
         // NavigationStack 在 push 之后不再渲染下一层 —— 任何自定义手势都只能推出
@@ -251,6 +224,29 @@ struct MediaListView: View {
                 ListSearchBar(text: $viewModel.searchText,
                               placeholder: "搜索标题、演员、类型…",
                               compact: true)
+            }
+            // 原来网格上方的工具行整行收进导航栏，页面只剩导航栏一行
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                Text(library?.name ?? (type == "tv" ? "剧集" : "电影"))
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                sortMenu
+                ToolChip(label: layout.landscape ? "横版" : "竖版",
+                         icon: layout.landscape ? "rectangle" : "rectangle.portrait",
+                         highlighted: layout.landscape) {
+                    layout.toggleOrientation()
+                }
+                // 窄屏（iPhone）塞不下：滑块与计数是冗余信息（捏合也能缩放），优先让位
+                if hSizeClass == .regular {
+                    ToolSlider(icon: "arrow.up.left.and.arrow.down.right", layout: layout)
+                }
+                // 固定库模式不显示库筛选（只有一个库）
+                if library == nil && !viewModel.libraries.isEmpty { libraryMenu }
+                if hSizeClass == .regular {
+                    Text("\(viewModel.items.count) / \(viewModel.totalCount)")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .tint(Theme.brand)

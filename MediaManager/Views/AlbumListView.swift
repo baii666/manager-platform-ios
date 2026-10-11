@@ -156,6 +156,8 @@ struct AlbumListView: View {
     @StateObject private var layout: CardLayoutController
     /// 捏合手势起始宽度
     @State private var pinchStartWidth: CGFloat = 0
+    /// 窄屏（iPhone）下隐藏滑块与计数 —— 一行塞不下时优先让出冗余信息（捏合也能缩放）
+    @Environment(\.horizontalSizeClass) private var hSizeClass
 
     /// 根据容器宽算列布局（对齐网页版 minmax(size,1fr)：卡片填满整列不留空隙）
     private func gridLayout(containerWidth: CGFloat) -> (columns: [GridItem], itemWidth: CGFloat) {
@@ -179,63 +181,35 @@ struct AlbumListView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            // 工具行。搜索框已挪进导航栏的 principal 位（见下方 .toolbar）
-            VStack(spacing: 10) {
-                HStack(spacing: 8) {
-                    // 库名（从导航栏挪到这里）
-                    Text(library?.name ?? "相册")
-                        .font(.subheadline.weight(.semibold))
-                        .lineLimit(1)
-                    sortMenu
-                    ToolChip(label: layout.landscape ? "横版" : "竖版",
-                             icon: layout.landscape ? "rectangle" : "rectangle.portrait",
-                             highlighted: layout.landscape) {
-                        layout.toggleOrientation()
-                    }
-                    ToolSlider(icon: "arrow.up.left.and.arrow.down.right", layout: layout)
-                    Spacer()
-                    // 固定库模式不显示库筛选
-                    if library == nil && viewModel.libraries.count > 1 { libraryMenu }
-                    Text("\(viewModel.albums.count) / \(viewModel.totalCount)")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 10)
-            .padding(.bottom, 4)
-
-            // 网格：GeometryReader 测容器宽，卡片填满列宽（对齐网页版 minmax(size,1fr)）
-            GeometryReader { geo in
-                let grid = gridLayout(containerWidth: geo.size.width)
-                ScrollView {
-                    LazyVGrid(columns: grid.columns, spacing: 18) {
-                        ForEach(viewModel.albums) { album in
-                            NavigationLink(value: album) {
-                                AlbumCard(album: album, coverURL: coverURL(for: album, landscape: layout.landscape),
-                                          width: grid.itemWidth, landscape: layout.landscape,
-                                          showInfo: layout.cardWidth >= CardLayoutController.compactThreshold)
-                            }
-                            .buttonStyle(.plain)
-                            .task {
-                                // 滚到末尾前预取
-                                if album.id == viewModel.albums.last?.id {
-                                    await viewModel.loadMore()
-                                }
+        // 网格：GeometryReader 测容器宽，卡片填满列宽（对齐网页版 minmax(size,1fr)）
+        GeometryReader { geo in
+            let grid = gridLayout(containerWidth: geo.size.width)
+            ScrollView {
+                LazyVGrid(columns: grid.columns, spacing: 18) {
+                    ForEach(viewModel.albums) { album in
+                        NavigationLink(value: album) {
+                            AlbumCard(album: album, coverURL: coverURL(for: album, landscape: layout.landscape),
+                                      width: grid.itemWidth, landscape: layout.landscape,
+                                      showInfo: layout.cardWidth >= CardLayoutController.compactThreshold)
+                        }
+                        .buttonStyle(.plain)
+                        .task {
+                            // 滚到末尾前预取
+                            if album.id == viewModel.albums.last?.id {
+                                await viewModel.loadMore()
                             }
                         }
                     }
-                    .padding(16)
-                    // 列数跳变时用弹簧动画平滑过渡
-                    .animation(.spring(response: 0.28, dampingFraction: 0.85), value: grid.columns.count)
-                    if viewModel.isLoading {
-                        ProgressView().frame(maxWidth: .infinity).padding()
-                    }
                 }
-                // 双指捏合缩放卡片大小（对齐网页版 usePinchToResize）
-                .simultaneousGesture(pinchGesture)
+                .padding(16)
+                // 列数跳变时用弹簧动画平滑过渡
+                .animation(.spring(response: 0.28, dampingFraction: 0.85), value: grid.columns.count)
+                if viewModel.isLoading {
+                    ProgressView().frame(maxWidth: .infinity).padding()
+                }
             }
+            // 双指捏合缩放卡片大小（对齐网页版 usePinchToResize）
+            .simultaneousGesture(pinchGesture)
         }
         // ⚠️ 导航栏一律保持可见（隐藏会让系统右滑返回失效，而 NavigationStack push 后
         // 不渲染下一层，自定义手势只能推出白屏）。搜索框放 principal 位，导航栏因而
@@ -249,6 +223,30 @@ struct AlbumListView: View {
                 ListSearchBar(text: $viewModel.searchText,
                               placeholder: "搜索相册名…",
                               compact: true)
+            }
+            // 原来网格上方的工具行整行收进导航栏，页面只剩导航栏一行。
+            // 跨库模式（sheet）时「完成」按钮来自外层 HomeView，与这里的 trailing 共存。
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                Text(library?.name ?? "相册")
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                sortMenu
+                ToolChip(label: layout.landscape ? "横版" : "竖版",
+                         icon: layout.landscape ? "rectangle" : "rectangle.portrait",
+                         highlighted: layout.landscape) {
+                    layout.toggleOrientation()
+                }
+                // 窄屏（iPhone）塞不下：滑块与计数是冗余信息（捏合也能缩放），优先让位
+                if hSizeClass == .regular {
+                    ToolSlider(icon: "arrow.up.left.and.arrow.down.right", layout: layout)
+                }
+                // 固定库模式不显示库筛选
+                if library == nil && viewModel.libraries.count > 1 { libraryMenu }
+                if hSizeClass == .regular {
+                    Text("\(viewModel.albums.count) / \(viewModel.totalCount)")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .tint(Theme.brand)
