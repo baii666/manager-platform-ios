@@ -55,6 +55,8 @@ struct PhotoViewerView: View {
     @State private var facesLoading = false
     @State private var similarPhotos: [SimilarPhoto] = []
     @State private var similarLoading = false
+    /// 点击相似图后，用简单蒙层看原图（不顶掉当前看图器）。非 nil 时显示蒙层。
+    @State private var similarOverlayURL: URL?
 
     private var client: APIClient? { AppSession.shared.client }
 
@@ -121,6 +123,13 @@ struct PhotoViewerView: View {
         // 不再是之前那个跟随状态栏一起消失的底部面板。
         .sheet(isPresented: $showInfo) {
             if let photo { detailSheet(photo) }
+        }
+        // 相似图蒙层：叠在看图器之上（不顶掉看图器），关掉即回到原位置。
+        .overlay {
+            if let url = similarOverlayURL {
+                SimilarPhotoOverlay(url: url) { similarOverlayURL = nil }
+                    .transition(.opacity)
+            }
         }
     }
 
@@ -508,35 +517,13 @@ struct PhotoViewerView: View {
         PhotoViewerPresenter.shared.openAlbum(album, libID: libID)
     }
 
-    /// 点击相似图查看：若它正好在当前照片列表里则直接翻页跳转；
-    /// 否则构造一个单图 Photo 重新打开看图器（全局 presenter），跨列表也能看。
+    /// 点击相似图查看：不顶掉当前看图器，用一层简单蒙层看原图（可缩放滚动）。
     private func viewSimilarPhoto(_ sp: SimilarPhoto) {
         showInfo = false
-        if let idx = photos.firstIndex(where: { $0.id == sp.id }) {
-            index = idx
-            resetTransform()
-            imagePixelSize = nil
-            return
-        }
-        // 构造单图：id + 尺寸 + 原图/缩略图 URL 即可驱动 ViewerImageView
-        var p = Photo(id: sp.id)
-        p.fileName = sp.fileName.isEmpty ? nil : sp.fileName
-        p.width = sp.width
-        p.height = sp.height
-        if let full = client?.makeURL("/photo", queryItems: [
+        similarOverlayURL = client?.makeURL("/photo", queryItems: [
             URLQueryItem(name: "id", value: "\(sp.id)"),
             URLQueryItem(name: "size", value: "original"),
-        ]) {
-            p.fullURL = full
-        }
-        if let thumb = client?.makeURL("/photo", queryItems: [
-            URLQueryItem(name: "id", value: "\(sp.id)"),
-            URLQueryItem(name: "size", value: "600"),
-        ]) {
-            p.thumbURL = thumb
-        }
-        // 用单图覆盖当前看图器（show 会更新 photos + startIndex，overlay 自动重建到该图）
-        PhotoViewerPresenter.shared.show([p], index: 0, hasMore: false, onLoadMore: nil)
+        ])
     }
 
     private func detailSheet(_ photo: Photo) -> some View {
@@ -1061,6 +1048,86 @@ private struct ViewerThumb: View {
                 Image(uiImage: image).resizable().scaledToFill()
             } else {
                 Color.white.opacity(0.08)
+            }
+        }
+        .task(id: url?.absoluteString ?? "") {
+            guard let url, image == nil else { return }
+            image = await ImageCache.shared.load(from: url)
+        }
+    }
+}
+
+// MARK: - 相似图查看蒙层
+// 点相似图时叠在看图器之上的一层简单蒙层：全屏黑底 + 原图，可捏合缩放、放大后拖动平移。
+// 不顶掉当前看图器，关闭即回到原位置。加载用 ImageCache 走内存缓存。
+private struct SimilarPhotoOverlay: View {
+    let url: URL?
+    var onClose: () -> Void
+
+    @State private var image: UIImage?
+    @State private var scale: CGFloat = 1
+    @State private var lastScale: CGFloat = 1
+    @State private var offset: CGSize = .zero
+    @State private var lastOffset: CGSize = .zero
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+
+            if let image {
+                GeometryReader { geo in
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: geo.size.width, height: geo.size.height)
+                        .scaleEffect(scale)
+                        .offset(offset)
+                        .gesture(
+                            MagnificationGesture()
+                                .onChanged { v in
+                                    scale = max(1, min(8, lastScale * v))
+                                }
+                                .onEnded { _ in
+                                    if scale < 1 { withAnimation { scale = 1 } }
+                                    lastScale = scale
+                                }
+                        )
+                        .simultaneousGesture(
+                            DragGesture()
+                                .onChanged { v in
+                                    guard scale > 1.01 else { return }
+                                    offset = CGSize(width: lastOffset.width + v.translation.width,
+                                                    height: lastOffset.height + v.translation.height)
+                                }
+                                .onEnded { _ in lastOffset = offset }
+                        )
+                        .onTapGesture(count: 2) {
+                            withAnimation(.easeOut(duration: 0.2)) {
+                                scale = 1; lastScale = 1
+                                offset = .zero; lastOffset = .zero
+                            }
+                        }
+                }
+            } else {
+                ProgressView().tint(.white)
+            }
+
+            // 关闭按钮（贴顶右）
+            VStack {
+                HStack {
+                    Spacer()
+                    Button(action: onClose) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 34, height: 34)
+                            .background(.black.opacity(0.35), in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 8)
+                    .padding(.trailing, 16)
+                }
+                Spacer()
             }
         }
         .task(id: url?.absoluteString ?? "") {
