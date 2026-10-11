@@ -180,12 +180,8 @@ struct AlbumListView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // 顶部状态栏（独立、美观）
+            // 工具行。搜索框已挪进导航栏的 principal 位（见下方 .toolbar）
             VStack(spacing: 10) {
-                // 跨库模式（首页 sheet 打开、导航栏仍在）没有上一层，不显示返回按钮
-                ListSearchRow(text: $viewModel.searchText,
-                              placeholder: "搜索相册名…",
-                              showsBackButton: library != nil)
                 HStack(spacing: 8) {
                     // 库名（从导航栏挪到这里）
                     Text(library?.name ?? "相册")
@@ -241,13 +237,19 @@ struct AlbumListView: View {
                 .simultaneousGesture(pinchGesture)
             }
         }
-        // 隐藏系统导航栏（返回 / 侧边栏按钮都不要，库名已挪进工具行）；
-        // 返回靠系统边缘右滑手势。
-        // ⚠️ 跨库模式（library == nil，首页相册 sheet 入口）要保留导航栏（含「完成」按钮）
-        .toolbar(library == nil ? .automatic : .hidden, for: .navigationBar)
-        // 固定库模式下隐藏导航栏，系统右滑返回失效，用自定义右滑手势补齐；
-        // 跨库模式（sheet 里，导航栏保留）不需要
-        .edgePopGesture(enabled: library != nil)
+        // ⚠️ 导航栏一律保持可见（隐藏会让系统右滑返回失效，而 NavigationStack push 后
+        // 不渲染下一层，自定义手势只能推出白屏）。搜索框放 principal 位，导航栏因而
+        // 不额外占高度。固定库模式下系统返回按钮自动出现在搜索框左边；
+        // 跨库模式（首页 sheet 入口）是栈底没有上一层，系统不会给返回按钮，
+        // sheet 的「完成」按钮由外层 HomeView 的 confirmationAction 提供。
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                ListSearchBar(text: $viewModel.searchText,
+                              placeholder: "搜索相册名…",
+                              compact: true)
+            }
+        }
+        .navigationBarTitleDisplayMode(.inline)
         // 下拉刷新
         .refreshable { await viewModel.refresh() }
         // ⚠️ iOS 17 起 onChange(of:) 零参闭包

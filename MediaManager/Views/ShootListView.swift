@@ -17,9 +17,8 @@ struct ShootListView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // 顶部状态栏：搜索框第一行，工具行第二行（库名从导航栏挪到这里）
+            // 工具行。搜索框已挪进导航栏的 principal 位（见下方 .toolbar）
             VStack(spacing: 10) {
-                ListSearchRow(text: $viewModel.searchText, placeholder: "搜索拍摄集…")
                 HStack(spacing: 8) {
                     Text(library?.name ?? "拍摄集")
                         .font(.subheadline.weight(.semibold))
@@ -60,10 +59,17 @@ struct ShootListView: View {
                 }
             }
         }
-        // 隐藏系统导航栏（返回 / 侧边栏按钮都不要，库名已挪进工具行）
-        .toolbar(.hidden, for: .navigationBar)
-        // 隐藏导航栏后系统右滑返回失效，用自定义右滑手势补齐
-        .edgePopGesture()
+        // ⚠️ 导航栏必须保持可见（隐藏会让系统右滑返回失效，而 NavigationStack
+        // push 后不渲染下一层，自定义手势只能推出白屏）。搜索框放 principal 位，
+        // 导航栏因而不额外占高度，系统返回按钮正好在搜索框左边。
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                ListSearchBar(text: $viewModel.searchText,
+                              placeholder: "搜索拍摄集…",
+                              compact: true)
+            }
+        }
+        .navigationBarTitleDisplayMode(.inline)
         // 下拉刷新
         .refreshable { await viewModel.refresh() }
         // ⚠️ iOS 17 起 `onChange(of:) { newValue in }`（单参数）已废弃，用零参数闭包

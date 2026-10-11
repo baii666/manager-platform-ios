@@ -1,23 +1,21 @@
 import SwiftUI
 
-// MARK: - 恢复系统右滑返回（UIKit 桥接）
+// MARK: - 恢复系统右滑返回（UIKit 桥接）⚠️ 当前停用，保留备用
 //
-// 为什么需要这一层：
-// 列表页为了「搜索框贴顶」执行了 .toolbar(.hidden, for: .navigationBar)。导航栏一隐藏，
-// UINavigationController 自带的 interactivePopGestureRecognizer 就被系统自己的 delegate
-// 拦下了（它在 shouldBegin 里判断 navigationBar.isHidden，隐藏就不允许开始）。
+// 列表页曾经为了「搜索框贴顶」执行 .toolbar(.hidden, for: .navigationBar)，
+// 导航栏一隐藏，UINavigationController 自带的 interactivePopGestureRecognizer
+// 就被系统自己的 delegate 拦下了（它在 shouldBegin 里判断 navigationBar.isHidden）。
+// 这个桥接换掉那个 delegate，试图把系统手势请回来。
 //
-// 于是只能自己用 DragGesture 兜底。但 SwiftUI 的 NavigationStack 在 push 之后
-// **不再渲染栈里被盖住的那一层**，右滑时把当前页推开，露出来的是容器背景（白/黑），
-// 松手后 pop 动画跑完，上一层才被渲染出来 —— 观感就是「白屏 + 突然跳出来」。
-// 这一点纯 SwiftUI 补不上，因为没有下一层的视图可以显示。
+// ❗ 真机结论：**没用**。手势确实恢复了一半（能触发 pop），但右滑过程中仍然是白屏 ——
+// 因为白屏的根因不是手势，而是 SwiftUI NavigationStack 在 push 之后不再渲染
+// 被盖住的那一层，下面根本没内容可显示。
 //
-// 这里的做法是把系统手势的 delegate 换成自己的：只要栈里不止一层就放行，绕开
-// 「导航栏隐藏就禁用」的判断。系统手势一旦生效，转场由 UINavigationController 接管，
-// 跟手、带视差、上一层真实可见 —— 和有导航栏的详情页完全一致。
+// 最终解法是列表页恢复系统导航栏（搜索框挪进 principal 位，视觉上不额外占高度），
+// 手势和转场都由 UINavigationController 接管。
 //
-// ⚠️ 降级设计：拿不到 UINavigationController（本页不在导航栈里，或未来 SwiftUI
-// 换了底层实现）时 isActive 保持 false，列表页的自定义手势照旧启用，行为不回退。
+// ⚠️ 保留备用：将来若有页面必须隐藏导航栏，可以再挂回来，但要接受
+// 「滑动过程中是空白」这个 SwiftUI 的硬限制。
 
 /// 顶替系统 delegate：栈里不止一层就放行。
 ///

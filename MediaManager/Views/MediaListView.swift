@@ -181,9 +181,9 @@ struct MediaListView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // 顶部状态栏（独立、美观）
+            // 工具行。搜索框已挪进导航栏的 principal 位（见下方 .toolbar），
+            // 这样导航栏不额外占高度，左边缘的系统返回按钮正好在搜索框左边。
             VStack(spacing: 10) {
-                ListSearchRow(text: $viewModel.searchText, placeholder: "搜索标题、演员、类型…")
                 HStack(spacing: 8) {
                     // 库名（从导航栏挪到这里）
                     Text(library?.name ?? (type == "tv" ? "剧集" : "电影"))
@@ -238,10 +238,18 @@ struct MediaListView: View {
                 .simultaneousGesture(pinchGesture)
             }
         }
-        // 隐藏系统导航栏（返回 / 侧边栏按钮都不要，库名已挪进工具行）
-        .toolbar(.hidden, for: .navigationBar)
-        // 隐藏导航栏后系统右滑返回失效，用自定义右滑手势补齐
-        .edgePopGesture()
+        // ⚠️ 导航栏必须保持可见。隐藏它会让系统的右滑返回失效，而 SwiftUI 的
+        // NavigationStack 在 push 之后不再渲染下一层 —— 任何自定义手势都只能推出
+        // 一片空白（右滑到一半是白屏）。导航栏可见时系统手势和系统 pop 转场
+        // 都由 UINavigationController 接管，效果与电影详情页返回列表完全一致。
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                ListSearchBar(text: $viewModel.searchText,
+                              placeholder: "搜索标题、演员、类型…",
+                              compact: true)
+            }
+        }
+        .navigationBarTitleDisplayMode(.inline)
         // 下拉刷新
         .refreshable { await viewModel.refresh() }
         // ⚠️ iOS 17 起 onChange(of:) 零参闭包

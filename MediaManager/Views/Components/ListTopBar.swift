@@ -9,6 +9,8 @@ import SwiftUI
 struct ListSearchBar: View {
     @Binding var text: String
     var placeholder: String = "搜索…"
+    /// 放进导航栏时用：纵向 padding 收紧，避免撑高 navigationBar（inline 只有 44pt）
+    var compact: Bool = false
 
     var body: some View {
         HStack(spacing: 8) {
@@ -33,48 +35,9 @@ struct ListSearchBar: View {
             }
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 9)
+        .padding(.vertical, compact ? 6 : 9)
         .background(Color(uiColor: .secondarySystemBackground),
                     in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-    }
-}
-
-// MARK: - 搜索框行：左侧返回按钮
-// 列表页隐藏了导航栏，就没有系统返回按钮。这里在搜索框左侧补一个同样作用的入口。
-//
-// ⚠️ 点击只调 dismiss()，转场完全交给系统的 pop —— 不做任何自定义动画。
-// 效果是露出**真实的上一层**并带视差，和从电影详情页返回列表一模一样。
-// 右滑手势（下方 EdgePopGestureModifier）照旧可用，两条路径是同一个转场。
-struct ListBackButton: View {
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        Button {
-            dismiss()
-        } label: {
-            Image(systemName: "chevron.left")
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(Theme.brand)
-                .frame(width: 26, height: 32)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("返回")
-    }
-}
-
-/// 搜索框 + 左侧返回按钮。三个列表页共用，省得各自拼 HStack。
-struct ListSearchRow: View {
-    @Binding var text: String
-    var placeholder: String = "搜索…"
-    /// 是否显示返回按钮。跨库模式（首页 sheet 打开、导航栏仍在）不需要 —— 它没有上一层。
-    var showsBackButton = true
-
-    var body: some View {
-        HStack(spacing: 8) {
-            if showsBackButton { ListBackButton() }
-            ListSearchBar(text: $text, placeholder: placeholder)
-        }
     }
 }
 
@@ -256,18 +219,19 @@ struct ToolSlider: View {
     }
 }
 
-// MARK: - 右滑返回
-// 列表页为了「搜索框贴顶」隐藏了导航栏，系统右滑返回手势会随之失效。
+// MARK: - 右滑返回（⚠️ 当前停用，保留备用）
 //
-// 两层方案，优先用系统的：
-// 1) 先用 NavigationPopGesture.swift 里的 UIKit 桥接把系统的
-//    interactivePopGestureRecognizer 请回来（换掉它「导航栏隐藏就禁用」的 delegate）。
-//    成功的话返回完全由 UINavigationController 接管：跟手、有视差、左边缘露出的是
-//    **真实的上一页** —— 和有导航栏的详情页一模一样。
-// 2) 桥接拿不到 UINavigationController 时才用这里的自定义 DragGesture 兜底。
-//    兜底版的已知缺陷：SwiftUI NavigationStack 在 push 后不再渲染下一层，
-//    所以滑动过程中露出的是容器背景，松手 pop 动画结束上一层才出现（观感是白屏 + 跳出）。
-//    这是纯 SwiftUI 无法弥补的，只能靠第 1 条解决。
+// 列表页以前为了「搜索框贴顶」隐藏导航栏，系统右滑返回随之失效，只能自己兜底。
+// 但 SwiftUI 的 NavigationStack 在 push 之后**不再渲染栈里被盖住的那一层** ——
+// 自定义手势把当前页推开，下面没有东西可显示，露出容器背景（右滑到一半是白屏），
+// 松手后 pop 动画跑完上一层才出现。真机验证过：连 UIKit 桥接启用系统的
+// interactivePopGestureRecognizer 也救不回来，白屏依旧。
+//
+// 所以列表页已恢复系统导航栏（搜索框挪进 principal 位，不额外占高度），
+// 手势和转场全部由 UINavigationController 接管，与电影详情页完全一致。
+//
+// ⚠️ 这段代码保留备用：将来若有页面必须隐藏导航栏，挂 .edgePopGesture() 即可，
+// 但要接受「滑动过程中是空白」这个 SwiftUI 的硬限制。
 struct EdgePopGestureModifier: ViewModifier {
     var enabled: Bool = true
     @Environment(\.dismiss) private var dismiss
