@@ -306,9 +306,12 @@ final class APIClient: DataProviding, @unchecked Sendable {
     }
 
     func search(query: String) async throws -> [UnifiedAsset] {
-        let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
-        let resp: SearchResponse = try await request("/api/search?q=\(encoded)&type=all&page=1&size=60")
-        return resp.items.compactMap { resolveSearchItem($0) }
+        // ⚠️ 别再请求 type=all：后端 all 分支返回的是分组 map
+        //（{movie:[...], tv:[...], album:[...], shoot:[...], library:[...]}），
+        // 既没有 items/total 也没有 photo。跨类型统一走客户端并发聚合。
+        let page = try await searchGrouped(query: query, types: ["movie", "tv", "album", "photo", "shoot"],
+                                           page: 1, size: 20)
+        return page.items.compactMap { resolveSearchItem($0) }
     }
 
     // MARK: - 媒体详情
@@ -396,8 +399,12 @@ final class APIClient: DataProviding, @unchecked Sendable {
 
     // MARK: - 搜索（分类）
 
-    /// 按类型分页搜索。type: all/movie/series/album/photo/shoot/short
-    func searchItems(query: String, type: String, page: Int = 1, size: Int = 60) async throws -> ([SearchItem], Int) {
+    /// 按类型分页搜索。type: movie/tv/album/photo/shoot
+    /// ⚠️ 不要传 "all"：后端 type=all 走的是 searchAll，返回的是
+    /// `{movie:[...], tv:[...], album:[...], shoot:[...], library:[...]}` 的**分组 map**，
+    /// 既没有 items/total，也不含 photo —— 用 items 解必然空/失败。
+    /// 需要「全部 / 影视」这种跨类型的，用 searchGrouped 自己并发聚合。
+    func searchItems(query: String, type: String, page: Int = 1, size: Int = 60) async throws -> SearchPage {
         let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
         let resp: SearchResponse = try await request(
             "/api/search", queryItems: [
@@ -407,7 +414,32 @@ final class APIClient: DataProviding, @unchecked Sendable {
                 URLQueryItem(name: "size", value: "\(size)"),
             ]
         )
-        return (resp.items, resp.total)
+        // 相册 / 拍摄集 / 照片的返回里没有 type 字段，用请求类型回填，
+        // 否则 UI 分不清这条该跳详情页还是相册（原先默认 "movie"，点相册会跳到影视详情）
+        var items = resp.items
+        for i in items.indices { items[i].fillType(type) }
+        let hasMore = resp.hasMore ?? (resp.total > 0 ? items.count < resp.total : items.count >= size)
+        return SearchPage(items: items, total: resp.total, hasMore: hasMore)
+    }
+
+    /// 跨类型聚合搜索（「全部」「影视」用）。后端没有可用的 all 分页接口，
+    /// 所以客户端对每种类型各发一次，合并成一个列表。
+    /// - 每组各取 size 条；任一组还有下一页 → 整组 hasMore = true
+    func searchGrouped(query: String, types: [String], page: Int = 1, size: Int = 30) async throws -> SearchPage {
+        var collected: [SearchItem] = []
+        var anyMore = false
+        var total = 0
+        try await withThrowingTaskGroup(of: SearchPage.self) { group in
+            for t in types {
+                group.addTask { try await self.searchItems(query: query, type: t, page: page, size: size) }
+            }
+            for try await p in group {
+                collected.append(contentsOf: p.items)
+                if p.hasMore { anyMore = true }
+                if p.total > 0 { total += p.total }
+            }
+        }
+        return SearchPage(items: collected, total: total, hasMore: anyMore)
     }
 
     /// 分类计数（用于搜索页 Tab 角标），走独立 /totals 端点
@@ -659,6 +691,29 @@ private struct AlbumListResponse: Decodable {
 private struct SearchResponse: Decodable {
     let items: [SearchItem]
     let total: Int
+    /// 照片分支（Meili / LIKE 回退）会带 has_more；其余分支没有
+    let hasMore: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case items, total
+        case hasMore = "has_more"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        // ⚠️ type=all 返回的是分组 map，没有 items —— 返回空而不是让整批解码失败
+        items = (try? c.decode([SearchItem].self, forKey: .items)) ?? []
+        total = (try? c.decode(Int.self, forKey: .total)) ?? -1
+        hasMore = try? c.decodeIfPresent(Bool.self, forKey: .hasMore)
+    }
+}
+
+/// 一页搜索结果。total 可能是 -1（照片走 LIKE 回退 / Meili 估算不出来），
+/// 所以同时给出 hasMore 供翻页判断，别拿 total 直接比大小。
+struct SearchPage {
+    let items: [SearchItem]
+    let total: Int
+    let hasMore: Bool
 }
 
 /// /api/actions/status 的响应：states 里每项含 id / favorite / rating / position

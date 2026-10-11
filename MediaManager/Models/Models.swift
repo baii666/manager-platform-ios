@@ -718,10 +718,18 @@ struct ShortPool: Identifiable, Codable, Sendable, Hashable {
 }
 
 // MARK: - 搜索结果项
-// 对应 /api/search 返回的单条；type 区分 movie/series/album/photo/shoot 等
+// 对应 /api/search 返回的单条；type 区分 movie/tv/album/photo/shoot
+//
+// ⚠️⚠️ 后端各类型返回的字段差别极大，解码必须全部容错：
+//   · media（movie/tv）→ 有 title / type / year / rating / poster_image_id
+//   · 相册 photo_albums   → 只有 folder_name / display_name / cover_photo_id / photo_count，**没有 title、type**
+//   · 拍摄集 shoots       → 同上，也没有 title、type
+//   · 照片（Meili / LIKE）→ 只有 file_name / folder_path / has_thumb / album_id，**没有 title、type**
+// 用自动合成的 init(from:) 时，任何一个缺失的非 Optional 字段都会让整批结果解码失败
+//（表现为「搜索失败」或结果恒空），所以这里手写 decodeIfPresent 兜底。
 struct SearchItem: Identifiable, Codable, Sendable {
     let id: Int
-    var type: String = "movie"
+    var type: String = ""
     var title: String = ""
     var year: Int? = nil
     var rating: Double? = nil
@@ -729,15 +737,19 @@ struct SearchItem: Identifiable, Codable, Sendable {
     var libraryName: String? = nil
     var posterImageId: Int? = nil
     var coverPhotoId: Int? = nil
+    var coverPhotoIdPortrait: Int? = nil
     var hasThumb: Int? = nil
     var photoCount: Int? = nil
     var albumId: Int? = nil
     var folderName: String? = nil
     var displayName: String? = nil
+    var fileName: String? = nil
 
     var titleText: String {
         if !title.isEmpty { return title }
-        return displayName?.isEmpty == false ? displayName! : (folderName ?? "")
+        if let d = displayName, !d.isEmpty { return d }
+        if let f = folderName, !f.isEmpty { return f }
+        return fileName ?? ""
     }
 
     enum CodingKeys: String, CodingKey {
@@ -746,10 +758,60 @@ struct SearchItem: Identifiable, Codable, Sendable {
         case libraryName = "library_name"
         case posterImageId = "poster_image_id"
         case coverPhotoId = "cover_photo_id"
+        case coverPhotoIdPortrait = "cover_photo_id_portrait"
         case hasThumb = "has_thumb"
         case photoCount = "photo_count"
         case albumId = "album_id"
         case folderName = "folder_name"
         case displayName = "display_name"
+        case fileName = "file_name"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        // id 可能是 123 也可能是 123.0（Meili 文档里的数值），两种都接
+        if let v = try? c.decode(Int.self, forKey: .id) {
+            id = v
+        } else if let d = try? c.decode(Double.self, forKey: .id) {
+            id = Int(d)
+        } else if let s = try? c.decode(String.self, forKey: .id) {
+            id = Int(s) ?? 0
+        } else {
+            id = 0
+        }
+        type = (try? c.decodeIfPresent(String.self, forKey: .type)) ?? ""
+        title = (try? c.decodeIfPresent(String.self, forKey: .title)) ?? ""
+        year = SearchItem.decodeInt(c, .year)
+        rating = SearchItem.decodeDouble(c, .rating)
+        libraryId = SearchItem.decodeInt(c, .libraryId)
+        libraryName = try? c.decodeIfPresent(String.self, forKey: .libraryName)
+        posterImageId = SearchItem.decodeInt(c, .posterImageId)
+        coverPhotoId = SearchItem.decodeInt(c, .coverPhotoId)
+        coverPhotoIdPortrait = SearchItem.decodeInt(c, .coverPhotoIdPortrait)
+        hasThumb = SearchItem.decodeInt(c, .hasThumb)
+        photoCount = SearchItem.decodeInt(c, .photoCount)
+        albumId = SearchItem.decodeInt(c, .albumId)
+        folderName = try? c.decodeIfPresent(String.self, forKey: .folderName)
+        displayName = try? c.decodeIfPresent(String.self, forKey: .displayName)
+        fileName = try? c.decodeIfPresent(String.self, forKey: .fileName)
+    }
+
+    /// 数值字段在不同分支里可能是 Int / Double / String（"12"），统一兜一遍
+    private static func decodeInt(_ c: KeyedDecodingContainer<CodingKeys>, _ key: CodingKeys) -> Int? {
+        if let v = try? c.decode(Int.self, forKey: key) { return v }
+        if let d = try? c.decode(Double.self, forKey: key) { return Int(d) }
+        if let s = try? c.decode(String.self, forKey: key) { return Int(s) }
+        return nil
+    }
+
+    private static func decodeDouble(_ c: KeyedDecodingContainer<CodingKeys>, _ key: CodingKeys) -> Double? {
+        if let v = try? c.decode(Double.self, forKey: key) { return v }
+        if let s = try? c.decode(String.self, forKey: key) { return Double(s) }
+        return nil
+    }
+
+    /// 由调用方回填类型：相册/拍摄集/照片的返回里根本没有 type 字段
+    mutating func fillType(_ fallback: String) {
+        if type.isEmpty { type = fallback }
     }
 }
