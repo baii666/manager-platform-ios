@@ -75,6 +75,11 @@ struct RootView: View {
 struct BottomTabBar: View {
     @Binding var selection: RootTab
 
+    /// 底 bar 内容的宽度上限（四个 tab 在这条宽度里均分）。
+    /// iPad 横屏有 1000+pt，均分铺满的话图标相距 250pt 以上，视线来回跑；
+    /// 收到 360（每格 90）居中，既聚拢又不至于挤到「短视频」这种三字标签。
+    private static let maxContentWidth: CGFloat = 360
+
     var body: some View {
         // ⚠️ 别写死 spacing：三个 tab 时 44 还够，四个 tab 在窄屏（iPhone）上
         // 会挤出屏幕外。改成每格 maxWidth:.infinity 均分，tab 增减都不用调数字。
@@ -98,6 +103,11 @@ struct BottomTabBar: View {
                 .buttonStyle(.plain)
             }
         }
+        // 内容不铺满整屏：四个 tab 均分到 iPad 的宽屏上会散得很开，
+        // 限一个宽度上限并居中，让图标往中间聚拢。
+        // ⚠️ 用 maxWidth 而不是 width：屏幕比它更窄时（小屏 iPhone）自动退回铺满，
+        //    不会因为撑不下而溢出去。要再紧一点就把这个数字调小。
+        .frame(maxWidth: Self.maxContentWidth)
         .frame(maxWidth: .infinity)
         .frame(height: 52)  // 标准 tab bar 高度，不厚
         .padding(.horizontal, 8)
