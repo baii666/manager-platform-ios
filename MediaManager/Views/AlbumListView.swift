@@ -182,7 +182,10 @@ struct AlbumListView: View {
         VStack(spacing: 0) {
             // 顶部状态栏（独立、美观）
             VStack(spacing: 10) {
-                ListSearchBar(text: $viewModel.searchText, placeholder: "搜索相册名…")
+                // 跨库模式（首页 sheet 打开、导航栏仍在）没有上一层，不显示返回按钮
+                ListSearchRow(text: $viewModel.searchText,
+                              placeholder: "搜索相册名…",
+                              showsBackButton: library != nil)
                 HStack(spacing: 8) {
                     // 库名（从导航栏挪到这里）
                     Text(library?.name ?? "相册")

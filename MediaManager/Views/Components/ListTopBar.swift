@@ -39,6 +39,45 @@ struct ListSearchBar: View {
     }
 }
 
+// MARK: - 搜索框行：左侧返回按钮
+// 列表页隐藏了导航栏，就没有系统返回按钮。这里在搜索框左侧补一个同样作用的入口。
+//
+// ⚠️ 点击只调 dismiss()，转场完全交给系统的 pop —— 不做任何自定义动画。
+// 效果是露出**真实的上一层**并带视差，和从电影详情页返回列表一模一样。
+// 右滑手势（下方 EdgePopGestureModifier）照旧可用，两条路径是同一个转场。
+struct ListBackButton: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        Button {
+            dismiss()
+        } label: {
+            Image(systemName: "chevron.left")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(Theme.brand)
+                .frame(width: 26, height: 32)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("返回")
+    }
+}
+
+/// 搜索框 + 左侧返回按钮。三个列表页共用，省得各自拼 HStack。
+struct ListSearchRow: View {
+    @Binding var text: String
+    var placeholder: String = "搜索…"
+    /// 是否显示返回按钮。跨库模式（首页 sheet 打开、导航栏仍在）不需要 —— 它没有上一层。
+    var showsBackButton = true
+
+    var body: some View {
+        HStack(spacing: 8) {
+            if showsBackButton { ListBackButton() }
+            ListSearchBar(text: $text, placeholder: placeholder)
+        }
+    }
+}
+
 /// 胶囊工具按钮：图标 + 文字；高亮态用品牌色浅底
 struct ToolChip: View {
     let label: String

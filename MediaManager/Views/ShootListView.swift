@@ -19,7 +19,7 @@ struct ShootListView: View {
         VStack(spacing: 0) {
             // 顶部状态栏：搜索框第一行，工具行第二行（库名从导航栏挪到这里）
             VStack(spacing: 10) {
-                ListSearchBar(text: $viewModel.searchText, placeholder: "搜索拍摄集…")
+                ListSearchRow(text: $viewModel.searchText, placeholder: "搜索拍摄集…")
                 HStack(spacing: 8) {
                     Text(library?.name ?? "拍摄集")
                         .font(.subheadline.weight(.semibold))

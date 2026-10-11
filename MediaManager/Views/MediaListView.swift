@@ -183,7 +183,7 @@ struct MediaListView: View {
         VStack(spacing: 0) {
             // 顶部状态栏（独立、美观）
             VStack(spacing: 10) {
-                ListSearchBar(text: $viewModel.searchText, placeholder: "搜索标题、演员、类型…")
+                ListSearchRow(text: $viewModel.searchText, placeholder: "搜索标题、演员、类型…")
                 HStack(spacing: 8) {
                     // 库名（从导航栏挪到这里）
                     Text(library?.name ?? (type == "tv" ? "剧集" : "电影"))
