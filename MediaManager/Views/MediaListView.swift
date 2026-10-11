@@ -235,21 +235,19 @@ struct MediaListView: View {
         // 而且没有任何可靠手段能单独把手势取回来（自定义位移会白屏，
         // UIKit 桥接在这个场景下也接管不了转场）。样式只能走 tint / appearance。
         .toolbar {
-            ToolbarItem(placement: .principal) {
-                ListSearchBar(text: $viewModel.searchText,
-                              placeholder: "搜索标题、演员、类型…",
-                              compact: true)
-            }
-            .withoutGlass()
+            // 靠左 + 固定宽度（ListSearchBarItem.width），三个列表页共用同一个组件
+            ListSearchBarItem(text: $viewModel.searchText, placeholder: "搜索标题、演员、类型…")
             // 原来网格上方的工具行整行收进导航栏，页面只剩导航栏一行
             ToolbarItemGroup(placement: .topBarTrailing) {
                 Text(library?.name ?? (type == "tv" ? "剧集" : "电影"))
                     .font(.subheadline.weight(.semibold))
                     .lineLimit(1)
                 sortMenu
+                // 只留图标：图标本身够直观，省下的宽度留给搜索框
                 ToolChip(label: layout.landscape ? "横版" : "竖版",
                          icon: layout.landscape ? "rectangle" : "rectangle.portrait",
-                         highlighted: layout.landscape) {
+                         highlighted: layout.landscape,
+                         iconOnly: true) {
                     layout.toggleOrientation()
                 }
                 // 固定库模式不显示库筛选（只有一个库）

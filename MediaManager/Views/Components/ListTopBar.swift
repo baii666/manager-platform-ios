@@ -65,12 +65,40 @@ extension ToolbarContent {
     }
 }
 
+// MARK: - 导航栏里的搜索框（三个列表页共用，保证宽度和位置一致）
+//
+// 用 .topBarLeading 而不是 .principal：principal 是居中的，左边留一大块空，
+// 而且宽度会被两侧的按钮挤来挤去，三个页面各不一样。
+// 放 leading 就紧跟在系统返回按钮右边，宽度写死 —— 切页面时搜索框不跳位。
+//
+// ⚠️ 封装成 ToolbarContent 而不是在各页各写一遍 ToolbarItem：
+// 宽度是常量，改一处三个页面同时生效，不会再出现「这个页面的搜索框短一点」。
+struct ListSearchBarItem: ToolbarContent {
+    @Binding var text: String
+    var placeholder: String = "搜索…"
+
+    /// 固定宽度。想要更长/更短只改这一个数字。
+    static let width: CGFloat = 280
+
+    var body: some ToolbarContent {
+        ToolbarItem(placement: .topBarLeading) {
+            ListSearchBar(text: $text, placeholder: placeholder, compact: true)
+                // ⚠️ 固定宽度而非 maxWidth：工具栏空间不足时会被压缩，
+                // 但有了确定值至少三个页面压出来是同一个长度
+                .frame(width: Self.width)
+        }
+        .withoutGlass()
+    }
+}
+
 /// 纯文字/图标工具按钮（不带任何背景）。高亮态改用文字颜色 + 字重表达，
 /// ⚠️ 不再自己画胶囊底：放进导航栏后系统还会再套一层玻璃底，两层叠一起很难看。
 struct ToolChip: View {
     let label: String
     var icon: String? = nil
     var highlighted: Bool = false
+    /// 只显示图标、不显示文字（横竖版切换这类图标本身够直观的按钮）
+    var iconOnly: Bool = false
     var action: () -> Void
 
     var body: some View {
@@ -78,10 +106,12 @@ struct ToolChip: View {
             HStack(spacing: 5) {
                 if let icon {
                     Image(systemName: icon)
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.system(size: iconOnly ? 14 : 12, weight: .semibold))
                 }
-                Text(label)
-                    .font(.caption.weight(highlighted ? .semibold : .medium))
+                if !iconOnly {
+                    Text(label)
+                        .font(.caption.weight(highlighted ? .semibold : .medium))
+                }
             }
             .foregroundStyle(highlighted ? Theme.brand : Color.secondary)
             .padding(.horizontal, 6)
@@ -89,6 +119,8 @@ struct ToolChip: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        // 只剩图标时文字没了，读屏和长按提示得补上
+        .accessibilityLabel(label)
     }
 }
 
