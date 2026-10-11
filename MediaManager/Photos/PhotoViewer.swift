@@ -78,7 +78,7 @@ struct PhotoViewerView: View {
             let safe = geo.safeAreaInsets
             // 缩略图条展开时：条直接贴顶盖住顶栏（黑底不透明，计数/关闭本就被挡住），
             // 图片紧贴条下方，不再额外让出「顶栏 + 状态栏」的黑边
-            let topReserve: CGFloat = showThumbs ? 60 : 0
+            let topReserve: CGFloat = showThumbs ? 72 : 0
             let imageSize = CGSize(width: geo.size.width, height: geo.size.height - topReserve)
 
             // ⚠️ 对齐 .top：ZStack 默认居中会让 imageLayer（高=全屏-topReserve）顶边落在
@@ -865,7 +865,7 @@ struct PhotoViewerView: View {
                             imagePixelSize = nil
                         } label: {
                             ViewerThumb(url: entry.photo.thumbURL ?? entry.photo.fullURL)
-                                .frame(width: 52, height: 52)
+                                .frame(width: 64, height: 64)
                                 .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                                 .overlay {
                                     RoundedRectangle(cornerRadius: 6, style: .continuous)
@@ -881,7 +881,7 @@ struct PhotoViewerView: View {
                 .padding(.vertical, 4)
             }
             .frame(maxWidth: .infinity)
-            .frame(height: 60)  // ⚠️ 固定高度：ScrollView 在 overlay 里会被提议全屏高，不加就会撑满、纯黑背景盖住图片/按钮并吃掉点击
+            .frame(height: 72)  // ⚠️ 固定高度：ScrollView 在 overlay 里会被提议全屏高，不加就会撑满、纯黑背景盖住图片/按钮并吃掉点击
             .background(Color.black)  // 纯黑不透明，避免半透明蒙层透出底图
             .onAppear { scrollStrip(proxy) }
             .onChange(of: index) { _, _ in scrollStrip(proxy) }
