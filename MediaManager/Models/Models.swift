@@ -350,6 +350,71 @@ struct Photo: Identifiable, Codable, Sendable {
     }
 }
 
+// MARK: - 图片详情（看图器信息卡片）
+// 对应 GET /api/photo/:id 返回的 photo 对象。字段全可选：后端只在 EXIF/AI 标注存在时才返回对应键。
+struct PhotoDetail: Identifiable, Decodable, Sendable {
+    let id: Int
+    var fileName: String = ""
+    var filePath: String = ""
+    var hasThumb: Bool = false
+    var folderName: String? = nil
+    var fileSize: Int64? = nil
+    var width: Int? = nil
+    var height: Int? = nil
+    var library: LibraryRef? = nil
+    var album: AlbumRef? = nil
+    var takenAt: String? = nil
+    var cameraMake: String? = nil
+    var cameraModel: String? = nil
+    var focalLength: Double? = nil
+    var aperture: Double? = nil
+    var iso: Int? = nil
+    var gpsLat: Double? = nil
+    var gpsLng: Double? = nil
+    var aestheticScore: Double? = nil
+    var aiCaption: String? = nil
+    var captionAt: String? = nil
+
+    enum CodingKeys: String, CodingKey {
+        case id, width, height, iso, library, album
+        case fileName = "file_name"
+        case filePath = "file_path"
+        case hasThumb = "has_thumb"
+        case folderName = "folder_name"
+        case fileSize = "file_size"
+        case takenAt = "taken_at"
+        case cameraMake = "camera_make"
+        case cameraModel = "camera_model"
+        case focalLength = "focal_length"
+        case aperture
+        case gpsLat = "gps_lat"
+        case gpsLng = "gps_lng"
+        case aestheticScore = "aesthetic_score"
+        case aiCaption = "ai_caption"
+        case captionAt = "caption_at"
+    }
+
+    /// 所属媒体库（后端返回 {id, name, type}）
+    struct LibraryRef: Decodable, Sendable {
+        let id: Int
+        let name: String
+        let type: String
+    }
+
+    /// 所属相册（后端返回 {id, photo_count, folder_name}）
+    struct AlbumRef: Decodable, Sendable {
+        let id: Int
+        let photoCount: Int?
+        let folderName: String?
+
+        enum CodingKeys: String, CodingKey {
+            case id
+            case photoCount = "photo_count"
+            case folderName = "folder_name"
+        }
+    }
+}
+
 // MARK: - 任务进度（SSE 推送）
 // 后端扫描/转码等后台任务通过 text/event-stream 推送进度
 struct TaskProgress: Identifiable, Sendable {

@@ -310,6 +310,12 @@ final class APIClient: DataProviding, @unchecked Sendable {
         return resp.items.map { resolvePhoto($0) }
     }
 
+    /// 图片详情（看图器信息卡片）。GET /api/photo/:id → {photo:{...}}
+    func fetchPhotoDetail(id: Int) async throws -> PhotoDetail {
+        let resp: PhotoDetailResponse = try await request("/api/photo/\(id)")
+        return resp.photo
+    }
+
     func search(query: String) async throws -> [UnifiedAsset] {
         // ⚠️ 别再请求 type=all：后端 all 分支返回的是分组 map
         //（{movie:[...], tv:[...], album:[...], shoot:[...], library:[...]}），
@@ -695,6 +701,11 @@ private struct ActionAck: Decodable {
 
 private struct ItemsResponse<T: Decodable>: Decodable {
     let items: [T]
+}
+
+/// GET /api/photo/:id 的响应：photo 对象挂在 photo 键下
+private struct PhotoDetailResponse: Decodable {
+    let photo: PhotoDetail
 }
 
 /// /api/actions/list 的响应：items + total（分页列表要 total 才知道还有没有下一页）
