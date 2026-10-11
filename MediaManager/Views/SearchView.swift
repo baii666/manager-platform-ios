@@ -40,15 +40,23 @@ struct SearchView: View {
     @State private var isSemantic = true
     /// 语义结果按 id 存相似度，供卡片角标显示
     @State private var similarity: [Int: Double] = [:]
-    /// 本轮语义匹配**新增**进来的照片条数（去重后）。
-    /// 顶栏总数是「关键词命中 + 语义命中」，翻页时不能把它算丢
-    @State private var semanticAdded = 0
+    /// 语义匹配单独存一份，**不混进 results**。
+    /// ⚠️ 它是异步回来的（CLIP 推理比关键词搜索慢得多），关键词结果先渲染，
+    /// 语义结果到了再追加到最后一组 / 最后一段。
+    @State private var semanticItems: [SearchItem] = []
+    /// 语义请求在飞（用于最后一组显示「匹配中」占位）
+    @State private var isSemanticLoading = false
+    @State private var semanticTask: Task<Void, Never>?
     /// 真正拿去请求的词（防抖后写入），避免每敲一个字都打接口
     @State private var activeQuery = ""
     @State private var selectedTab: Tab = .all
+    /// 关键词命中的结果（不含语义）
     @State private var results: [SearchItem] = []
     @State private var totals: [String: Int] = [:]
-    /// 服务端回的**总匹配数**（顶栏「已加载 / 总数」的右边那个数）。
+    /// 关键词搜索响应里的 total。语义是异步追加的，回来后要把它加回去，
+    /// 所以这个中间值得单独留着
+    @State private var keywordTotal = 0
+    /// 服务端回的**总匹配数**（顶栏「已加载 / 总数」的右边那个数）= 关键词 total + 语义条数。
     /// ⚠️ 独立于 totals：totals 是 /search/totals 按类型给的（给分类胶囊用），
     /// 这个是搜索响应自带的 total，跟列表页的 totalCount 同源。
     @State private var resultTotal = 0
@@ -179,7 +187,7 @@ struct SearchView: View {
                 // 「已加载 / 总数」，列表页顶栏同款：等宽数字 + 固定槽位 + 与按钮分组的间隔。
                 // ⚠️ 同样只在宽屏显示：窄屏这一行已经很挤（iPhone 排版后续统一适配）
                 if hSizeClass == .regular, !activeQuery.isEmpty {
-                    Text("\(results.count) / \(currentTotal)")
+                    Text("\(loadedCount) / \(currentTotal)")
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
                         // ⚠️ 不加 fixedSize：工具栏空间紧张时 Text 会被压缩换行，
@@ -234,17 +242,23 @@ struct SearchView: View {
     @MainActor
     private func clearAll() {
         searchTask?.cancel()
+        semanticTask?.cancel()
         query = ""
         activeQuery = ""
         results = []
         totals = [:]
+        keywordTotal = 0
         resultTotal = 0
-        semanticAdded = 0
+        semanticItems = []
+        isSemanticLoading = false
         similarity = [:]
         page = 1
         hasMore = false
         errorMessage = nil
     }
+
+    /// 顶栏「已加载 / 总数」的左边那个数：关键词结果 + 异步追加的语义结果
+    private var loadedCount: Int { results.count + semanticItems.count }
 
     /// 顶栏「已加载 / 总数」的右边那个数。
     /// ⚠️ 优先用搜索响应自带的 total（和列表页 totalCount 同源）；后端没给（0，
@@ -302,7 +316,7 @@ struct SearchView: View {
                 .frame(maxWidth: .infinity, minHeight: 300)
         } else if activeQuery.isEmpty {
             historyList
-        } else if results.isEmpty && !isLoading {
+        } else if results.isEmpty && semanticItems.isEmpty && !isLoading && !isSemanticLoading {
             ContentUnavailableView("没有匹配结果", systemImage: "tray")
                 .frame(maxWidth: .infinity, minHeight: 300)
         } else if selectedTab == .all {
@@ -374,27 +388,43 @@ struct SearchView: View {
                                     .foregroundStyle(.secondary)
                             }
                             Spacer()
-                            Button {
-                                selectTab(targetTab(section))
-                            } label: {
-                                Text("查看全部").font(.caption)
+                            // 语义组还没回来时不给「查看全部」：点了会跳到空的照片页
+                            if !(section.isSemantic && section.items.isEmpty) {
+                                Button {
+                                    selectTab(targetTab(section))
+                                } label: {
+                                    Text("查看全部").font(.caption)
+                                }
                             }
                         }
                         .padding(.horizontal, 16)
 
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            LazyHStack(spacing: 12) {
-                                ForEach(section.items) { item in
-                                    // 照片在浏览页是瀑布流（UIKit 组件），横滑预览里
-                                    // 用同款圆角方块缩略图，观感保持一致
-                                    if item.type == "photo" {
-                                        SearchPhotoThumb(photo: makeBadgedPhoto(item)) { route(item) }
-                                    } else {
-                                        resultCard(item, width: SearchView.previewCardWidth)
+                        if section.items.isEmpty {
+                            // 只有语义组会出现在这里：它异步在跑，先占位说明「还在匹配」
+                            HStack(spacing: 8) {
+                                ProgressView().controlSize(.small)
+                                Text("正在按画面内容匹配…")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .frame(height: SearchView.previewCardWidth)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 16)
+                        } else {
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                LazyHStack(spacing: 12) {
+                                    ForEach(section.items) { item in
+                                        // 照片在浏览页是瀑布流（UIKit 组件），横滑预览里
+                                        // 用同款圆角方块缩略图，观感保持一致
+                                        if item.type == "photo" {
+                                            SearchPhotoThumb(photo: makeBadgedPhoto(item)) { route(item) }
+                                        } else {
+                                            resultCard(item, width: SearchView.previewCardWidth)
+                                        }
                                     }
                                 }
+                                .padding(.horizontal, 16)
                             }
-                            .padding(.horizontal, 16)
                         }
                     }
                 }
@@ -424,72 +454,92 @@ struct SearchView: View {
         return p
     }
 
-    /// 语义命中的照片。**单独一组**展示，不并进关键词命中的照片里
+    /// 语义命中的照片。**单独一组**展示，不并进关键词命中的照片里。
+    /// ⚠️ 来源是 semanticItems（异步回来的那份），不在 results 里
     private var semanticPhotos: [Photo] {
-        results.filter { $0.semanticHit && $0.type == "photo" }.map { makeBadgedPhoto($0) }
+        semanticItems.map { makeBadgedPhoto($0) }
     }
 
-    /// 关键词命中的照片（已排除语义项，避免两组重复出现同一张）
+    /// 关键词命中的照片
     private var keywordPhotos: [Photo] {
-        results.filter { $0.type == "photo" && !$0.semanticHit }.map { makeBadgedPhoto($0) }
+        results.filter { $0.type == "photo" }.map { makeBadgedPhoto($0) }
     }
 
-    /// 看图器的数据源：两类照片合起来，语义的排前面（与页面上的顺序一致）
-    private var viewerPhotos: [Photo] { semanticPhotos + keywordPhotos }
+    /// 看图器的数据源：关键词在前、语义在后（与页面上的顺序一致）
+    private var viewerPhotos: [Photo] { keywordPhotos + semanticPhotos }
 
-    /// 照片分类下同样**分两段**：语义匹配（上面一行横滑）+ 关键词命中（下面瀑布流）。
+    /// 照片分类下同样**分两段**：关键词命中（瀑布流）在上，
+    /// 语义匹配（下面一行横滑）放最后 —— 它异步回来得慢，不挡主结果。
     /// ⚠️ PhotoGrid 是 UICollectionView，没有 intrinsicContentSize，
     /// 必须由外层给定尺寸（GeometryReader 量剩下的空间），否则高度为 0
     private var photoResults: some View {
-        let semantic = semanticPhotos
         let photos = keywordPhotos
+        let semantic = semanticPhotos
+        let showSemantic = !semantic.isEmpty || isSemanticLoading
         return GeometryReader { geo in
             VStack(spacing: 0) {
-                if !semantic.isEmpty {
-                    semanticStrip(semantic)
-                        .frame(height: Self.semanticStripHeight)
-                }
                 PhotoGrid(photos: photos,
                           columns: photoColumns(width: geo.size.width),
                           onSelect: { openViewer(photos: viewerPhotos, id: $0.id) },
                           onReachEnd: { Task { await loadMore() } })
                     .frame(width: geo.size.width,
-                           height: max(geo.size.height - (semantic.isEmpty ? 0 : Self.semanticStripHeight), 200))
+                           height: max(geo.size.height - (showSemantic ? Self.semanticStripHeight : 0), 200))
+                if showSemantic {
+                    semanticStrip(semantic)
+                        .frame(height: Self.semanticStripHeight)
+                }
             }
         }
     }
 
-    /// 照片分类里语义段占的高度（标题 + 缩略图一行）。
+    /// 照片分类里语义段占的高度（分隔线 + 标题 + 缩略图一行）。
     /// ⚠️ 瀑布流要减掉它，否则整个 VStack 会超出屏幕一截
     private static let semanticStripHeight: CGFloat = 190
 
-    /// 语义段：与「全部」里那个语义分组同款（sparkles 标题 + 横滑缩略图 + 相似度角标）
+    /// 语义段：与「全部」里那个语义分组同款（sparkles 标题 + 横滑缩略图 + 相似度角标）。
+    /// 结果还没回来时显示「匹配中」占位 —— 它慢，但位置先占住，不会突然插进来把页面顶一下
     private func semanticStrip(_ photos: [Photo]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
+            Divider()
             HStack(spacing: 6) {
                 Image(systemName: "sparkles")
                     .font(.caption)
                     .foregroundStyle(Color.purple)
                 Text("语义匹配")
                     .font(.subheadline.weight(.semibold))
-                Text("\(photos.count)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if photos.isEmpty {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Text("\(photos.count)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 Spacer()
             }
             .padding(.horizontal, 16)
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: 12) {
-                    ForEach(photos) { p in
-                        SearchPhotoThumb(photo: p, size: Self.previewCardWidth) {
-                            openViewer(photos: viewerPhotos, id: p.id)
+            if photos.isEmpty {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("正在按画面内容匹配…")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(height: Self.previewCardWidth)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(spacing: 12) {
+                        ForEach(photos) { p in
+                            SearchPhotoThumb(photo: p, size: Self.previewCardWidth) {
+                                openViewer(photos: viewerPhotos, id: p.id)
+                            }
                         }
                     }
+                    .padding(.horizontal, 16)
                 }
-                .padding(.horizontal, 16)
             }
         }
-        .padding(.top, 8)
     }
 
     /// 列数随宽度走：窄屏 3 列，宽屏逐步加密（对齐相册照片页的观感）
@@ -624,21 +674,23 @@ struct SearchView: View {
         return Tab(rawValue: section.type) ?? .all
     }
 
-    /// 把混合结果按类型归组（后端按请求顺序返回，顺序是乱的）。
-    /// ⚠️ 语义命中的照片**单独成一组**排最前：它们靠画面内容匹配上，
-    /// 混进「照片」组里用户分不清哪张是为什么出现的。
+    /// 把关键词结果按类型归组（后端按请求顺序返回，顺序是乱的）。
+    /// ⚠️ 语义命中的照片**单独成一组，排最后**：它异步回来得慢，
+    /// 放最后既不挡前面的结果，也不会在追加时把上面的组顶下去。
     private var sections: [ResultSection] {
-        let order = ["semantic", "movie", "tv", "album", "photo", "shoot"]
+        let order = ["movie", "tv", "album", "photo", "shoot"]
         var map: [String: [SearchItem]] = [:]
-        for item in results {
-            let key = item.semanticHit ? "semantic" : item.type
-            map[key, default: []].append(item)
-        }
-        return order.compactMap { t in
+        for item in results { map[item.type, default: []].append(item) }
+        var list = order.compactMap { t in
             guard let items = map[t], !items.isEmpty else { return nil }
-            let count = t == "semantic" ? items.count : (totals[t] ?? 0)
-            return ResultSection(type: t, items: items, count: count)
+            return ResultSection(type: t, items: items, count: totals[t] ?? 0)
         }
+        // 语义组：结果到了就有，还在跑就先给个占位组（告诉用户后面还有东西）
+        if !semanticItems.isEmpty || isSemanticLoading {
+            list.append(ResultSection(type: "semantic", items: semanticItems,
+                                      count: semanticItems.count))
+        }
+        return list
     }
 
     /// 进入时处理首页带过来的初始词。没带词就自动聚焦键盘，省一次点击。
@@ -674,7 +726,9 @@ struct SearchView: View {
         activeQuery = q
         selectedTab = .all
         guard !q.isEmpty else {
-            results = []; totals = [:]; resultTotal = 0; similarity = [:]; return
+            results = []; totals = [:]; resultTotal = 0; similarity = [:]
+            semanticTask?.cancel(); semanticItems = []; isSemanticLoading = false
+            return
         }
         SearchHistoryStore.add(q)
         history = SearchHistoryStore.load()
@@ -691,6 +745,8 @@ struct SearchView: View {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         if !q.isEmpty { activeQuery = q }
         searchTask?.cancel()
+        // 语义是异步的，换条件时它在飞的那次也一并作废（reload 里会清空结果）
+        semanticTask?.cancel()
         searchTask = Task { await reload() }
     }
 
@@ -703,9 +759,13 @@ struct SearchView: View {
         }
         errorMessage = nil
         page = 1; hasMore = true; results = []; similarity = [:]
+        // 换词了，语义那一组也整个作废（旧词的语义结果不能留在新词下面）
+        semanticTask?.cancel()
+        semanticItems = []
+        isSemanticLoading = false
         // 换词了，总数也得跟着重来（否则新词第一页会顶着上一个词的总数）
+        keywordTotal = 0
         resultTotal = 0
-        semanticAdded = 0
         // 分类计数（/totals 有 5s 服务端缓存，切 Tab 不会重复打爆）
         do { totals = try await client.searchTotals(query: token) } catch { totals = [:] }
         // 计数回来期间词可能已经换了（或这次任务被取消了），别再往下翻页
@@ -733,25 +793,16 @@ struct SearchView: View {
                 query: token, types: selectedTab.requestTypes, page: page, size: size)
             // 结果回来时词已经换了 / 任务被取消 → 整批丢弃，不能往列表里写
             guard !Task.isCancelled, token == activeQuery else { return }
-            // 语义匹配是**附加项**：只跟第一页一起取一次，单独成一组展示。
-            // ⚠️ 不再走「语义模式」那条互斥分支 —— 那样一点语义按钮，
-            // 影视/相册/拍摄集的结果就全没了（用户明确不要这个行为）。
-            // ⚠️ 也**不并入照片组**：两者命中方式不同，混在一起说不清哪张是靠画面匹配的。
-            let semanticItems = await fetchSemantic(client: client, token: token, existing: p.items)
-            guard !Task.isCancelled, token == activeQuery else { return }
-            var items = p.items
-            if page == 1 {
-                semanticAdded = semanticItems.count
-                // 语义项插在最前：分组展示时它们会被拎进独立的「语义匹配」组，
-                // 那一组排在「全部」页的第一位
-                items = semanticItems + items
-            }
-            if page == 1 { results = items } else { results.append(contentsOf: items) }
-            // searchGrouped 已经把各类型的 total 加过了，语义新增的条数补在后面，
-            // 否则顶栏会出现「38 / 30」这种加载数大于总数的倒挂
-            resultTotal = p.total + semanticAdded
+            let isFirstPage = (page == 1)
+            if isFirstPage { results = p.items } else { results.append(contentsOf: p.items) }
+            keywordTotal = p.total
+            resultTotal = keywordTotal + semanticItems.count
             page += 1
             hasMore = selectedTab == .all ? false : p.hasMore
+            // 语义匹配（CLIP 推理）明显比关键词搜索慢，**异步**跑：
+            // 关键词结果先落地渲染，语义结果到了再追加到最后一组 / 最后一段，
+            // 不让慢的那一路拖住整页出结果。
+            if isFirstPage { startSemantic(token: token) }
         } catch {
             // 旧词的报错也不该弹在新结果上
             guard !Task.isCancelled, token == activeQuery else { return }
@@ -768,27 +819,47 @@ struct SearchView: View {
     /// · 失败一律静默（服务端没加载 CLIP 会返回 503），
     ///   绝不能让语义不可用把关键词搜索的结果也拖没了。
     @MainActor
-    private func fetchSemantic(client: APIClient, token: String, existing: [SearchItem]) async -> [SearchItem] {
-        guard isSemantic, page == 1, (selectedTab == .all || selectedTab == .photo) else { return [] }
-        // 「全部」只是总览，语义别取太多，免得照片组一家独大
-        let limit = selectedTab == .all ? 12 : pageSize
-        guard let p = try? await client.semanticSearch(query: token, limit: limit, offset: 0) else { return [] }
-        var map = similarity
-        for r in p.results { map[r.id] = r.similarity ?? 0 }
-        similarity = map
-        // 去重：文件名里本来就带关键词的照片，两边都会命中，只留一条。
-        // ⚠️ key 带 type：不同类型之间的 id 是各表自增的，会撞号
-        var seen = Set(existing.map { "\($0.type)-\($0.id)" })
-        var added: [SearchItem] = []
-        for var item in p.results.map({ makeSearchItem($0) }) {
-            let key = "\(item.type)-\(item.id)"
-            guard !seen.contains(key) else { continue }
-            seen.insert(key)
-            // 打标记：分组时靠它把语义结果单独拎出来成一组，不混进「照片」组
-            item.semanticHit = true
-            added.append(item)
+    private func startSemantic(token: String) {
+        guard let client, isSemantic,
+              selectedTab == .all || selectedTab == .photo else { return }
+        semanticTask?.cancel()
+        isSemanticLoading = true
+        semanticTask = Task { @MainActor in
+            // 「全部」只是总览，语义别取太多，免得这一组一家独大
+            let limit = selectedTab == .all ? 12 : pageSize
+            // ⚠️ 用 var + 初值：do/catch 两个分支都给 let 赋值，编译器会判「初始化两次」
+            var items: [SearchItem] = []
+            do {
+                let p = try await client.semanticSearch(query: token, limit: limit, offset: 0)
+                var map = similarity
+                for r in p.results { map[r.id] = r.similarity ?? 0 }
+                similarity = map
+                items = p.results.map { makeSearchItem($0) }
+            } catch {
+                // 静默：CLIP 没加载（503）不该把关键词结果变成错误态
+            }
+            // 慢请求，回来时可能已经换了词 / 切了分类 / 任务被取消
+            guard !Task.isCancelled else { return }
+            // 词换了：这批结果整个作废。⚠️ loading 标记不在这里关 ——
+            // 关掉的可能是**新词**那次请求的占位（它们共用同一个标记位），
+            // 交给 reload / clearAll 去清（每次开搜都会先置 false）
+            guard token == activeQuery else { return }
+            isSemanticLoading = false
+            // 去重放在写入这一刻：异步期间用户可能翻过页，results 已经不是原来那批了。
+            // ⚠️ key 带 type：不同类型之间的 id 是各表自增的，会撞号
+            var seen = Set(results.map { "\($0.type)-\($0.id)" })
+            var added: [SearchItem] = []
+            for var item in items {
+                let key = "\(item.type)-\(item.id)"
+                guard !seen.contains(key) else { continue }
+                seen.insert(key)
+                // 打标记：靠它把语义结果单独拎出来成一组，不混进「照片」组
+                item.semanticHit = true
+                added.append(item)
+            }
+            semanticItems = added
+            resultTotal = keywordTotal + added.count
         }
-        return added
     }
 
     // MARK: 路由
