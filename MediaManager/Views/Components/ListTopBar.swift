@@ -219,17 +219,23 @@ struct ToolSlider: View {
 
 // MARK: - 右滑返回
 // 列表页为了「搜索框贴顶」隐藏了导航栏，系统右滑返回手势会随之失效。
-// 这里用自定义手势补齐：向右滑时页面**跟手**移动，松手按「位移 + 甩动速度」
-// 判定是完成返回还是弹回原位 —— 比原来「松手才瞬间跳走」接近系统的手感。
 //
-// ⚠️ 为什么没能和详情页完全一致：详情页走的是系统 interactivePop，返回时左边缘
-// 露出的是**上一层页面**并带视差；这里我们只是把当前页整体位移，露出的多半是
-// 页面背景。要完全对齐只能恢复系统的 interactivePopGestureRecognizer（UIKit 桥接），
-// 但那依赖 NavigationStack 的内部行为、隐藏导航栏后能否稳定启用没把握，
-// 所以先用这套纯 SwiftUI 的跟手版，不引入不可控的 hack。
+// 两层方案，优先用系统的：
+// 1) 先用 NavigationPopGesture.swift 里的 UIKit 桥接把系统的
+//    interactivePopGestureRecognizer 请回来（换掉它「导航栏隐藏就禁用」的 delegate）。
+//    成功的话返回完全由 UINavigationController 接管：跟手、有视差、左边缘露出的是
+//    **真实的上一页** —— 和有导航栏的详情页一模一样。
+// 2) 桥接拿不到 UINavigationController 时才用这里的自定义 DragGesture 兜底。
+//    兜底版的已知缺陷：SwiftUI NavigationStack 在 push 后不再渲染下一层，
+//    所以滑动过程中露出的是容器背景，松手 pop 动画结束上一层才出现（观感是白屏 + 跳出）。
+//    这是纯 SwiftUI 无法弥补的，只能靠第 1 条解决。
 struct EdgePopGestureModifier: ViewModifier {
     var enabled: Bool = true
     @Environment(\.dismiss) private var dismiss
+
+    /// 系统手势是否已经接管。接管后自定义手势必须让位 ——
+    /// 两套手势同时响应会看到「页面跟着手指走一遍，系统又滑一遍」的重影。
+    @State private var systemPopActive = false
 
     /// 跟手位移。判定返回时**故意不清零** —— 留给系统的 pop 转场接手，
     /// 动画就能从手指松开的位置继续往右滑出去，中间不打断；自己再补一段动画
@@ -242,14 +248,34 @@ struct EdgePopGestureModifier: ViewModifier {
     private let commitDistance: CGFloat = 110
     /// 甩一下就返回：末速度预测位移超过这个值也算 —— 快速轻扫时手指位移未必够 110
     private let commitVelocity: CGFloat = 320
+    /// 系统边缘手势的起手区宽度
+    private let systemEdgeZone: CGFloat = 40
+
+    /// 这次拖动该不该由兜底手势处理。
+    /// 系统手势接管后，左边缘这一带让给它 —— 否则两套手势会同时响应，
+    /// 看到页面跟着手指走一遍、系统再滑一遍的重影。
+    private func shouldHandle(_ value: DragGesture.Value) -> Bool {
+        // 桥接没成功（拿不到 UINavigationController）→ 任意位置都得兜底，行为不变
+        guard systemPopActive else { return true }
+        return value.startLocation.x > systemEdgeZone
+    }
 
     func body(content: Content) -> some View {
         content
             .offset(x: offsetX)
+            // 0 尺寸探针：只为拿到本页所在的 UINavigationController。
+            // 不占布局、不拦事件（VC 内部也关了 userInteractionEnabled）。
+            .background(alignment: .topLeading) {
+                if enabled {
+                    SystemPopGestureEnabler(isActive: $systemPopActive)
+                        .frame(width: 1, height: 1)
+                        .allowsHitTesting(false)
+                }
+            }
             .simultaneousGesture(
                 DragGesture(minimumDistance: 12)
                     .onChanged { value in
-                        guard enabled else { return }
+                        guard enabled, shouldHandle(value) else { return }
                         let dx = value.translation.width
                         // 只认「向右且水平为主」：垂直滚列表、向左滑都不跟手
                         guard dx > 0, dx > abs(value.translation.height) else { return }
@@ -257,7 +283,7 @@ struct EdgePopGestureModifier: ViewModifier {
                         offsetX = dx
                     }
                     .onEnded { value in
-                        guard enabled, tracking else { return }
+                        guard enabled, tracking, shouldHandle(value) else { return }
                         tracking = false
                         let dx = value.translation.width
                         guard dx > 0, dx > abs(value.translation.height) else {
