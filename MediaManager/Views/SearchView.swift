@@ -33,11 +33,12 @@ struct SearchView: View {
     var semantic: Bool = false
 
     @State private var query = ""
-    /// **附带**语义匹配的开关（CLIP 以文搜图）。
-    /// ⚠️ 它不再是「模式」：语义结果只是普通搜索的**附加照片**，
-    /// 点了不会把影视/相册/拍摄集的结果清掉（用户明确要求）。默认开 ——
-    /// 执行一次搜索就顺带跑一遍语义匹配。
-    @State private var isSemantic = true
+    /// **当前是否在「语义」这个视图**（它就是第 6 个分类，点顶栏那个 sparkles 按钮切过来）。
+    /// ⚠️ 它不是一个「要不要附带语义」的开关：切过来就只看语义匹配到的照片，
+    /// 切回关键词分类（全部/影视/相册/照片/拍摄集）就只看那类结果 ——
+    /// 两个视图互斥，和其它分类按钮的用法完全一致。
+    /// 默认 false（一进来在「全部」）；关键词搜索仍会自动附带语义组，排在最后。
+    @State private var isSemantic = false
     /// 语义结果按 id 存相似度，供卡片角标显示
     @State private var similarity: [Int: Double] = [:]
     /// 语义匹配单独存一份，**不混进 results**。
@@ -154,8 +155,8 @@ struct SearchView: View {
             // 分类决定搜哪类、语义决定按不按画面搜，都复用同一条搜索链路。
             ToolbarItem(placement: .topBarLeading) {
                 HStack(spacing: 4) {
-                    // 分类胶囊组：始终可点。语义模式下点分类 = 自动退出语义、按该分类搜
-                    //（分类和语义互斥：语义只出照片，用户点了分类就是想按类型搜）。
+                    // 分类胶囊组：始终可点。
+                    // ⚠️ 在语义视图下点分类 = 切回关键词视图、按该分类搜（互斥的两个视图）。
                     // ⚠️ 之前试过语义模式下置灰，用户否了——后面的按钮都要能点、点了就搜。
                     if !activeQuery.isEmpty {
                         categoryChips
@@ -163,14 +164,16 @@ struct SearchView: View {
                             // fixedSize 让按钮文字保持完整，空间不足宁可溢出也不缩成空壳
                             .fixedSize(horizontal: true, vertical: false)
                     }
-                    // 语义开关：放在类别最后面（用户指定），紫 = 开。
+                    // 语义：**第 6 个分类**（放在类别最后面，用户指定）。
+                    // 点它和其它分类按钮完全一样 —— 切到语义这个视图、按当前词搜一次，
+                    // 结果区只展示语义匹配到的照片。回关键词结果就点前面的分类胶囊。
                     // ⚠️ 放最后一个是有讲究的：它在最右，自己变宽只往右扩，
-                    // 不会把前面的搜索按钮和分类胶囊推得左右挪。
+                    // 不会把前面的搜索框和分类胶囊推得左右挪。
                     // ⚠️ minWidth 钉死槽位：高亮态字重从 medium 变 semibold，
                     // 文字会宽那么一两个点，不给下限的话切换时整排会轻微抖一下。
                     ToolChip(label: "语义", icon: "sparkles", highlighted: isSemantic,
                              tintColor: isSemantic ? Color.purple : nil) {
-                        toggleSemantic()
+                        selectSemantic()
                     }
                     .frame(minWidth: 62)
                 }
@@ -179,11 +182,12 @@ struct SearchView: View {
             // 右侧整组：与列表页同一个 TrailingToolsItem，间距/高度由 ToolbarMetrics 统一
             TrailingToolsItem {
                 // 转圈：列表页同款槽位思路（固定宽度 + opacity），
-                // 出现/消失不会把左右的控件推着挪
+                // 出现/消失不会把左右的控件推着挪。
+                // ⚠️ 语义视图下没有关键词请求（只有 isSemanticLoading），要一起算进来
                 ProgressView()
                     .controlSize(.small)
                     .frame(width: 16)
-                    .opacity(isLoading ? 1 : 0)
+                    .opacity(isLoading || isSemanticLoading ? 1 : 0)
                 // 「已加载 / 总数」，列表页顶栏同款：等宽数字 + 固定槽位 + 与按钮分组的间隔。
                 // ⚠️ 同样只在宽屏显示：窄屏这一行已经很挤（iPhone 排版后续统一适配）
                 if hSizeClass == .regular, !activeQuery.isEmpty {
@@ -221,19 +225,21 @@ struct SearchView: View {
     /// 等 iPhone 适配时分类组会换形态（大概率挪回内容区或改成分段控件），再一起定。
     private static let compactFieldWidth: CGFloat = 170
 
-    /// 语义开关：只是决定「这次搜索要不要顺带跑语义匹配」。
-    /// 切完按当前词重搜一次 —— 关键词命中的结果始终都在，不会清掉（与分类按钮同一条链路）
+    /// 切到「语义」视图：和点任何一个分类胶囊是同一件事 ——
+    /// 标记当前视图 + 按当前词重搜一次，结果区只展示语义匹配到的照片。
+    /// ⚠️ 幂等：已经在语义视图时再点一次，就是原地重搜（和点已选中的分类胶囊一样）
     @MainActor
-    private func toggleSemantic() {
-        isSemantic.toggle()
+    private func selectSemantic() {
+        isSemantic = true
         if !activeQuery.isEmpty { startSearch() }
     }
 
     /// 切分类：就是一个普通的条件切换 + 重搜。
-    /// ⚠️ 不再动语义开关：语义结果只是附加的照片，和分类不互斥
-    ///（影视/相册/拍摄集分类下本来就不会去打语义请求）。
+    /// ⚠️ 顺带退出语义视图：语义和关键词是两个互斥视图，
+    /// 点了某个分类就是想看那类结果（点分类退出语义，是分类自己的用法，不是给语义开的分支）
     @MainActor
     private func selectTab(_ tab: Tab) {
+        isSemantic = false
         selectedTab = tab
         startSearch()
     }
@@ -277,7 +283,10 @@ struct SearchView: View {
     // ⚠️ 选中态保留胶囊底：ToolbarItem 加了 .withoutGlass()，iOS 26 那层共享玻璃底
     //    已经去掉了，再画一层底不会变成「两层圆弧」。
     private var categoryChips: some View {
-        HStack(spacing: 6) {
+        // ⚠️ 语义视图下整排胶囊都不高亮：当前展示的是语义结果，
+        // 不是任何一类关键词结果（高亮留着会让人以为看到的还是那一类）
+        let active: Tab? = isSemantic ? nil : selectedTab
+        return HStack(spacing: 6) {
             ForEach(Tab.allCases, id: \.self) { tab in
                 Button {
                     selectTab(tab)
@@ -294,13 +303,13 @@ struct SearchView: View {
                             // 数字再跟着变色整颗胶囊就太花了
                             .foregroundStyle(.secondary)
                     }
-                    .font(.subheadline.weight(selectedTab == tab ? .semibold : .regular))
+                    .font(.subheadline.weight(active == tab ? .semibold : .regular))
                     .padding(.horizontal, 12)
                     .padding(.vertical, 5)
-                    .background(selectedTab == tab ? Theme.brand.opacity(0.15) : Color.clear,
+                    .background(active == tab ? Theme.brand.opacity(0.15) : Color.clear,
                                 in: Capsule())
                     // 未选中用次级灰：跟顶栏其它工具（排序/库筛选）同一个色调
-                    .foregroundStyle(selectedTab == tab ? Theme.brand : Color.secondary)
+                    .foregroundStyle(active == tab ? Theme.brand : Color.secondary)
                 }
                 .buttonStyle(.plain)
             }
@@ -316,6 +325,9 @@ struct SearchView: View {
                 .frame(maxWidth: .infinity, minHeight: 300)
         } else if activeQuery.isEmpty {
             historyList
+        } else if isSemantic {
+            // 语义视图：只展示语义匹配到的照片（它自己管加载中 / 空态）
+            semanticResults
         } else if results.isEmpty && semanticItems.isEmpty && !isLoading && !isSemanticLoading {
             ContentUnavailableView("没有匹配结果", systemImage: "tray")
                 .frame(maxWidth: .infinity, minHeight: 300)
@@ -323,6 +335,28 @@ struct SearchView: View {
             groupedResults
         } else {
             flatResults
+        }
+    }
+
+    /// 语义视图的结果区：与「照片」分类同一套瀑布流，只是数据源换成语义命中的照片。
+    /// ⚠️ 语义请求慢（CLIP 推理），先给加载态，不要闪一下「没有结果」
+    @ViewBuilder
+    private var semanticResults: some View {
+        if semanticItems.isEmpty && isSemanticLoading {
+            VStack(spacing: 10) {
+                ProgressView()
+                Text("正在按画面内容匹配…")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, minHeight: 300)
+        } else if semanticItems.isEmpty {
+            ContentUnavailableView("没有语义匹配的照片", systemImage: "sparkles",
+                                   description: Text("按画面内容匹配，需要照片已完成 AI 分析；换个说法再试试。"))
+                .frame(maxWidth: .infinity, minHeight: 300)
+        } else {
+            // 复用「照片」分类那套瀑布流组件
+            photoGrid(semanticPhotos)
         }
     }
 
@@ -468,20 +502,29 @@ struct SearchView: View {
     /// 看图器的数据源：关键词在前、语义在后（与页面上的顺序一致）
     private var viewerPhotos: [Photo] { keywordPhotos + semanticPhotos }
 
-    /// 照片分类下同样**分两段**：关键词命中（瀑布流）在上，
-    /// 语义匹配（下面一行横滑）放最后 —— 它异步回来得慢，不挡主结果。
+    /// 照片瀑布流的裸组件。
     /// ⚠️ PhotoGrid 是 UICollectionView，没有 intrinsicContentSize，
     /// 必须由外层给定尺寸（GeometryReader 量剩下的空间），否则高度为 0
+    private func photoGrid(_ photos: [Photo]) -> some View {
+        GeometryReader { geo in
+            PhotoGrid(photos: photos,
+                      columns: photoColumns(width: geo.size.width),
+                      onSelect: { openViewer(photos: viewerPhotos, id: $0.id) },
+                      onReachEnd: { Task { await loadMore() } })
+                .frame(width: geo.size.width, height: geo.size.height)
+        }
+    }
+
+    /// 照片分类下同样**分两段**：关键词命中（瀑布流）在上，
+    /// 语义匹配（下面一行横滑）放最后 —— 它异步回来得慢，不挡主结果。
     private var photoResults: some View {
         let photos = keywordPhotos
         let semantic = semanticPhotos
         let showSemantic = !semantic.isEmpty || isSemanticLoading
         return GeometryReader { geo in
             VStack(spacing: 0) {
-                PhotoGrid(photos: photos,
-                          columns: photoColumns(width: geo.size.width),
-                          onSelect: { openViewer(photos: viewerPhotos, id: $0.id) },
-                          onReachEnd: { Task { await loadMore() } })
+                // 瀑布流：高度要扣掉下面语义段占的那一条
+                photoGrid(photos)
                     .frame(width: geo.size.width,
                            height: max(geo.size.height - (showSemantic ? Self.semanticStripHeight : 0), 200))
                 if showSemantic {
@@ -701,8 +744,8 @@ struct SearchView: View {
     private func applyInitial() {
         guard !didApplyInitial else { return }
         didApplyInitial = true
-        // 首页的语义开关**只在它打开时**同步过来：本页默认就附带语义匹配，
-        // 首页没开不代表这里要关（用户要的就是「执行一次搜索顺带跑语义」）
+        // 首页开着语义开关进来 → 直接落在「语义」这个 tab 上（它就是首页那个开关的意思）。
+        // 首页没开就停在「全部」：关键词搜索照样会自动附带语义组，排在最后
         if semantic { isSemantic = true }
         let q = initialQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else {
@@ -769,10 +812,18 @@ struct SearchView: View {
         // 换词了，总数也得跟着重来（否则新词第一页会顶着上一个词的总数）
         keywordTotal = 0
         resultTotal = 0
-        // 分类计数（/totals 有 5s 服务端缓存，切 Tab 不会重复打爆）
+        // 分类计数（/totals 有 5s 服务端缓存，切 Tab 不会重复打爆）。
+        // ⚠️ 语义视图下也打：胶囊上的计数要保持准确，点回某个分类时数字才是对的
         do { totals = try await client.searchTotals(query: token) } catch { totals = [:] }
         // 计数回来期间词可能已经换了（或这次任务被取消了），别再往下翻页
         guard !Task.isCancelled, token == activeQuery else { return }
+        if isSemantic {
+            // 语义视图：只跑语义那一路。关键词结果在这页一条都不展示，
+            // 再打一次关键词请求纯属浪费（还拖慢出结果的观感）
+            hasMore = false
+            startSemantic(token: token)
+            return
+        }
         await loadMore()
     }
 
@@ -814,25 +865,25 @@ struct SearchView: View {
         }
     }
 
-    /// 语义匹配（CLIP 以文搜图）拿回来的照片。
+    /// 语义匹配（CLIP 以文搜图）拿回来的照片，**异步**跑（它比关键词搜索慢得多）。
     ///
-    /// ⚠️ 它是**附加结果**而不是独立模式：
+    /// ⚠️ 两个用途，同一个请求：
+    /// · 语义视图（isSemantic）：它就是这一页的全部结果；
+    /// · 关键词视图：作为附加的一组 / 一段，排在最后（用户要「执行一次搜索顺带跑语义」）。
+    /// ⚠️ 其它约束：
     /// · 只在第一页取一次（不参与翻页，翻页交给关键词搜索那一套）；
-    /// · 只在「全部 / 照片」分类下打这个请求 —— 影视/相册/拍摄集没有向量；
+    /// · 影视/相册/拍摄集分类下不打（那几类没有向量）；
     /// · 失败一律静默（服务端没加载 CLIP 会返回 503），
     ///   绝不能让语义不可用把关键词搜索的结果也拖没了。
     @MainActor
     private func startSemantic(token: String) {
-        // ⚠️ all/photo 那个 || 必须加括号：&& 优先级高于 ||，
-        // 不加会解析成 (client && isSemantic && all) || photo，
-        // 而且 `guard let` 绑定不能只出现在 || 的一侧，编译器会直接报错
-        guard let client, isSemantic,
-              (selectedTab == .all || selectedTab == .photo) else { return }
+        // ⚠️ 括号不能省：&& 优先级高于 ||，而且 guard let 绑定不能只出现在 || 的一侧
+        guard let client, (isSemantic || selectedTab == .all || selectedTab == .photo) else { return }
         semanticTask?.cancel()
         isSemanticLoading = true
         semanticTask = Task { @MainActor in
-            // 「全部」只是总览，语义别取太多，免得这一组一家独大
-            let limit = selectedTab == .all ? 12 : pageSize
+            // 语义视图 / 照片分类取满一页；「全部」只是总览，少取一点免得这一组一家独大
+            let limit = (isSemantic || selectedTab != .all) ? pageSize : 12
             // ⚠️ 用 var + 初值：do/catch 两个分支都给 let 赋值，编译器会判「初始化两次」
             var items: [SearchItem] = []
             do {
