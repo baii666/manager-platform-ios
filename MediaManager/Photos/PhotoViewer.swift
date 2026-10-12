@@ -1188,7 +1188,7 @@ struct ViewerImageView: View {
             placeholder = ImageCache.shared.image(for: thumbURL)
         }
 
-        // 已决定退回缩略图：thumbURL 本身就是 400px 小图，直接普通加载
+        // 已决定退回缩略图：thumbURL 本身就是 600 标准缩略图（后端全局唯一档），直接普通加载
         if fallBackToThumb {
             guard let url = photo.thumbURL else { isLoading = false; return }
             if let cached = ImageCache.shared.image(for: url) {
