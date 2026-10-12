@@ -88,6 +88,13 @@ final class PhotoViewerPresenter: ObservableObject {
         if albumPageTarget == nil { statusBarHidden = false }
     }
 
+    /// 下拉**中途改主意**（改横滑翻页 / 松手回弹）时调：下层重新被黑底盖严，
+    /// 状态栏藏回去。与 beginDismiss 对称。
+    /// ⚠️ 同样要判断相册层：露的是相册层，状态栏全程保持隐藏。
+    func rehideStatusBar() {
+        if albumPageTarget == nil { statusBarHidden = true }
+    }
+
     /// 翻页时回写当前下标（看图器若被重建，能回到原来那张而不是最初打开的那张）
     func updateStartIndex(_ i: Int) { startIndex = i }
 

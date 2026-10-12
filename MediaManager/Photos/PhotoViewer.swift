@@ -38,6 +38,9 @@ struct PhotoViewerView: View {
     /// 关闭阶段整层的淡出系数：退出时看图器（含黑底）整体淡掉，
     /// 屏幕直接交还给上一级页面（照片网格），而不是让 cover 整层滑走。
     @State private var closingFade: Double = 1
+    /// 本次下拉是否已提前恢复状态栏。手指刚下拖的那一帧调一次（避免每帧写
+    /// @Published 触发 RootView 重算）；回弹/改横滑时置回 false 并藏回去。
+    @State private var statusBarRestored = false
 
     // 1:1 需要「图片像素尺寸」与「容器尺寸」
     @State private var imagePixelSize: CGSize?
@@ -219,11 +222,27 @@ struct PhotoViewerView: View {
                 let dy = value.translation.height
                 // 同网页版：水平权重 ×1.2，优先判为翻页
                 if abs(dx) * 1.2 >= abs(dy) {
+                    if dismissY != 0 {
+                        dismissY = 0
+                        // 拖到一半改横滑：下层重新被盖严，状态栏藏回去
+                        rehideStatusBar()
+                    }
                     trackOffset = dx
-                    dismissY = 0
                 } else {
+                    let wasFlat = dismissY == 0
                     dismissY = dy
                     trackOffset = 0
+                    // ⚠️ 状态栏必须在黑底还（几乎）不透明时就恢复 —— 这是
+                    // 「上层页面完全不动」的关键：backgroundOpacity 跟手渐隐，
+                    // 手指下滑全程下层页面就在逐渐透出；若等松手淡出才恢复，
+                    // 用户看到的是「页面一点点显形、头上没状态栏，松手后状态栏
+                    // 才滑入 + safe area 重排」= 页面动了一下。提前恢复后，
+                    // 下层页面（含状态栏、safe area 布局）在被看到之前就已处于
+                    // 最终形态，渐显时完全不动，只是被黑色揭开。
+                    if wasFlat && !statusBarRestored {
+                        statusBarRestored = true
+                        presenter.beginDismiss()
+                    }
                 }
             }
             .onEnded { value in
@@ -244,9 +263,19 @@ struct PhotoViewerView: View {
                 } else if abs(dy) > 150 {
                     close(after: dy)
                 } else {
+                    // 回弹：下层重新被盖严，状态栏藏回去（与手势中途改横滑对称）
                     withAnimation(Self.pageSpring) { dismissY = 0 }
+                    rehideStatusBar()
                 }
             }
+    }
+
+    /// 下拉中途改主意（横滑翻页 / 回弹）：下层重新被黑底盖严，状态栏藏回去。
+    /// 与 onChanged 里的提前恢复对称；全程发生在黑底不透明时，不可见。
+    private func rehideStatusBar() {
+        guard statusBarRestored else { return }
+        statusBarRestored = false
+        presenter.rehideStatusBar()
     }
 
     private var magnifyGesture: some Gesture {
@@ -355,7 +384,12 @@ struct PhotoViewerView: View {
             // 整层淡到 0：cover 真正 dismiss 时已经完全透明，
             // 屏幕上看到的就是上一级页面 —— 不会再出现「先黑/先白再跳一下」
             closingFade = 0
-            // 状态栏与淡出**同一时刻**恢复（RootView 按 presenter.statusBarHidden 控制）。
+            // 状态栏恢复。两条路径：
+            // ① 手势下滑：onChanged 第一帧就恢复了（那时黑底还几乎不透明，
+            //    下层页面的 safe area 重排发生在被盖着的时候 → 渐显时完全不动）；
+            //    这里重复调是幂等的。
+            // ② 点关闭按钮：没走过手势，这里首次恢复（dismissY 全程为 0、
+            //    下层从未透出，恢复时机无视觉影响）。
             // 放在 dismiss 后恢复会晚 0.27s：背景页已透出但状态栏不在，dismiss
             // 那一刻状态栏突然出现 → 页面「抖一下」。相册层盖着时 beginDismiss
             // 内部会判断不恢复（露的是相册层，它也不要状态栏）。
