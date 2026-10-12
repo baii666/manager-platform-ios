@@ -20,6 +20,11 @@ final class PhotoViewerPresenter: ObservableObject {
     static let shared = PhotoViewerPresenter()
 
     @Published var isVisible = false
+    /// 系统状态栏是否隐藏。与 isVisible **解耦**：退出时要让状态栏与淡出动画
+    /// **同步**恢复 —— 否则 0.27s 后 dismiss 那一刻才出现，背景页「先无状态栏、
+    /// 后突然有」，视觉上抖一下（RootView 按它控制 .statusBarHidden）。
+    /// show() 置 true；beginDismiss() 置 false（相册层盖着时除外）。
+    @Published var statusBarHidden = true
     /// 看图器当前的照片数组。调用方在网格翻页（loadMore）后要调 updatePhotos 同步，
     /// 否则看图器里翻不到新加载的图。
     @Published var photos: [Photo] = []
@@ -63,6 +68,7 @@ final class PhotoViewerPresenter: ObservableObject {
         viewerAboveAlbum = (albumPageTarget != nil)
         generation += 1
         isVisible = true
+        statusBarHidden = true
     }
 
     func updatePhotos(_ photos: [Photo]) { self.photos = photos }
@@ -71,6 +77,15 @@ final class PhotoViewerPresenter: ObservableObject {
     func dismiss() {
         isVisible = false
         viewerAboveAlbum = false
+    }
+
+    /// 退出动画**开始**时调（PhotoViewerView.close() 的 withAnimation 里）：
+    /// 状态栏与 0.25s 淡出同步恢复，而不是等 0.27s 后 dismiss 那一刻。
+    /// ⚠️ 相册层盖着时（albumPageTarget != nil）退出看图器露出的是相册层 ——
+    /// 相册层同样不要状态栏，这里保持隐藏，等相册层自己关闭时看图器仍在，
+    /// 状态栏继续藏着，语义一致。
+    func beginDismiss() {
+        if albumPageTarget == nil { statusBarHidden = false }
     }
 
     /// 翻页时回写当前下标（看图器若被重建，能回到原来那张而不是最初打开的那张）
@@ -92,6 +107,9 @@ final class PhotoViewerPresenter: ObservableObject {
         albumPageTarget = nil
         viewerAboveAlbum = false
         albumBackdrop = nil
+        // 兜底：若看图器已经退了（相册层内点开的看图器先关），beginDismiss 因
+        // 「露的是相册层」没有恢复状态栏 —— 这里补上，否则状态栏会一直藏着
+        if !isVisible { statusBarHidden = false }
     }
 
     /// 抓当前 key window 的整屏快照。失败返回 nil（调用方退回透明根）。

@@ -117,8 +117,11 @@ struct RootView: View {
             }
         }
         .animation(.easeIn(duration: 0.15), value: photoViewer.isVisible)
-        // overlay 里 .statusBarHidden 可能不生效，在根上按看图器显隐统一控制
-        .statusBarHidden(photoViewer.isVisible)
+        // overlay 里 .statusBarHidden 可能不生效，在根上按看图器显隐统一控制。
+        // ⚠️ 绑 statusBarHidden 而不是 isVisible：退出淡出动画期间（isVisible 仍 true）
+        // 状态栏就要开始恢复，与 closingFade 同步 —— 绑 isVisible 会晚 0.27s（dismiss
+        // 那一刻才出现），背景页「先无状态栏、后突然有」就是退出时那一「抖」。
+        .statusBarHidden(photoViewer.statusBarHidden)
     }
 }
 

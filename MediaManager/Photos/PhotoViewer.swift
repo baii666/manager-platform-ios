@@ -355,6 +355,11 @@ struct PhotoViewerView: View {
             // 整层淡到 0：cover 真正 dismiss 时已经完全透明，
             // 屏幕上看到的就是上一级页面 —— 不会再出现「先黑/先白再跳一下」
             closingFade = 0
+            // 状态栏与淡出**同一时刻**恢复（RootView 按 presenter.statusBarHidden 控制）。
+            // 放在 dismiss 后恢复会晚 0.27s：背景页已透出但状态栏不在，dismiss
+            // 那一刻状态栏突然出现 → 页面「抖一下」。相册层盖着时 beginDismiss
+            // 内部会判断不恢复（露的是相册层，它也不要状态栏）。
+            presenter.beginDismiss()
         }
         // 淡出动画走完（0.25s）再让 cover 消失：此时整层已透明，
         // 系统那一下 dismiss 就看不到了，屏幕上一直是上一级页面
