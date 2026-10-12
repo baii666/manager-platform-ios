@@ -1281,72 +1281,41 @@ private struct SimilarPhotoPage: View {
 
 
 // MARK: - 相册页层（盖在看图器之上）
-// 详情卡片点「进入相册」→ 这一层从右侧滑入、盖在看图器上（看图器与详情卡片全程不动）。
-// 返回两种方式：顶栏「返回」按钮 / 左边缘右滑拖拽。拖拽过程中下面的看图器和
-// 详情卡片实时可见 —— 这正是系统 push 做不到的效果：看图器 overlay 比-tab 导航栈高，
-// 系统 push 必须先把看图器藏起来，交互式返回滑到一半时 path 还没变，半路露馅。
 // ⚠️ 不能标 private：RootView 要引用它（同模块内可见即可）
 struct AlbumPageLayer: View {
     let target: AlbumOpenTarget
     /// 撤掉本层（下面的看图器 + 详情卡片本来就在那儿）
     var onClose: () -> Void
 
-    // 初始就顶到屏幕外：避免首帧闪现（GeometryReader 的宽度要到布局后才知道）
-    @State private var dragX: CGFloat = UIScreen.main.bounds.width
-    @State private var appeared = false
+    /// 相册页是本层内部 push 上去的（root 透明），pop 掉它才算返回
+    @State private var path = NavigationPath()
 
     var body: some View {
-        GeometryReader { geo in
-            let w = geo.size.width
-            NavigationStack {
-                AlbumPhotosView(album: target.album, libID: target.libID,
-                                onBack: { closeAnimated(width: w) })
-            }
-            .offset(x: dragX)
-            // 左边缘拖拽条：替代系统的交互式返回手势（本层不是 push 进导航栈的）
-            .overlay(alignment: .leading) {
-                Color.clear
-                    .frame(width: 28)
-                    .contentShape(Rectangle())
-                    .gesture(edgeDrag(width: w))
-            }
-            .onAppear {
-                guard !appeared else { return }
-                appeared = true
-                withAnimation(.easeOut(duration: 0.24)) { dragX = 0 }
-            }
+        NavigationStack(path: $path) {
+            // ⚠️ 透明根是关键：NavigationStack 自己不铺底色（所以每个页面都要
+            // .appBackground()），root 用 Color.clear 就是全透明的 ——
+            // 右滑返回（系统交互式 pop）过程中透出来的就是下面的看图器 + 详情卡片，
+            // 而不是一层底色。这就是「返回直接显示上一个页面」的效果。
+            Color.clear
+                .ignoresSafeArea()
+                // ⚠️ root 必须隐藏导航栏：它是透明的，但 UINavigationBar 自己会画底色/毛玻璃，
+                // pop 时会在看图器上糊一条不透明的顶栏。只藏 root 的（相册页自己的栏照常显示），
+                // 系统右滑返回手势由**栈顶**页面决定，不受 root 影响。
+                .toolbar(.hidden, for: .navigationBar)
+                .navigationDestination(for: AlbumOpenTarget.self) { t in
+                    AlbumPhotosView(album: t.album, libID: t.libID)
+                }
         }
         // 盖满整屏（RootView overlay 默认在安全区内，不忽略的话顶部/底栏处会露缝）
         .ignoresSafeArea()
-    }
-
-    private func closeAnimated(width: CGFloat) {
-        withAnimation(.easeIn(duration: 0.2)) { dragX = width }
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 200_000_000)
-            onClose()
+        .onAppear {
+            // 出现即 push 相册页（带系统 push 动画）。用原生 push 而不是自绘滑动层：
+            // 只有系统 push 才自带原生右滑返回手势（自绘的边缘拖拽条在真机上不触发）。
+            if path.isEmpty { path.append(target) }
         }
-    }
-
-    private func edgeDrag(width: CGFloat) -> some Gesture {
-        DragGesture(minimumDistance: 12)
-            .onChanged { v in
-                guard v.translation.width > 0 else { return }
-                dragX = v.translation.width
-            }
-            .onEnded { v in
-                // 拖过屏宽三成、或预测位移过半 → 放手滑出；否则弹回
-                let far = v.translation.width > width * 0.3
-                    || v.predictedEndTranslation.width > width * 0.55
-                if far {
-                    withAnimation(.easeOut(duration: 0.2)) { dragX = width }
-                    Task { @MainActor in
-                        try? await Task.sleep(nanoseconds: 200_000_000)
-                        onClose()
-                    }
-                } else {
-                    withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) { dragX = 0 }
-                }
-            }
+        // 相册页被 pop 掉（右滑 / 返回按钮）→ 撤掉整层，露出看图器
+        .onChange(of: path.count) { _, count in
+            if count == 0 { onClose() }
+        }
     }
 }
