@@ -103,8 +103,15 @@ struct RootView: View {
                 if photoViewer.albumPageTarget != nil {
                     AlbumPageLayer(
                         target: photoViewer.albumPageTarget!,
+                        // 根的背景 = openAlbum 时抓的整屏快照（看图器+详情卡片）。
+                        // 透明根在系统 push/pop 过渡中背后是窗口底色（浅色=白）→ 大白屏，
+                        // 详见 PhotoViewer.swift 里 AlbumPageLayer 的注释。
+                        backdrop: photoViewer.albumBackdrop,
                         onClose: { photoViewer.closeAlbum() }
                     )
+                    // 每次「进入相册」都重建图层（openAlbum 里 generation 自增）：
+                    // 返回后有约 350ms 撤层等待期，期内再次进入也必须能重新 push。
+                    .id(photoViewer.albumOpenGeneration)
                     .zIndex(2)
                 }
             }

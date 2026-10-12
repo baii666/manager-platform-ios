@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit  // 相册层根的窗口快照（UIGraphicsImageRenderer）
 
 // MARK: - 看图器全局呈现器
 // ⚠️⚠️ 为什么不用 .fullScreenCover：UIKit 的 fullScreen 呈现会把底层页面**移出窗口层级**，
@@ -39,6 +40,20 @@ final class PhotoViewerPresenter: ObservableObject {
     /// 相册页里点开照片时，看图器要临时升到相册层之上（RootView 按它排 zIndex）。
     @Published var viewerAboveAlbum = false
 
+    /// 「进入相册」时抓的整屏快照（看图器 + 详情卡片），相册层 NavigationStack 根的
+    /// 不透明背景。普通属性（非 @Published）：openAlbum 里先抓快照再设 albumPageTarget，
+    /// 后者触发的 body 刷新里读它一定是新值。
+    ///
+    /// ⚠️ 为什么需要它：相册层是「透明根 NavigationStack + 系统原生 push」。透明根在
+    /// **过渡过程中**背后渲染的是窗口底色（浅色模式 = 白），右滑返回滑到一半就是一片
+    /// 大白屏。改用这张不透明快照当根的背景后，push/pop 两个方向滑出来的都是看图器
+    /// 本身的逐像素副本，不再依赖 UIKit 对透明根的渲染。
+    /// 抓取失败时为 nil，相册层退回透明根（最差即旧行为）。
+    var albumBackdrop: UIImage? = nil
+    /// 每次 openAlbum 自增。RootView 用它给相册层做 .id：返回后 350ms 撤层等待期内
+    /// 再次「进入相册」也能立刻重建图层并 push（否则图层不重建、onAppear 不再触发）。
+    var albumOpenGeneration = 0
+
     func show(_ photos: [Photo], index: Int, hasMore: Bool = false, onLoadMore: (() -> Void)? = nil) {
         self.photos = photos
         self.startIndex = index
@@ -65,6 +80,10 @@ final class PhotoViewerPresenter: ObservableObject {
     /// 返回时撤掉相册层就是详情卡片 —— 全程没有重建、没有重新弹出。
     func openAlbum(_ album: Album, libID: Int) {
         viewerAboveAlbum = false
+        albumOpenGeneration += 1
+        // 先抓快照再设 target：RootView 因 target 变化刷新建层时，快照必须已就位。
+        // 此刻相册层还没出现，快照内容 = 看图器 + 详情卡片，不会拍到自己。
+        albumBackdrop = Self.captureWindowSnapshot()
         albumPageTarget = AlbumOpenTarget(album: album, libID: libID)
     }
 
@@ -72,5 +91,25 @@ final class PhotoViewerPresenter: ObservableObject {
     func closeAlbum() {
         albumPageTarget = nil
         viewerAboveAlbum = false
+        albumBackdrop = nil
+    }
+
+    /// 抓当前 key window 的整屏快照。失败返回 nil（调用方退回透明根）。
+    private static func captureWindowSnapshot() -> UIImage? {
+        guard let window = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .flatMap({ $0.windows })
+            .first(where: { $0.isKeyWindow })
+        else { return nil }
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = window.traitCollection.displayScale
+        let renderer = UIGraphicsImageRenderer(bounds: window.bounds, format: format)
+        var captured = false
+        let image = renderer.image { _ in
+            // afterScreenUpdates: true —— 强制按当前已渲染状态出图，
+            // 保证详情卡片这种刚交互过的自绘层一定在快照里。
+            captured = window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+        }
+        return captured ? image : nil
     }
 }

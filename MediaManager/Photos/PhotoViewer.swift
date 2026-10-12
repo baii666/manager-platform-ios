@@ -1284,30 +1284,46 @@ private struct SimilarPhotoPage: View {
 // ⚠️ 不能标 private：RootView 要引用它（同模块内可见即可）
 struct AlbumPageLayer: View {
     let target: AlbumOpenTarget
+    /// 根的背景：openAlbum 时抓的「看图器 + 详情卡片」整屏快照。
+    ///
+    /// ⚠️ 为什么不能再用 Color.clear：透明根在系统 push/pop **过渡过程中**，
+    /// 背后渲染的是窗口底色（浅色模式 = 白）—— 右滑返回滑到一半就是大白屏。
+    /// 换成这张不透明快照后，滑出来的就是看图器本身的逐像素副本，
+    /// push / pop 两个方向都不会闪白。抓取失败时为 nil，退回透明根（旧行为）。
+    let backdrop: UIImage?
     /// 撤掉本层（下面的看图器 + 详情卡片本来就在那儿）
     var onClose: () -> Void
 
-    /// 相册页是本层内部 push 上去的（root 透明），pop 掉它才算返回
+    /// 相册页是本层内部 push 上去的，pop 掉它才算返回
     @State private var path = NavigationPath()
+    /// 撤层任务：pop 提交后等系统过渡动画结束再撤层
+    @State private var closeTask: Task<Void, Never>?
 
     var body: some View {
         NavigationStack(path: $path) {
-            // ⚠️ 透明根是关键：NavigationStack 自己不铺底色（所以每个页面都要
-            // .appBackground()），root 用 Color.clear 就是全透明的 ——
-            // 右滑返回（系统交互式 pop）过程中透出来的就是下面的看图器 + 详情卡片，
-            // 而不是一层底色。这就是「返回直接显示上一个页面」的效果。
-            Color.clear
-                .ignoresSafeArea()
-                // ⚠️ root 必须隐藏导航栏：它是透明的，但 UINavigationBar 自己会画底色/毛玻璃，
-                // pop 时会在看图器上糊一条不透明的顶栏。只藏 root 的（相册页自己的栏照常显示），
-                // 系统右滑返回手势由**栈顶**页面决定，不受 root 影响。
-                .toolbar(.hidden, for: .navigationBar)
-                .navigationDestination(for: AlbumOpenTarget.self) { t in
-                    AlbumPhotosView(album: t.album, libID: t.libID)
+            Group {
+                if let backdrop {
+                    // 快照就是整屏尺寸，resizable 铺满即原样显示
+                    Image(uiImage: backdrop)
+                        .resizable()
+                } else {
+                    Color.clear
                 }
+            }
+            .ignoresSafeArea()
+            // ⚠️ root 必须隐藏导航栏：UINavigationBar 自己会画底色/毛玻璃，
+            // 会在快照上糊一条栏。只藏 root 的（相册页自己的栏照常显示），
+            // 系统右滑返回手势由**栈顶**页面决定，不受 root 影响。
+            .toolbar(.hidden, for: .navigationBar)
+            .navigationDestination(for: AlbumOpenTarget.self) { t in
+                AlbumPhotosView(album: t.album, libID: t.libID)
+            }
         }
         // 盖满整屏（RootView overlay 默认在安全区内，不忽略的话顶部/底栏处会露缝）
         .ignoresSafeArea()
+        // pop 之后（path 空）本层只剩一张静态快照：关掉交互，让底下的看图器
+        // 在等撤层的这段时间里立即可用（快照与实时画面逐像素一致，看不出来）。
+        .allowsHitTesting(!path.isEmpty)
         .onAppear {
             // 出现即 push 相册页（带系统 push 动画）。用原生 push 而不是自绘滑动层：
             // 只有系统 push 才自带原生右滑返回手势（自绘的边缘拖拽条在真机上不触发）。
@@ -1315,7 +1331,15 @@ struct AlbumPageLayer: View {
         }
         // 相册页被 pop 掉（右滑 / 返回按钮）→ 撤掉整层，露出看图器
         .onChange(of: path.count) { _, count in
-            if count == 0 { onClose() }
+            closeTask?.cancel()
+            // ⚠️ 不能马上撤层：系统 pop 动画约 0.35s，此刻撤会把 NavigationStack
+            // 从过渡容器里撕下来，中途闪白。快照与实时画面一致，等动画结束再撤。
+            guard count == 0 else { return }
+            closeTask = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 350_000_000)
+                onClose()
+            }
         }
+        .onDisappear { closeTask?.cancel() }
     }
 }
