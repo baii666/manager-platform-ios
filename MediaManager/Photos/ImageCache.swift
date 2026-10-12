@@ -21,12 +21,14 @@ final class ImageCache: @unchecked Sendable {
 
     /// 同步查内存 + 磁盘缓存
     func image(for url: URL) -> UIImage? {
-        let key = url.absoluteString as NSString
-        if let img = memory.object(forKey: key) { return img }
+        // ⚠️ 局部变量不能叫 key：会遮蔽成员方法 key(for:)，后面的 key(for:) 调用
+        // 会被解析成「调用 NSString 局部变量」报 cannot call value of non-function type
+        let memKey = url.absoluteString as NSString
+        if let img = memory.object(forKey: memKey) { return img }
         let file = diskDir.appendingPathComponent(key(for: url))
         guard let data = try? Data(contentsOf: file),
               let img = UIImage(data: data) else { return nil }
-        memory.setObject(img, forKey: key)
+        memory.setObject(img, forKey: memKey)
         return img
     }
 
@@ -64,11 +66,12 @@ final class ImageCache: @unchecked Sendable {
 
     /// 同步查降采样档缓存
     func downsampledImage(for url: URL, maxPixel: Int) -> UIImage? {
-        let key = downKey(url, maxPixel)
-        if let img = memory.object(forKey: key) { return img }
+        // ⚠️ 同上：局部变量不能叫 key（遮蔽 key(for:) 方法）
+        let memKey = downKey(url, maxPixel)
+        if let img = memory.object(forKey: memKey) { return img }
         let file = diskDir.appendingPathComponent(key(for: url) + "_ds\(maxPixel)")
         if let data = try? Data(contentsOf: file), let img = UIImage(data: data) {
-            memory.setObject(img, forKey: key)
+            memory.setObject(img, forKey: memKey)
             return img
         }
         return nil
