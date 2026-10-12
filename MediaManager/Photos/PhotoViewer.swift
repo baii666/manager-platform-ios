@@ -1195,7 +1195,7 @@ struct ViewerImageView: View {
                 finish(cached, newTier: .full)
                 return
             }
-            if let loaded = await ImageCache.load(from: url) {
+            if let loaded = await ImageCache.shared.load(from: url) {
                 finish(loaded, newTier: .full)
                 return
             }
@@ -1253,7 +1253,7 @@ struct ViewerImageView: View {
               let url = photo.fullURL else { return }
         upgrading = true
         Task {
-            let loaded = await ImageCache.load(from: url, cacheToDisk: false)
+            let loaded = await ImageCache.shared.load(from: url, cacheToDisk: false)
             // 期间翻页切了图（photo.id 变 → task(id:) 取消本任务链）就不应用
             guard upgrading else { return }
             upgrading = false
