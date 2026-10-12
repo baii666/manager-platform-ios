@@ -9,6 +9,11 @@ import UIKit
 //   底部工具栏（缩放 / 适应屏幕 / 1:1 / 旋转 / 缩略图条 / 信息 / 收藏 / 保存）
 //   前后各 3 张预加载 + 滚到末尾触发 loadMore
 struct PhotoViewerView: View {
+    /// 打开动画时长（图片层缩放浮现）
+    static let openAnimDuration: TimeInterval = 0.28
+    /// 打开动画起始缩放
+    static let openScaleFrom: CGFloat = 0.9
+
     let photos: [Photo]
     var hasMore: Bool = false
     var onLoadMore: (() -> Void)? = nil
@@ -41,6 +46,11 @@ struct PhotoViewerView: View {
     /// 本次下拉是否已提前恢复状态栏。手指刚下拖的那一帧调一次（避免每帧写
     /// @Published 触发 RootView 重算）；回弹/改横滑时置回 false 并藏回去。
     @State private var statusBarRestored = false
+    /// 打开动画：图片层的淡入系数（0→1）与缩放（openScaleFrom→1）。
+    /// ⚠️ 黑底**不**参与这个渐显 —— 它必须在插入第一帧就不透明，状态栏才能
+    /// 与打开同刻隐藏而不抖（见 show() 注释）。
+    @State private var openFade: Double = 0
+    @State private var openScale: CGFloat = 1
 
     // 1:1 需要「图片像素尺寸」与「容器尺寸」
     @State private var imagePixelSize: CGSize?
@@ -101,7 +111,13 @@ struct PhotoViewerView: View {
             ZStack(alignment: .top) {
                 Color.black.opacity(backgroundOpacity)
 
+                // ⚠️ 打开动画只作用于**图片层**（openFade/openScale），黑底不参与：
+                // 黑底在插入第一帧就是不透明的，下层被同帧盖住，状态栏才可以与打开
+                // 同刻隐藏而不被看见下层重排（以前用整层 .transition(.opacity) 渐显，
+                // 黑底慢半拍才盖上，状态栏只能延迟隐藏 → 「消失得慢」）。
                 imageLayer(size: imageSize)
+                    .opacity(openFade)
+                    .scaleEffect(openScale)
                     .offset(y: topReserve)
 
                 topBar()
@@ -125,10 +141,10 @@ struct PhotoViewerView: View {
         // home indicator 上沿，底下露出黑色背景。ignore 后 geo.size = 全屏，
         // 图片真正铺满整屏；顶栏/底栏用 safeAreaInsets 手动避让。
         .ignoresSafeArea()
-        // ⚠️ 必须绑 presenter.statusBarHidden 而不是写死 true：状态栏是**延迟**到
-        // 打开动画结束才隐藏的（show() 里排了 openAnimDuration 的延迟任务）——
-        // 提前隐藏会让下层照片网格的 safe area 立刻变化，打开动画还没盖上就是
-        // 「后面抖一下」。这里写死 true 会绕过那套时序，同样立即触发重排。
+        // ⚠️ 必须绑 presenter.statusBarHidden 而不是写死 true：状态栏与打开同刻
+        // 隐藏（show() 里立即置 true），本视图的黑底插入第一帧就不透明（打开动画
+        // 只作用于图片层 openFade/openScale，见下），下层 safe area 重排发生在被
+        // 盖住时，不可见。写死 true 在这里等效，但语义上应与 presenter 单一来源一致。
         .statusBarHidden(presenter.statusBarHidden)
         // ⚠️ 关闭时整层淡出（见 close(after:)）：图片飞出/原地 + 全层透明，
         // cover 真正 dismiss 时已经看不见，屏幕直接是上一级页面 —— 退出才丝滑
@@ -139,6 +155,15 @@ struct PhotoViewerView: View {
         .onAppear {
             isClosing = false
             closingFade = 1
+            // 打开动画：图片层从 0.9 缩放浮现（easeOut 0.28s）。
+            // 首帧 openFade=0（@State 初始值）→ 黑底已在、图片未出，
+            // 与状态栏隐藏同帧发生，下层重排被黑底盖住不可见。
+            openFade = 0
+            openScale = Self.openScaleFrom
+            withAnimation(.easeOut(duration: Self.openAnimDuration)) {
+                openFade = 1
+                openScale = 1
+            }
             scheduleIdleHide()
         }
         .onDisappear { idleTask?.cancel(); tipTask?.cancel(); detailTask?.cancel() }
