@@ -41,6 +41,8 @@ struct PhotoViewerView: View {
 
     // 1:1 需要「图片像素尺寸」与「容器尺寸」
     @State private var imagePixelSize: CGSize?
+    /// 递增即通知当前主图「升级原图」（显示需求已超出 preview 档清晰度）
+    @State private var fullUpgradeTick = 0
     @State private var containerSize: CGSize = .zero
 
     @State private var isFavorite = false
@@ -176,17 +178,33 @@ struct PhotoViewerView: View {
 
     /// 单张图（含缩放 / 旋转 / 平移）。extraOffsetX 用于连续翻页时把相邻图放到屏幕外。
     private func singleImage(_ p: Photo, size: CGSize, extraOffsetX: CGFloat) -> some View {
-        ViewerImageView(
+        let primary = p.id == photo?.id
+        return ViewerImageView(
             photo: p,
             containerSize: size,
             rotated: Int(rotation) % 180 != 0,
             // 只有当前主图才回填像素尺寸（供 1:1 计算），相邻图的加载别污染它
-            onLoaded: { if p.id == photo?.id { imagePixelSize = $0 } }
+            isPrimary: primary,
+            onLoaded: { if primary { imagePixelSize = $0 } },
+            // 只有当前主图能升级原图（相邻图等翻成主图再说）
+            upgradeTick: primary ? fullUpgradeTick : 0
         )
         .scaleEffect(scale)
         .rotationEffect(.degrees(rotation))
         .offset(x: offset.width + extraOffsetX, y: offset.height + dismissY)
         .id(p.id)
+    }
+
+    /// 当前显示需求已超出持有数据的清晰度（1:1 / 放大过档）→ 让当前主图升级原图。
+    /// 判据：缩放后需要的位图宽度 > 当前档位像素宽度 × 0.9。
+    private func maybeUpgradeFull() {
+        guard scale > 1.01,
+              let px = imagePixelSize,
+              let fit = viewerFit(image: px, container: containerSize),
+              fit.width > 0,
+              scale * fit.width > px.width * 0.9
+        else { return }
+        fullUpgradeTick += 1
     }
 
     private func dragGesture(width: CGFloat) -> some Gesture {
@@ -239,6 +257,8 @@ struct PhotoViewerView: View {
             .onEnded { _ in
                 lastScale = scale
                 if scale <= 1.02 { resetTransform() }
+                // 放大超过 preview 档清晰度 → 升级原图（后台无感替换）
+                maybeUpgradeFull()
             }
     }
 
@@ -260,6 +280,8 @@ struct PhotoViewerView: View {
                 lastScale = 2.5
             }
         }
+        if scale <= 1.01 { return }
+        maybeUpgradeFull()
     }
 
     private func zoom(by factor: CGFloat) {
@@ -268,10 +290,13 @@ struct PhotoViewerView: View {
             lastScale = scale
             if scale <= 1.02 { offset = .zero; lastOffset = .zero }
         }
+        if scale > 1.01 { maybeUpgradeFull() }
     }
 
     /// 1:1 原始像素：按容器算出 scale=1 时的显示宽度，再反推缩放比
-    /// （竖图竖屏走 fill，显示宽度要按 fill 算，否则 1:1 会偏小）
+    /// （竖图竖屏走 fill，显示宽度要按 fill 算，否则 1:1 会偏小）。
+    /// ⚠️ preview 档下 clamp 到「当前数据能提供的最清晰」并同时升级原图，
+    /// 升级完成后再按一次即是真 1:1。
     private func fitNative() {
         guard let px = imagePixelSize,
               let fit = viewerFit(image: px, container: containerSize),
@@ -282,6 +307,7 @@ struct PhotoViewerView: View {
             offset = .zero
             lastOffset = .zero
         }
+        maybeUpgradeFull()
     }
 
     // MARK: - 翻页 / 关闭
@@ -366,8 +392,12 @@ struct PhotoViewerView: View {
         for delta in 1...3 {
             for i in [idx - delta, idx + delta] where list.indices.contains(i) {
                 guard let url = list[i].fullURL else { continue }
+                // 预热 **preview 档**（与 ViewerImageView 同 key，翻页滑入即命中缓存）。
+                // 之前预载全尺寸原图：单张 48~96MB，±3 张把 256MB 的 NSCache 撑爆，
+                // 既白下流量又触发反复淘汰。
+                let target = viewerPreviewMaxPixel(container: containerSize, photo: list[i])
                 Task.detached(priority: .userInitiated) {
-                    _ = await ImageCache.shared.load(from: url, cacheToDisk: false)
+                    _ = await ImageCache.shared.loadDownsampled(from: url, maxPixel: target, cacheToDisk: true)
                 }
             }
         }
@@ -1056,7 +1086,19 @@ fileprivate func viewerFit(image px: CGSize, container box: CGSize) -> ViewerFit
     return ViewerFit(width: fitWidth, mode: .fit)
 }
 
-// MARK: - 单张图（原图加载 + 缩略图占位 + 重试回退）
+// MARK: - 单张图（preview 降采样档 + 原图按需升级 + 缩略图占位 + 重试回退）
+
+/// preview 档长边像素 = 容器长边 × 屏幕 scale × 2（与 EXIF 原图尺寸取小，不放大小图）。
+/// ×2 给双指放大留余量：放到 2x 仍清晰；超出此清晰度由 ViewerImageView 按需升级原图。
+/// 同时被 ViewerImageView 与 preloadNeighbors 使用（保证缓存 key 一致）。
+func viewerPreviewMaxPixel(container: CGSize, photo: Photo) -> Int {
+    guard container.width > 0, container.height > 0 else { return 2400 }
+    let longEdge = max(container.width, container.height) * UIScreen.main.scale
+    if let w = photo.width, let h = photo.height, w > 0, h > 0 {
+        return Int(min(ceil(longEdge * 2), Double(max(w, h))))
+    }
+    return Int(ceil(longEdge * 2))
+}
 
 struct ViewerImageView: View {
     let photo: Photo
@@ -1064,7 +1106,11 @@ struct ViewerImageView: View {
     var containerSize: CGSize = .zero
     /// 已旋转 90°/270°：图片实际朝向与原始像素相反，此时一律走 fit，避免裁切加剧
     var rotated: Bool = false
+    /// 是否是当前主图（相邻图为 false）：主图才回填尺寸 / 接收升级请求
+    var isPrimary: Bool = false
     var onLoaded: ((CGSize) -> Void)? = nil
+    /// 递增即触发一次「升级原图」：外部在 1:1 / 双指放大超出当前清晰度时 +1
+    var upgradeTick: Int = 0
 
     @State private var image: UIImage?
     @State private var placeholder: UIImage?
@@ -1073,6 +1119,12 @@ struct ViewerImageView: View {
     @State private var retries = 0
     /// 原图连试 3 次仍失败 → 退回缩略图（同网页版 onError 分支）
     @State private var fallBackToThumb = false
+    /// 当前档位：preview = 降采样档（默认，滑动丝滑）；full = 原图 / 缩略图（不再升级）
+    @State private var tier: Tier = .preview
+    /// 升级任务进行中（防重复触发）
+    @State private var upgrading = false
+
+    private enum Tier { case preview, full }
 
     var body: some View {
         ZStack {
@@ -1088,6 +1140,16 @@ struct ViewerImageView: View {
             }
         }
         .task(id: photo.id) { await load() }
+        // 外部请求升级（fitNative / 放大过档）。tick 只在变化时触发，
+        // 翻页切图后新实例的 upgradeTick 与旧值相同 → 不会误触发（resetTransform 后也不需要）。
+        .onChange(of: upgradeTick) { _, tick in
+            if tick > 0 { upgradeToFull() }
+        }
+        // 翻页后本图成为主图：若它早已加载完（相邻图预载命中），补发一次像素尺寸，
+        // 否则 imagePixelSize 停在 nil，翻页后 1:1 按钮不工作
+        .onChange(of: isPrimary) { _, primary in
+            if primary, let img = image { onLoaded?(pixelSize(of: img)) }
+        }
     }
 
     /// 撑满容器再按 fit / fill 摆放。
@@ -1118,17 +1180,41 @@ struct ViewerImageView: View {
         image = nil
         showSpinner = false
         isLoading = true
+        tier = .preview
+        upgrading = false
 
         // 网格刚加载过，缩略图通常已在内存里，先顶上避免白屏
         if let thumbURL = photo.thumbURL {
             placeholder = ImageCache.shared.image(for: thumbURL)
         }
 
-        let url = (fallBackToThumb ? photo.thumbURL : photo.fullURL) ?? photo.thumbURL
-        guard let url else { isLoading = false; return }
+        // 已决定退回缩略图：thumbURL 本身就是 400px 小图，直接普通加载
+        if fallBackToThumb {
+            guard let url = photo.thumbURL else { isLoading = false; return }
+            if let cached = ImageCache.shared.image(for: url) {
+                finish(cached, newTier: .full)
+                return
+            }
+            if let loaded = await ImageCache.load(from: url) {
+                finish(loaded, newTier: .full)
+                return
+            }
+            isLoading = false
+            return
+        }
 
-        if let cached = ImageCache.shared.image(for: url) {
-            finish(cached)
+        guard let url = photo.fullURL else {
+            if let thumbURL = photo.thumbURL, let cached = ImageCache.shared.image(for: thumbURL) {
+                finish(cached, newTier: .full)
+            }
+            isLoading = false
+            return
+        }
+
+        // preview 档：先同步查缓存（相邻图已被 preloadNeighbors 预热 → 翻页滑入秒开）
+        let target = viewerPreviewMaxPixel(container: containerSize, photo: photo)
+        if let cached = ImageCache.shared.downsampledImage(for: url, maxPixel: target) {
+            finish(cached, newTier: .preview)
             return
         }
 
@@ -1138,12 +1224,12 @@ struct ViewerImageView: View {
             if isLoading { showSpinner = true }
         }
 
-        // 原图不落盘（后端本来就是源文件，再存一份会撑爆缓存目录）
-        let loaded = await ImageCache.shared.load(from: url, cacheToDisk: fallBackToThumb)
+        // 降采样档不落原图体积：downsample 后仅约 1/6，可安心写磁盘缓存（cacheToDisk: true）
+        let loaded = await ImageCache.shared.loadDownsampled(from: url, maxPixel: target, cacheToDisk: true)
         spinner.cancel()
 
         if let loaded {
-            finish(loaded)
+            finish(loaded, newTier: .preview)
             return
         }
 
@@ -1158,12 +1244,41 @@ struct ViewerImageView: View {
         await load()
     }
 
+    /// 升级原图：用户意图超出 preview 档清晰度（点了 1:1 / 双指放大过档）时由外部触发。
+    /// 后台加载 + 强制解码（见 ImageCache.load），完成后无感替换 —— frame 由
+    /// containerSize 决定，替换不引起布局跳变。失败静默保留 preview 档。
     @MainActor
-    private func finish(_ img: UIImage) {
+    private func upgradeToFull() {
+        guard tier == .preview, !upgrading, !fallBackToThumb,
+              let url = photo.fullURL else { return }
+        upgrading = true
+        Task {
+            let loaded = await ImageCache.load(from: url, cacheToDisk: false)
+            // 期间翻页切了图（photo.id 变 → task(id:) 取消本任务链）就不应用
+            guard upgrading else { return }
+            upgrading = false
+            if let loaded {
+                finish(loaded, newTier: .full)
+            }
+        }
+    }
+
+    @MainActor
+    private func finish(_ img: UIImage, newTier: Tier) {
         image = img
         isLoading = false
         showSpinner = false
-        onLoaded?(img.size)
+        tier = newTier
+        // 回填**当前档位的像素尺寸**（img.size × scale）：fitNative 的 1:1 按它 clamp，
+        // 语义变为「当前数据能提供的最清晰显示」，不会放不出像素。
+        // ⚠️ 不能直接回传 img.size：UIImage 的 size 是「点」，scale=2 时只有像素一半，
+        // 1:1 会算错。
+        onLoaded?(pixelSize(of: img))
+    }
+
+    /// 位图的像素尺寸（UIImage.size 是「点」，scale=2 时只有像素一半）
+    private func pixelSize(of img: UIImage) -> CGSize {
+        CGSize(width: img.size.width * img.scale, height: img.size.height * img.scale)
     }
 }
 
