@@ -96,8 +96,20 @@ struct RootView: View {
                     // 不响应 presenter.photos 变化。点击相似图单图覆盖（show 换照片数组）时，
                     // 必须重建视图才能显示新图，否则状态错乱黑屏。
                     .id(photoViewer.generation)
-                    // 打开时淡入（退出本身是内容自己淡出，不依赖 transition）
-                    .transition(.opacity)
+                    // 打开动画：缩放浮现（0.92→1）+ 淡入。原来只有 .opacity +
+                    // 0.15s，纯淡入且极短，很生硬。
+                    // ⚠️ removal 用 identity：退出靠 close(after:) 自己把整层
+                    // closingFade 淡到 0，不依赖 transition（0.27s 后 dismiss 移除时
+                    // 层已全透明，identity 移除无感）。给 removal 加缩放反而会
+                    // 和 closingFade 打架。
+                    .transition(
+                        .asymmetric(
+                            insertion: .scale(scale: 0.92)
+                                .combined(with: .opacity)
+                                .animation(.easeOut(duration: PhotoViewerPresenter.openAnimDuration)),
+                            removal: .identity
+                        )
+                    )
                     .zIndex(photoViewer.viewerAboveAlbum ? 3 : 1)
                 }
                 if photoViewer.albumPageTarget != nil {
@@ -116,7 +128,9 @@ struct RootView: View {
                 }
             }
         }
-        .animation(.easeIn(duration: 0.15), value: photoViewer.isVisible)
+        // transition 自带 animation；这行只兜底 AlbumPageLayer 的插入（它没有
+        // transition，靠隐式动画），时长与看图器打开动画保持一致
+        .animation(.easeOut(duration: PhotoViewerPresenter.openAnimDuration), value: photoViewer.isVisible)
         // overlay 里 .statusBarHidden 可能不生效，在根上按看图器显隐统一控制。
         // ⚠️ 绑 statusBarHidden 而不是 isVisible：退出淡出动画期间（isVisible 仍 true）
         // 状态栏就要开始恢复，与 closingFade 同步 —— 绑 isVisible 会晚 0.27s（dismiss

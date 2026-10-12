@@ -125,7 +125,11 @@ struct PhotoViewerView: View {
         // home indicator 上沿，底下露出黑色背景。ignore 后 geo.size = 全屏，
         // 图片真正铺满整屏；顶栏/底栏用 safeAreaInsets 手动避让。
         .ignoresSafeArea()
-        .statusBarHidden(true)
+        // ⚠️ 必须绑 presenter.statusBarHidden 而不是写死 true：状态栏是**延迟**到
+        // 打开动画结束才隐藏的（show() 里排了 openAnimDuration 的延迟任务）——
+        // 提前隐藏会让下层照片网格的 safe area 立刻变化，打开动画还没盖上就是
+        // 「后面抖一下」。这里写死 true 会绕过那套时序，同样立即触发重排。
+        .statusBarHidden(presenter.statusBarHidden)
         // ⚠️ 关闭时整层淡出（见 close(after:)）：图片飞出/原地 + 全层透明，
         // cover 真正 dismiss 时已经看不见，屏幕直接是上一级页面 —— 退出才丝滑
         .opacity(closingFade)

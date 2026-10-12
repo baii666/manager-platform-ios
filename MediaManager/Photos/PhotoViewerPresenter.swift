@@ -32,6 +32,13 @@ final class PhotoViewerPresenter: ObservableObject {
     ///（let + @State initialValue），不响应 presenter.photos 变化；用 .id(generation)
     /// 强制重建视图，才能正确切换到新的照片数组（例如点击相似图单图覆盖）。
     @Published var generation = 0
+    /// 打开动画时长（与 RootView 里 PhotoViewerView 的 insertion transition 保持一致）。
+    /// 状态栏延迟这么久再隐藏 —— 见 show() 里的注释。
+    static let openAnimDuration: TimeInterval = 0.28
+    /// 已进入退出流程（beginDismiss 调用过）。show() 的延迟隐藏任务靠它判断：
+    /// 打开后立刻下滑退出时 isVisible 要 0.27s 后才置 false，不看这个标记会把
+    /// 状态栏重新藏起来，下层已渐显却突然没状态栏 = 抖。
+    private var dismissStarted = false
     private(set) var startIndex = 0
     private(set) var hasMore = false
     private(set) var onLoadMore: (() -> Void)?
@@ -68,7 +75,20 @@ final class PhotoViewerPresenter: ObservableObject {
         viewerAboveAlbum = (albumPageTarget != nil)
         generation += 1
         isVisible = true
-        statusBarHidden = true
+        // ⚠️ 状态栏**延迟**到打开动画结束后再隐藏，不能像以前那样立刻置 true：
+        // 下层照片网格的 safe area 会随状态栏立刻变化（状态栏区被内容占上），
+        // 而打开动画（黑底渐显）还没盖上、下层全可见 → 「后面抖一下」。
+        // 推迟后，重排发生在被看图器完全盖住的那一刻，没人看到；动画期间状态栏
+        // 还在，下层纹丝不动。（与退出严格对称：退出是跟手第一帧就 beginDismiss
+        // 恢复，同样让下层在被盖着时完成重排。）
+        dismissStarted = false
+        let gen = generation
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.openAnimDuration) { [self] in
+            // 三重校验：仍是本次打开、没进入退出流程、看图器还在
+            if isVisible && !dismissStarted && generation == gen {
+                statusBarHidden = true
+            }
+        }
     }
 
     func updatePhotos(_ photos: [Photo]) { self.photos = photos }
@@ -86,6 +106,7 @@ final class PhotoViewerPresenter: ObservableObject {
     /// 状态栏继续藏着，语义一致。
     func beginDismiss() {
         if albumPageTarget == nil { statusBarHidden = false }
+        dismissStarted = true
     }
 
     /// 下拉**中途改主意**（改横滑翻页 / 松手回弹）时调：下层重新被黑底盖严，
