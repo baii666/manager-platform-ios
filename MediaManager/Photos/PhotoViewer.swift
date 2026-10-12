@@ -1285,7 +1285,8 @@ private struct SimilarPhotoPage: View {
 // 返回两种方式：顶栏「返回」按钮 / 左边缘右滑拖拽。拖拽过程中下面的看图器和
 // 详情卡片实时可见 —— 这正是系统 push 做不到的效果：看图器 overlay 比-tab 导航栈高，
 // 系统 push 必须先把看图器藏起来，交互式返回滑到一半时 path 还没变，半路露馅。
-private struct AlbumPageLayer: View {
+// ⚠️ 不能标 private：RootView 要引用它（同模块内可见即可）
+struct AlbumPageLayer: View {
     let target: AlbumOpenTarget
     /// 撤掉本层（下面的看图器 + 详情卡片本来就在那儿）
     var onClose: () -> Void
