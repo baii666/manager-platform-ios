@@ -180,7 +180,10 @@ private struct ShortFeedPage: View {
                                 loop: true,
                                 isActive: isActive,
                                 showsCloseButton: false,
-                                dragGesturesEnabled: false)
+                                dragGesturesEnabled: false,
+                                // 刷流里状态栏常驻（退出时才不会「闪」）：
+                                // 播放器别再自己藏一次，控制条也会自动让开状态栏
+                                hidesStatusBar: false)
             } else {
                 placeholder
             }

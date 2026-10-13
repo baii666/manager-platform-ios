@@ -50,6 +50,10 @@ struct VideoPlayerView: View {
     /// 抖音式刷流里上下滑要交给 ScrollView 切视频，亮度音量手势会跟它抢，
     /// 所以刷流里关掉，只保留单击显隐控制条 / 双击暂停。
     var dragGesturesEnabled: Bool = true
+    /// 是否隐藏系统状态栏。独立全屏播放（fullScreenCover）时隐藏；
+    /// ⚠️ 内嵌场景（短视频刷流）必须传 false —— 那里的状态栏由外层统一管，
+    /// 播放器再来一句 hidden 只会和外层打架（且嵌套视图里它未必生效，行为不可预期）。
+    var hidesStatusBar: Bool = true
 
     @StateObject private var engine = PlayerEngine()
     @Environment(\.dismiss) private var dismiss
@@ -171,7 +175,7 @@ struct VideoPlayerView: View {
         .navigationTitle(title ?? "播放")
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarHidden(true)
-        .statusBar(hidden: true)
+        .statusBar(hidden: hidesStatusBar)
         .onAppear { setup() }
         .onDisappear { teardown() }
         // ⚠️ iOS 17 起 `onChange(of:) { v in }`（单参数）已废弃，用零参数闭包
@@ -313,9 +317,24 @@ struct VideoPlayerView: View {
         }
         .foregroundStyle(.white)
         .padding(.horizontal, 16)
-        .padding(.top, 8)
+        // ⚠️ 顶部留出的高度 = 常规间距 + 状态栏（若可见）。
+        // 控制条左边是片名、右边是 AirPlay，贴顶排就会压在状态栏（时间/电池）上 ——
+        // 独立全屏时状态栏被本视图隐藏（statusBarHeight=0）照旧贴顶；
+        // 内嵌在刷流里时状态栏常驻，必须让开。
+        .padding(.top, 8 + statusBarHeight)
         .padding(.bottom, 20)
         .background(controlScrim)
+    }
+
+    /// 状态栏当前**可见**时的高度；已隐藏时为 0。
+    /// 从 UIStatusBarManager 读（SwiftUI 没有直接暴露状态栏高度的 API）：
+    /// 控制条要不要避让，取决于此刻状态栏在不在，而不是取决于调用方是谁。
+    private var statusBarHeight: CGFloat {
+        let scene = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first
+        guard let manager = scene?.statusBarManager, !manager.isStatusBarHidden else { return 0 }
+        return manager.statusBarFrame.height
     }
 
     /// 上下压一层半透明黑，保证任何画面上文字都可读
