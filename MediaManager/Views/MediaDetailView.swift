@@ -16,6 +16,9 @@ struct MediaDetailView: View {
     @State private var isFavorite = false
     @State private var favLoading = false
 
+    /// Hero 背景高度（海报 180 + 上方露出 ~50）
+    private let heroHeight: CGFloat = 230
+
     private var client: APIClient? { AppSession.shared.client }
 
     var body: some View {
@@ -51,19 +54,15 @@ struct MediaDetailView: View {
         ScrollView {
             // ── Hero ──
             ZStack(alignment: .bottomLeading) {
-                if let backdrop = d.backdropURL {
-                    RemoteImage(url: backdrop, fallbackIcon: "film",
-                                fallbackColors: Theme.placeholderGradient(for: .media))
-                        .imageFilled()
-                        .frame(height: 230)
-                        .clipped()
-                        .overlay(LinearGradient(
-                            colors: [.black.opacity(0.1), .black.opacity(0.85)],
-                            startPoint: .top, endPoint: .bottom))
-                } else {
-                    Rectangle().fill(LinearGradient(colors: Theme.placeholderGradient(for: .media),
-                                                   startPoint: .top, endPoint: .bottom)).frame(height: 230)
-                }
+                // 背景图三级逻辑，对齐网页端 MediaDetailPage：
+                //   ① 有 fanart → 铺满 + 顶部对齐裁切（网页 object-cover object-top）
+                //   ② 没有 fanart（或加载失败）→ 海报模糊放大打底（网页 blur-2xl scale-110）
+                //   ③ 都没有 → 渐变占位
+                // 遮罩对三档统一生效（网页端遮罩 div 也是常驻的）
+                HeroBackground(backdropURL: d.backdropURL, posterURL: d.posterURL, height: heroHeight)
+                    .overlay(LinearGradient(
+                        colors: [.black.opacity(0.1), .black.opacity(0.85)],
+                        startPoint: .top, endPoint: .bottom))
 
                 HStack(alignment: .bottom, spacing: 16) {
                     RemoteImage(url: d.posterURL, fallbackIcon: "film",
@@ -289,6 +288,91 @@ struct MediaDetailView: View {
                                       // 缺了会表现成「进度条/快进拖了没反应」（全算成 0）。
                                       // runtime 是分钟（nfo 元数据）。
                                       knownDuration: d.runtime.map { Double($0) * 60 })
+    }
+}
+
+// MARK: - Hero 背景图（对齐网页端三级展示逻辑）
+// 网页端 MediaDetailPage 的 hero 背景（src/pages/MediaDetailPage.tsx）：
+//   ① media.backdrop_path → object-cover object-top
+//   ② media.poster_path   → object-cover object-center blur-2xl scale-110
+//   ③ 都没有              → bg-gradient-to-br from-surface to-background
+// 之前 iOS 只有 ①③ 两档：没有 fanart 的影片 Hero 是一块纯渐变，而海报就在手边。
+// 现在补上 ②；fanart 加载失败也退到 ②，不留空。
+private struct HeroBackground: View {
+    let backdropURL: URL?
+    let posterURL: URL?
+    let height: CGFloat
+
+    @State private var backdrop: UIImage?
+    /// fanart 加载失败：退到海报模糊档
+    @State private var backdropFailed = false
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack {
+                if let backdrop, backdrop.size.height > 0, backdrop.size.width > 0 {
+                    topCover(backdrop, box: geo.size)
+                } else if backdropURL != nil, !backdropFailed {
+                    // fanart 还在加载：渐变占位（RemoteImage 同款观感）
+                    placeholder
+                } else if let posterURL {
+                    // ② 海报模糊打底：先模糊再放大，模糊边缘才不会露出虚边
+                    RemoteImage(url: posterURL, fallbackIcon: "film",
+                                fallbackColors: Theme.placeholderGradient(for: .media))
+                        .imageFilled()
+                        // 网页 blur-2xl=40px 是按 ~480px 高的 Hero 定的，
+                        // 这里 Hero 只有 230，按同比例折算到 24
+                        .blur(radius: 24)
+                        .scaleEffect(1.1)
+                } else {
+                    placeholder
+                }
+            }
+        }
+        .frame(height: height)
+        .clipped()
+        .task(id: backdropURL) { await loadBackdrop() }
+    }
+
+    /// ① fanart：object-cover object-top。
+    /// imageFilled() 是居中裁切，会把画面主体切掉 —— iPad 上 Hero 矮宽，
+    /// 竖幅 fanart 垂直溢出两百多 pt，居中切两头吃亏。这里自己算缩放比例
+    /// 铺满容器、顶边对齐，向下溢出由外层 .clipped() 裁掉。
+    @ViewBuilder
+    private func topCover(_ image: UIImage, box: CGSize) -> some View {
+        let scale = max(box.width / image.size.width, box.height / image.size.height)
+        let w = image.size.width * scale
+        let h = image.size.height * scale
+        Image(uiImage: image)
+            .resizable()
+            .frame(width: w, height: h)
+            .position(x: box.width / 2, y: h / 2)
+    }
+
+    private var placeholder: some View {
+        ZStack {
+            LinearGradient(colors: Theme.placeholderGradient(for: .media),
+                           startPoint: .topLeading, endPoint: .bottomTrailing)
+            Image(systemName: "film")
+                .font(.system(size: 26, weight: .light))
+                .foregroundStyle(.white.opacity(0.85))
+        }
+    }
+
+    @MainActor
+    private func loadBackdrop() async {
+        guard let backdropURL else {
+            backdrop = nil
+            backdropFailed = false
+            return
+        }
+        backdrop = nil
+        backdropFailed = false
+        if let img = await ImageCache.shared.load(from: backdropURL) {
+            backdrop = img
+        } else {
+            backdropFailed = true
+        }
     }
 }
 
