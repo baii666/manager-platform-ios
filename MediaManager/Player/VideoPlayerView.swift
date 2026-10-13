@@ -65,6 +65,9 @@ struct VideoPlayerView: View {
     /// ⚠️ 内嵌场景（短视频刷流）必须传 false —— 那里的状态栏由外层统一管，
     /// 播放器再来一句 hidden 只会和外层打架（且嵌套视图里它未必生效，行为不可预期）。
     var hidesStatusBar: Bool = true
+    /// 是否在**本页底部**画一条细进度条。短视频刷流传 true：
+    /// 它跟着页面一起上下滚（抖音式），所以必须画在页面内部而不是外层固定位置。
+    var showsBottomProgressBar: Bool = false
 
     @StateObject private var engine = PlayerEngine()
     @Environment(\.dismiss) private var dismiss
@@ -139,6 +142,13 @@ struct VideoPlayerView: View {
                     .transition(.opacity)
             }
 
+            // 底部细进度条（刷流用）：画在页面内部，跟着上下滑一起滚。
+            // ⚠️ 采样用 TimelineView，不能只依赖引擎的 objectWillChange：
+            // currentTime 是 0.5s 一跳发布的，靠转发只会一跳一跳、看着像不动。
+            if showsBottomProgressBar {
+                bottomProgressBar
+            }
+
             if let hud {
                 Text(hud)
                     .font(.system(size: 15, weight: .medium))
@@ -203,6 +213,32 @@ struct VideoPlayerView: View {
         .onChange(of: isActive) {
             // 刷流里滑走暂停、滑回来继续播。首次出现时 setup() 已按 autoplay 决定，这里只处理切换
             if isActive { engine.play() } else { engine.pause() }
+        }
+    }
+
+    /// 底部细进度条：一条 3pt 细线（半透明底 + 白色已播），钉在本页最底。
+    /// 位置跟着页面走，所以刷流上下滑时它跟着视频一起滚；固定 UI（标题 / 图标）不归它管。
+    /// 不可拖拽 —— 拖动语义归手势层（快进 / 亮度 / 音量）和刷流的上下滑 / 右滑退出。
+    private var bottomProgressBar: some View {
+        TimelineView(.periodic(from: .now, by: 0.2)) { _ in
+            let total = displayDuration
+            if total > 0 {
+                let ratio = min(max(displayPosition / total, 0), 1)
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(Color.white.opacity(0.25))
+                        Capsule().fill(Color.white)
+                            .frame(width: geo.size.width * ratio)
+                    }
+                }
+                .frame(height: 3)
+                .clipShape(Capsule())
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                .padding(.bottom, 6)
+                .allowsHitTesting(false)
+                // 采样 0.2s + 线性补间：观感是持续滚动，而不是 0.5s 一跳
+                .animation(.linear(duration: 0.2), value: ratio)
+            }
         }
     }
 

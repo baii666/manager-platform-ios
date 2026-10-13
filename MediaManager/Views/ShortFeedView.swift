@@ -158,23 +158,10 @@ struct ShortFeedView: View {
             .padding(.leading, 16)
             // 右侧留白：标题不顶到屏幕边（也给将来的竖排操作位留地方）
             .padding(.trailing, 72)
-            // 抬高一点给底部进度条留位
-            .padding(.bottom, 14)
+            // 抬高一点：底部进度条在每页内部跟着滚，标题别压在上面
+            .padding(.bottom, 18)
             // 撑满整屏只为定位，不能吃掉滑动手势
             .allowsHitTesting(false)
-
-            // 底部细进度条：抖音式，钉在屏幕上不随视频滚，跟着当前页引擎走。
-            // 进度取引擎的 currentTime/duration —— FeedEngineHandle 已把引擎的
-            // objectWillChange 转发出来，所以这里读 computed 值也能实时刷新。
-            // duration 未知（HLS 还没就绪）或为 0 时不画，避免进度条乱跳。
-            if let engine = engineHandle.engine,
-               engine.duration > 0, engine.duration.isFinite {
-                ThinProgressBar(progress: engine.currentTime / engine.duration)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-                    .padding(.horizontal, 0)
-                    .padding(.bottom, 4)
-                    .allowsHitTesting(false)
-            }
         }
         // 右滑退出：页面跟手向右移动，松手超过阈值向右滑出屏幕（露出背后的来源页）
         .offset(x: dragOffsetX)
@@ -283,7 +270,10 @@ private struct ShortFeedPage: View {
                                 onEngineReady: onEngineReady,
                                 // 刷流里状态栏常驻（退出时才不会「闪」）：
                                 // 播放器别再自己藏一次，控制条也会自动让开状态栏
-                                hidesStatusBar: false)
+                                hidesStatusBar: false,
+                                // 进度条画在本页内部 → 上下滑切视频时它跟着视频一起滚
+                                // （抖音式；不是右上角那种钉在屏幕上的固定图标）
+                                showsBottomProgressBar: true)
             } else {
                 placeholder
             }
@@ -358,26 +348,5 @@ private struct ShortFeedPage: View {
         } catch {
             self.error = error.localizedDescription
         }
-    }
-}
-
-// MARK: - 底部细进度条
-// 抖音式一条细线：白描边 0.25 透明底 + 白色已播部分，钉在屏幕最底。
-// 不做可拖拽（刷流场景拖动交给上下滑/右滑退出了，进度只做展示）。
-private struct ThinProgressBar: View {
-    /// 0~1；调用方保证已 clamp，这里再兜一层
-    let progress: Double
-
-    var body: some View {
-        GeometryReader { geo in
-            ZStack(alignment: .leading) {
-                Capsule().fill(Color.white.opacity(0.25))
-                Capsule().fill(Color.white)
-                    .frame(width: geo.size.width * CGFloat(min(max(progress, 0), 1)))
-            }
-        }
-        .frame(height: 3)
-        // 圆角被裁到方角也无妨，关键是细
-        .clipShape(Capsule())
     }
 }
