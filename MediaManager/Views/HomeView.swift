@@ -19,7 +19,9 @@ struct HomeView: View {
     @Binding var path: NavigationPath
     /// 当前底 bar tab：发现区「短视频连播」卡要切到短视频 tab 再开随机刷流
     @Binding var tab: RootTab
-    /// 媒体库 tab 内的二级分类：发现区「拍摄集」卡切 tab 的同时落准分类
+    /// 媒体库 tab 内的二级分类：预留给「首页卡切 tab 同时落准分类」用。
+    /// 2026-10-13：发现区「拍摄集」卡已移除，当前无卡片写入它，
+    /// binding 保留以免将来新增同类入口时再改 RootView 的传参。
     @Binding var libraryCategory: LibraryHomeView.Category
     @Environment(\.horizontalSizeClass) private var hSizeClass
 
@@ -211,12 +213,6 @@ struct HomeView: View {
                 }
                 DiscoverCard(icon: "person.2.fill", title: "人物", subtitle: "人脸聚类结果", tint: .cyan) {
                     path.append(HomeRoute.persons)
-                }
-                DiscoverCard(icon: "photo.on.rectangle.angled", title: "拍摄集", subtitle: "按拍摄批次浏览", tint: .pink) {
-                    // 切到媒体库 tab + 落准「拍摄集」分类：媒体库 tab 内有二级分类，
-                    // 只切 tab 会落在默认的电影分类，用户还要自己再点一次顶栏 chip。
-                    tab = .library
-                    libraryCategory = .shoot
                 }
                 DiscoverCard(icon: "play.rectangle.fill", title: "短视频连播", subtitle: "刷起来停不下", tint: .orange) {
                     // 切到短视频 tab + 请求随机起始的沉浸刷流。
