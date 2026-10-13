@@ -116,6 +116,10 @@ struct RootView: View {
                     // 返回后有约 350ms 撤层等待期，期内再次进入也必须能重新 push。
                     .id(photoViewer.albumOpenGeneration)
                     .zIndex(2)
+                    // 看图器叠在相册页之上时（相册页里点开了照片），相册页被全屏
+                    // 盖住 → 关掉它的交互：省得它的 UIScrollView / 导航返回手势
+                    // 识别器在图解器里跟看图器的下拉退出手势抢触摸。
+                    .allowsHitTesting(!photoViewer.viewerAboveAlbum)
                 }
             }
         }

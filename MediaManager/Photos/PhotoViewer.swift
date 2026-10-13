@@ -51,6 +51,15 @@ struct PhotoViewerView: View {
     /// 与打开同刻隐藏而不抖（见 show() 注释）。
     @State private var openFade: Double = 0
     @State private var openScale: CGFloat = 1
+    /// 手势「自救」任务：onChanged 每帧重排、onEnded 取消。
+    ///
+    /// ⚠️ 为什么需要它：DragGesture 被**取消**时（典型：从屏幕底部下拉触发系统
+    /// Home 手势，触摸被系统抢走），SwiftUI 的 `onEnded` 根本不会回调 ——
+    /// dismissY 停在半路：图片挂在屏幕中间、黑底半透明，既退不出去也弹不回来，
+    /// 就是用户看到的「下滑到一半卡住」。
+    /// 兜底：手势安静 1s（没有新的 onChanged）就替用户做完决定 ——
+    /// 拖过退出阈值 → 继续退出；没过 → 弹回；横滑被取消 → 相邻图归位。
+    @State private var stuckHealTask: Task<Void, Never>?
 
     // 1:1 需要「图片像素尺寸」与「容器尺寸」
     @State private var imagePixelSize: CGSize?
@@ -166,7 +175,7 @@ struct PhotoViewerView: View {
             }
             scheduleIdleHide()
         }
-        .onDisappear { idleTask?.cancel(); tipTask?.cancel(); detailTask?.cancel() }
+        .onDisappear { idleTask?.cancel(); tipTask?.cancel(); detailTask?.cancel(); stuckHealTask?.cancel() }
         // 详情卡片：看图器**内部**的自绘层，不用 .sheet。
         // ⚠️ sheet 是独立 presentation：它浮在系统窗口的更高层级上，
         // 父视图的 opacity / zIndex / offset 全都管不到它。相册层盖上来时
@@ -242,6 +251,10 @@ struct PhotoViewerView: View {
     private func dragGesture(width: CGFloat) -> some Gesture {
         DragGesture(minimumDistance: 8)
             .onChanged { value in
+                // 退出动画播放中（isClosing）：整层正在飞出去，此时再拖会把图片
+                // 拽回手指位置，而 onEnded 的 close() 又被 isClosing 守卫挡掉
+                // → 卡在退出动画中途。直接忽略这段手势。
+                if isClosing { return }
                 if scale > 1.01 {
                     offset = CGSize(width: lastOffset.width + value.translation.width,
                                     height: lastOffset.height + value.translation.height)
@@ -273,8 +286,12 @@ struct PhotoViewerView: View {
                         presenter.beginDismiss()
                     }
                 }
+                // 手势每帧都在活动 → 重排自救计时（onEnded 会取消它）
+                scheduleStuckHeal()
             }
             .onEnded { value in
+                stuckHealTask?.cancel()
+                if isClosing { return }
                 if scale > 1.01 {
                     lastOffset = offset
                     return
@@ -305,6 +322,29 @@ struct PhotoViewerView: View {
         guard statusBarRestored else { return }
         statusBarRestored = false
         presenter.rehideStatusBar()
+    }
+
+    /// 手势自救：onChanged 每帧重排一个 1s 的检查。若到点仍停在「拖了一半」的
+    /// 状态，说明 onEnded 不会来了（手势被系统取消 / 被守卫挡掉），替用户收尾：
+    /// 拖过退出阈值就继续退出，没过就弹回，横滑被取消就让相邻图归位。
+    private func scheduleStuckHeal() {
+        stuckHealTask?.cancel()
+        stuckHealTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            // 被 onEnded 取消 / 已进入退出流程 → 不用管
+            guard !Task.isCancelled, !isClosing else { return }
+            if dismissY != 0 {
+                if abs(dismissY) > 150 {
+                    // 用户明显是想退出（拖过阈值了）→ 补上那次没来的 onEnded
+                    close(after: dismissY)
+                } else {
+                    withAnimation(Self.pageSpring) { dismissY = 0 }
+                    rehideStatusBar()
+                }
+            } else if trackOffset != 0 {
+                withAnimation(Self.pageSpring) { trackOffset = 0 }
+            }
+        }
     }
 
     private var magnifyGesture: some Gesture {
