@@ -513,6 +513,8 @@ struct AlbumPhotosView: View {
     var onBack: (() -> Void)? = nil
 
     @State private var photos: [Photo] = []
+    /// 瀑布流列数：双指捏合缩放，按「相册照片页」记忆（对齐列表页的卡片宽度记忆）
+    @State private var columns = PhotoGridPrefs.load("albumPhotos", fallback: 4)
     @State private var isLoading = false
     @State private var page = 1
     @State private var hasMore = true
@@ -529,7 +531,8 @@ struct AlbumPhotosView: View {
     var body: some View {
         PhotoGrid(
             photos: photos,
-            columns: 4,
+            columns: columns,
+            onColumnsChange: { columns = $0; PhotoGridPrefs.save("albumPhotos", $0) },
             onSelect: { photo in
                 guard let i = photos.firstIndex(where: { $0.id == photo.id }) else { return }
                 // 全局 overlay 呈现（见 PhotoViewerPresenter 注释）。

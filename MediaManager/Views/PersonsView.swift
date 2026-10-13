@@ -84,6 +84,8 @@ struct PersonPhotosView: View {
     let person: Person
 
     @State private var photos: [Photo] = []
+    /// 瀑布流列数：双指捏合缩放，按「人物照片页」记忆
+    @State private var columns = PhotoGridPrefs.load("personPhotos", fallback: 4)
     @State private var isLoading = false
     @State private var page = 1
     @State private var hasMore = true
@@ -92,7 +94,8 @@ struct PersonPhotosView: View {
     var body: some View {
         PhotoGrid(
             photos: photos,
-            columns: 4,
+            columns: columns,
+            onColumnsChange: { columns = $0; PhotoGridPrefs.save("personPhotos", $0) },
             onSelect: { photo in
                 guard let i = photos.firstIndex(where: { $0.id == photo.id }) else { return }
                 PhotoViewerPresenter.shared.show(photos, index: i, hasMore: hasMore, onLoadMore: {

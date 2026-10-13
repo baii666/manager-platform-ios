@@ -8,6 +8,8 @@ struct ShootDetailView: View {
     @StateObject private var viewModel: ShootDetailViewModel
     /// 同 ShortsView：地址挂 item 上，不用 isPresented + 分离 URL 状态
     @State private var playTarget: PlayerTarget?
+    /// 照片瀑布流列数：双指捏合缩放，按「拍摄集照片」记忆
+    @State private var photoColumns = PhotoGridPrefs.load("shootPhotos", fallback: 3)
 
     private var client: APIClient? { AppSession.shared.client }
 
@@ -44,7 +46,9 @@ struct ShootDetailView: View {
 
                 if viewModel.activeTab == .photos || viewModel.activeTab == .all {
                     if !viewModel.photos.isEmpty {
-                        PhotoGrid(photos: viewModel.viewerPhotos, columns: 3, onSelect: { photo in
+                        PhotoGrid(photos: viewModel.viewerPhotos, columns: photoColumns,
+                                  onColumnsChange: { photoColumns = $0; PhotoGridPrefs.save("shootPhotos", $0) },
+                                  onSelect: { photo in
                             guard let idx = viewModel.viewerPhotos.firstIndex(where: { $0.id == photo.id }) else { return }
                             PhotoViewerPresenter.shared.show(
                                 viewModel.viewerPhotos, index: idx,

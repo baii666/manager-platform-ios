@@ -6,7 +6,16 @@ import UIKit
 // 内存与滚动性能远好于 SwiftUI 自绘网格。
 struct PhotoGrid: UIViewRepresentable {
     let photos: [Photo]
+    /// 初始列数（各页面默认值不同）。⚠️ 它只是初始值 / 外部显式修改的入口：
+    /// 用户捏合后的实时列数以 Coordinator 为准，父视图重渲染不会把它弹回去
+    ///（见 updateUIView 的 syncsColumns 注释）。
     var columns: Int = 3
+    /// 捏合缩放的列数范围。放大（分开手指）→ 列数变少，最小 1 列铺满全宽
+    var minColumns: Int = 1
+    var maxColumns: Int = 6
+    /// 列数变化回调（每步触发）。父视图据此持久化（各页记忆自己的列数），
+    /// 并把 columns 参数同步回来。不传 = 捏合只当场生效，不记忆。
+    var onColumnsChange: ((Int) -> Void)? = nil
     var onSelect: (Photo) -> Void = { _ in }
     var onReachEnd: () -> Void = {}
 
@@ -26,15 +35,39 @@ struct PhotoGrid: UIViewRepresentable {
         cv.prefetchDataSource = context.coordinator
         cv.register(PhotoCell.self, forCellWithReuseIdentifier: PhotoCell.reuseID)
         cv.contentInset = UIEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)
+        // 双指捏合缩放列数（对齐相册列表 / 影视列表页的捏合）。
+        // 挂在 cv 上而不是 SwiftUI 侧：列数是离散档位，原生手势可以直接改布局，
+        // 不经过父视图状态 → 没有每步 reloadData 的闪烁
+        let pinch = UIPinchGestureRecognizer(target: context.coordinator,
+                                             action: #selector(Coordinator.handlePinch(_:)))
+        cv.addGestureRecognizer(pinch)
         context.coordinator.collectionView = cv
         return cv
     }
 
     func updateUIView(_ cv: UICollectionView, context: Context) {
         context.coordinator.parent = self
-        (cv.collectionViewLayout as? MasonryLayout)?.columns = columns
-        cv.reloadData()
+        let layout = cv.collectionViewLayout as? MasonryLayout
+        // columns 参数只在「父视图显式改了它」时跟随（持久化恢复 / 宽度自适应的默认值变化）。
+        // ⚠️ 两个不能无条件写回的理由：
+        // ① 捏合过程中父视图每步都会重渲染走到这里，写回参数会把用户捏出的列数弹回旧值；
+        // ② 无回调页面的参数是常量，而 Coordinator 里的实时值可能已被手势改掉。
+        // 有回调的页面靠 onColumnsChange 把参数同步回来，两边不会打架。
+        if syncsColumns, let layout, layout.columns != columns {
+            layout.columns = columns
+            context.coordinator.liveColumns = columns
+        }
+        // 数据变了才 reload：count + 首尾 id 做指纹，replace 成同长度数组也不会漏判
+        //（以前每次 updateUIView 都 reloadData，捏合时 cell 全量重建会剧烈闪烁）
+        let token = (photos.count, photos.first?.id ?? -1, photos.last?.id ?? -1)
+        if token != context.coordinator.dataToken {
+            context.coordinator.dataToken = token
+            cv.reloadData()
+        }
     }
+
+    /// 父视图是否跟随列数变化（有回调才会把 columns 参数同步回来）
+    private var syncsColumns: Bool { onColumnsChange != nil }
 
     // MARK: Coordinator
 
@@ -44,9 +77,24 @@ struct PhotoGrid: UIViewRepresentable {
         /// 图片加载后回填的真实宽高比（photo.id → 宽/高）。
         /// 对齐网页版 PhotoWaterfallGrid：真实加载尺寸 > 数据 width/height > 后备比例。
         private var ratioCache: [Int: CGFloat] = [:]
+        /// 捏合后的实时列数。父视图的 columns 参数只是初始值，手势改完后以这里为准
+        ///（否则任何父视图刷新都会把用户捏好的列数弹回旧值，见 updateUIView 注释）。
+        /// ⚠️ 不能标 private：updateUIView（外层 struct）要读写它
+        var liveColumns: Int
+        /// 上次 reloadData 时的数据指纹（count + 首尾 id），用于跳过无谓的整表重载。
+        /// ⚠️ 同上，外层 updateUIView 要读写
+        var dataToken: (Int, Int, Int)
+        /// 捏合开始时视野顶部的 item：列数变化后把它钉回顶部，避免内容跳动
+        private var pinchAnchor: IndexPath?
+        /// 每档步进的触感反馈（对齐系统相册捏合的手感）
+        private let feedback = UISelectionFeedbackGenerator()
 
         init(_ parent: PhotoGrid) {
             self.parent = parent
+            self.liveColumns = parent.columns
+            self.dataToken = (parent.photos.count,
+                              parent.photos.first?.id ?? -1,
+                              parent.photos.last?.id ?? -1)
         }
 
         func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
@@ -102,6 +150,67 @@ struct PhotoGrid: UIViewRepresentable {
                 self?.collectionView?.collectionViewLayout.invalidateLayout()
             }
         }
+
+        // MARK: 捏合缩放
+
+        /// 双指捏合 → 列数步进。放大（分开手指）列数变少、合拢列数变多，
+        /// 每跨过一档就把手势参考点重置（scale=1），下次重新累计 —— 连续捏合可以一路缩到底。
+        /// ⚠️ 不能标 private：makeUIView 里用 #selector(Coordinator.handlePinch) 注册，
+        /// 跨类型引用 private 成员编译不过。
+        @objc func handlePinch(_ gesture: UIPinchGestureRecognizer) {
+            guard let cv = collectionView else { return }
+            switch gesture.state {
+            case .began:
+                pinchAnchor = cv.indexPathsForVisibleItems.min(by: { $0.item < $1.item })
+                feedback.prepare()
+            case .changed:
+                let scale = gesture.scale
+                var stepped = false
+                if scale > 1.5, liveColumns > parent.minColumns {
+                    liveColumns -= 1
+                    stepped = true
+                } else if scale < 0.67, liveColumns < parent.maxColumns {
+                    liveColumns += 1
+                    stepped = true
+                }
+                guard stepped else { return }
+                gesture.scale = 1
+                applyColumns(cv)
+                feedback.selectionChanged()
+                feedback.prepare()
+            case .ended, .cancelled, .failed:
+                pinchAnchor = nil
+            default:
+                break
+            }
+        }
+
+        /// 把实时列数写进布局并重排；保持手势开始时顶部那张仍在顶部。
+        /// 只 invalidateLayout 不 reloadData：masonry 布局与数据无关，cell 全部复用。
+        private func applyColumns(_ cv: UICollectionView) {
+            let layout = cv.collectionViewLayout as? MasonryLayout
+            guard layout?.columns != liveColumns else { return }
+            layout?.columns = liveColumns
+            cv.layoutIfNeeded()
+            if let anchor = pinchAnchor, anchor.item < cv.numberOfItems(inSection: 0) {
+                cv.scrollToItem(at: anchor, at: .top, animated: false)
+            }
+            parent.onColumnsChange?(liveColumns)
+        }
+    }
+}
+
+// MARK: - 瀑布流列数记忆
+// 对齐列表页 CardSizePrefs 的思路：每个照片页各记一份，捏合缩到位后下次进来还是那个列数。
+enum PhotoGridPrefs {
+    static func load(_ key: String, fallback: Int) -> Int {
+        // UserDefaults.integer 未命中返回 0，用 >=1 区分「没存过」和「存过 1」
+        let v = UserDefaults.standard.integer(forKey: "photoGrid.columns.\(key)")
+        return v >= 1 ? v : fallback
+    }
+
+    static func save(_ key: String, _ value: Int) {
+        UserDefaults.standard.set(value, forKey: "photoGrid.columns.\(key)")
     }
 }
 

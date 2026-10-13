@@ -43,11 +43,14 @@ struct PhotoBrowserView: View {
     @State private var localViewerIndex: Int?
 
     @StateObject private var viewModel = PhotoBrowserViewModel()
+    /// 瀑布流列数：双指捏合缩放，按「照片浏览页」记忆
+    @State private var columns = PhotoGridPrefs.load("photoBrowser", fallback: 4)
 
     var body: some View {
         PhotoGrid(
             photos: viewModel.photos,
-            columns: 4,
+            columns: columns,
+            onColumnsChange: { columns = $0; PhotoGridPrefs.save("photoBrowser", $0) },
             onSelect: { photo in
                 guard let i = viewModel.photos.firstIndex(where: { $0.id == photo.id }) else { return }
                 if useGlobalViewer {

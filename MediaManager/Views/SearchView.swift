@@ -53,6 +53,9 @@ struct SearchView: View {
     /// 真正拿去请求的词（防抖后写入），避免每敲一个字都打接口
     @State private var activeQuery = ""
     @State private var selectedTab: Tab = .all
+    /// 用户捏合缩放后的照片瀑布流列数。nil = 没捏过，按屏宽给默认列数（见 photoColumns(width:)）；
+    /// 捏过之后听用户的，持久化在 photoSearch 这个 key 下
+    @State private var pinchedColumns: Int?
     /// 关键词命中的结果（不含语义）
     @State private var results: [SearchItem] = []
     @State private var totals: [String: Int] = [:]
@@ -560,7 +563,9 @@ struct SearchView: View {
     private func photoGrid(_ photos: [Photo]) -> some View {
         GeometryReader { geo in
             PhotoGrid(photos: photos,
-                      columns: photoColumns(width: geo.size.width),
+                      // 捏合过就听用户的（持久化），否则按宽度给默认列数
+                      columns: pinchedColumns ?? photoColumns(width: geo.size.width),
+                      onColumnsChange: { pinchedColumns = $0; PhotoGridPrefs.save("photoSearch", $0) },
                       onSelect: { openViewer(photos: viewerPhotos, id: $0.id) },
                       onReachEnd: { Task { await loadMore() } })
                 // ⚠️ 底部扣掉底栏高度：网格不是 ScrollView，没有 safeArea 避让，
