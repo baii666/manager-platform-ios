@@ -425,12 +425,17 @@ final class APIClient: DataProviding, @unchecked Sendable {
         let resp: ActorDetailResponse = try await request("/api/actors/\(id)")
         var profile = resp.actor
         profile.thumbURL = resolve(resp.actor.thumbURL)
-        let resolveWork: (ActorWork) -> ActorWork = { w in
-            var x = w
-            x.posterURL = resolve(w.posterURL)
-            return x
-        }
         return (profile, resp.movies.map(resolveWork), resp.series.map(resolveWork))
+    }
+
+    /// 作品海报是 /raw?path= 相对地址，resolve 成完整 URL。
+    /// ⚠️ 必须是方法、不能写成局部变量闭包：`let f: (ActorWork) -> ActorWork = { ... }`
+    /// 是 escaping 闭包，里面调 resolve 会报「requires explicit use of 'self'」
+    ///（map 的闭包参数是非 escaping，所以直接内联写才不报错）。
+    private func resolveWork(_ w: ActorWork) -> ActorWork {
+        var x = w
+        x.posterURL = resolve(w.posterURL)
+        return x
     }
 
     // MARK: - 拍摄集
