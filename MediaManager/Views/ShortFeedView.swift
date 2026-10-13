@@ -18,9 +18,14 @@ struct ShortFeedView: View {
     /// 退出回调：关掉根层 overlay 回到**进来时的那个 tab**（首页进的回首页、
     /// 短视频页进的回短视频页）—— 刷流挂在 RootView 的 overlay 上，背后就是来源页
     var onClose: () -> Void = {}
-    /// 退出动画**开始**的回调：此刻就要恢复状态栏 / 底栏。
-    /// 等 onClose 再恢复就晚了 —— 背后的页面已经整屏露出，状态栏一出现它整体
-    /// 下移，看着就是返回时那一下「闪」。
+    /// 退出动画**开始**的回调：此刻恢复底栏（.opacity 渐显），
+    /// 等页面滑开时底栏已经在位。等 onClose 再恢复的话，页面已滑开、底栏才冒出来。
+    ///
+    /// ⚠️ 状态栏不在这里处理：它曾经走「打开时隐藏、退出时恢复」的路子，
+    /// 但状态栏显隐是系统级的、无法动画，它一出现窗口 safeArea 就变、背后页面
+    /// 跟着重排 —— 无论提前到动画开始还是延到 close，用户都能看到那一下「闪」。
+    /// 所以改成刷流期间状态栏一直在（RootView 的 statusBarHidden 不含刷流），
+    /// 退出时零变化。
     var onBeginExit: () -> Void = {}
 
     /// 当前正在看的页（scrollPosition 跟踪，滑到哪更新到哪）
@@ -68,8 +73,7 @@ struct ShortFeedView: View {
             .ignoresSafeArea()
 
             // 统一关闭入口（播放器里 xmark 已隐藏，避免两个按钮叠一起）。
-            // 与右滑走同一条退出动画，不再「点了直接消失」——那样没有动画缓冲，
-            // 状态栏/底栏的恢复会硬切一下
+            // 与右滑走同一条退出动画：有动画缓冲，底栏渐显才不会硬切
             Button { beginExit() } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 16, weight: .semibold))
@@ -77,18 +81,18 @@ struct ShortFeedView: View {
                     .frame(width: 38, height: 38)
                     .background(Circle().fill(Color.black.opacity(0.45)))
             }
-            // 顶部按钮同样贴屏幕上沿算，不跟状态栏走（下面整层 ignoresSafeArea）
+            // 顶部按钮按安全区排布（本层不再 ignoresSafeArea）：
+            // 状态栏常驻不隐藏，按钮要落在它下面
             .padding(.top, 8)
             .padding(.leading, 16)
         }
         // 右滑退出：页面跟手向右移动，松手超过阈值向右滑出屏幕（露出背后的来源页）
         .offset(x: dragOffsetX)
-        // ⚠️ 整层不吃安全区：退出动画一开始状态栏就要恢复，
-        // 若本层跟着 safeArea 走，状态栏出现的瞬间整页会下移一截 —— 那下「闪」更明显
-        .ignoresSafeArea()
+        // ⚠️ 本层**不加** ignoresSafeArea（视频层/黑底各自加了，照样铺满全屏）。
+        // 加在整层上会把安全区 inset 清零，关闭按钮就压到状态栏上了；
+        // 而且刷流期间状态栏不再隐藏，也没有「跟着 safeArea 下移」的问题要防。
         .simultaneousGesture(exitDragGesture)
-        // 状态栏由 RootView 统一控制（overlay 里 .statusBar 不一定生效，且退出时要
-        // 与动画同步提前恢复，不能写死 hidden: true）
+        // 状态栏保持系统默认（常驻显示）：由 RootView 统一控制，刷流不参与隐藏
         .onChange(of: currentID) {
             guard let id = currentID,
                   let idx = viewModel.items.firstIndex(where: { $0.id == id }) else { return }
@@ -127,7 +131,7 @@ struct ShortFeedView: View {
     }
 
     /// 统一的退出：整页右移滑出屏幕 → 关闭。
-    /// ⚠️ 顺序很重要：先 onBeginExit（状态栏 / 底栏开始恢复，背后的来源页完成布局），
+    /// ⚠️ 顺序很重要：先 onBeginExit（底栏开始渐显，背后的来源页完成布局），
     /// 再动画，最后 onClose 移除本层。反过来就会看到背后页面「整体下移」的一闪。
     private func beginExit() {
         guard !isExiting else { return }

@@ -80,8 +80,9 @@ struct RootView: View {
             BottomTabBar(selection: $tab)
                 .opacity(overlay.active ? 0 : 1)
                 .allowsHitTesting(!overlay.active)
-                // 渐隐渐显：硬切出现的话，退出刷流时会看到底栏「啪」地跳出来
-                .animation(.easeInOut(duration: 0.15), value: overlay.active)
+                // 渐隐渐显：硬切出现的话，退出刷流时会看到底栏「啪」地跳出来。
+                // 时长对齐刷流滑出（0.28s），底栏是「随页面滑开慢慢浮现」而不是抢在前面冒头
+                .animation(.easeOut(duration: 0.25), value: overlay.active)
         }
         // ⚠️ overlay 必须挂在 safeAreaInset **之后**（外层）：safeAreaInset 的内容
         // 合成在主内容之上，挂在它里面/之前会被底栏压住。看图器要盖住底栏。
@@ -154,10 +155,11 @@ struct RootView: View {
         // ⚠️ 必须叠 isVisible：只看图器可见时才允许它藏状态栏。
         // 否则任何一条退出路径漏恢复（异常退出、手势被系统取消、相册层组合），
         // 残留的 statusBarHidden=true 会让整个 App 永久没有状态栏。
-        // 刷流层不再自带 .statusBar(hidden:)：由这里统一控制，且退出动画一启动
-        // （isExiting）就提前恢复，等页面滑开时背后的来源页已是最终布局，不会「闪」
-        .statusBarHidden((photoViewer.isVisible && photoViewer.statusBarHidden)
-                         || (shortsFeed.isActive && !shortsFeed.isExiting))
+        .statusBarHidden(photoViewer.isVisible && photoViewer.statusBarHidden)
+        // ⚠️ 刷流**不参与**状态栏隐藏（试过两版都不行，见 ShortFeedView 注释）：
+        // 状态栏的显示/隐藏是系统级的、无法动画，它一出现窗口 safeArea 就变，
+        // 背后页面随之重排 —— 无论把恢复时机提前到动画开始还是等 close，
+        // 用户都能看到那一下「闪」。所以刷流期间状态栏一直在，退出时零变化。
     }
 }
 
