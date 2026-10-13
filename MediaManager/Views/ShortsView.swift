@@ -118,7 +118,9 @@ struct ShortsView: View {
         }
         .task { await viewModel.loadInitial() }
         // 首页「短视频连播」卡 → 随机起始的沉浸刷流
-        .onChange(of: randomRequest.generation) { _ in
+        // ⚠️ iOS 17 起 `onChange(of:) { newValue in }`（单参数，含 `{ _ in }`）已废弃，
+        // 统一用零参数闭包，闭包内直接读属性即为新值
+        .onChange(of: randomRequest.generation) {
             // 已在刷流中：忽略（连点只第一次生效）
             guard feedEntry == nil else { return }
             if viewModel.items.isEmpty {
@@ -128,7 +130,7 @@ struct ShortsView: View {
                 startRandomFeed()
             }
         }
-        .onChange(of: viewModel.items.count) { _ in
+        .onChange(of: viewModel.items.count) {
             if pendingRandomOpen, !viewModel.items.isEmpty {
                 pendingRandomOpen = false
                 startRandomFeed()
