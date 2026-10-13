@@ -27,6 +27,11 @@ final class ShortsRandomRequest: ObservableObject {
 final class ShortFeedPresenter: ObservableObject {
     static let shared = ShortFeedPresenter()
     @Published var isActive = false
+    /// 退出动画进行中。
+    /// ⚠️ 状态栏必须在动画**开始**时就恢复，不能等 close()：
+    /// 那时背后的来源页已经整屏露出来了，状态栏再出现会让它的内容整体下移 ——
+    /// 就是返回时那一下「闪」。提前恢复，等页面滑开时背后已经是最终布局。
+    @Published var isExiting = false
     /// 每次打开自增：驱动 ShortFeedView 重建（换起始下标 / 换数据源）。
     /// 不重建的话 ShortFeedView 的 @State currentIndex 还是上一次的。
     @Published var generation = 0
@@ -37,14 +42,23 @@ final class ShortFeedPresenter: ObservableObject {
     func open(viewModel: ShortsViewModel, startIndex: Int) {
         self.viewModel = viewModel
         self.startIndex = startIndex
+        isExiting = false
         generation += 1
         isActive = true
         // 底 bar 在 RootView 的 safeAreaInset 里、层级比刷流高，刷流盖不住它
         FullscreenOverlay.shared.active = true
     }
 
+    /// 退出动画开始（右滑松手 / 点关闭）：状态栏与底栏就在这时恢复，
+    /// 与页面滑出同步，背后的来源页露出来时已经是最终布局
+    func beginExit() {
+        isExiting = true
+        FullscreenOverlay.shared.active = false
+    }
+
     func close() {
         isActive = false
+        isExiting = false
         FullscreenOverlay.shared.active = false
     }
 }

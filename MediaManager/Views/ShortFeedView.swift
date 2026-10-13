@@ -18,6 +18,10 @@ struct ShortFeedView: View {
     /// 退出回调：关掉根层 overlay 回到**进来时的那个 tab**（首页进的回首页、
     /// 短视频页进的回短视频页）—— 刷流挂在 RootView 的 overlay 上，背后就是来源页
     var onClose: () -> Void = {}
+    /// 退出动画**开始**的回调：此刻就要恢复状态栏 / 底栏。
+    /// 等 onClose 再恢复就晚了 —— 背后的页面已经整屏露出，状态栏一出现它整体
+    /// 下移，看着就是返回时那一下「闪」。
+    var onBeginExit: () -> Void = {}
 
     /// 当前正在看的页（scrollPosition 跟踪，滑到哪更新到哪）
     @State private var currentID: Int?
@@ -29,10 +33,13 @@ struct ShortFeedView: View {
     /// 预加载窗口半径：当前页 ±2
     private let windowRadius = 2
 
-    init(viewModel: ShortsViewModel, startIndex: Int, onClose: @escaping () -> Void = {}) {
+    init(viewModel: ShortsViewModel, startIndex: Int,
+         onClose: @escaping () -> Void = {},
+         onBeginExit: @escaping () -> Void = {}) {
         self.viewModel = viewModel
         self.startIndex = startIndex
         self.onClose = onClose
+        self.onBeginExit = onBeginExit
         let idx = min(max(startIndex, 0), viewModel.items.count - 1)
         _currentIndex = State(initialValue: idx)
         _currentID = State(initialValue: viewModel.items.indices.contains(idx) ? viewModel.items[idx].id : nil)
@@ -60,21 +67,28 @@ struct ShortFeedView: View {
             .scrollIndicators(.hidden)
             .ignoresSafeArea()
 
-            // 统一关闭入口（播放器里 xmark 已隐藏，避免两个按钮叠一起）
-            Button { onClose() } label: {
+            // 统一关闭入口（播放器里 xmark 已隐藏，避免两个按钮叠一起）。
+            // 与右滑走同一条退出动画，不再「点了直接消失」——那样没有动画缓冲，
+            // 状态栏/底栏的恢复会硬切一下
+            Button { beginExit() } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(.white)
                     .frame(width: 38, height: 38)
                     .background(Circle().fill(Color.black.opacity(0.45)))
             }
+            // 顶部按钮同样贴屏幕上沿算，不跟状态栏走（下面整层 ignoresSafeArea）
             .padding(.top, 8)
             .padding(.leading, 16)
         }
-        // 右滑退出：页面跟手向右移动，松手超过阈值向右滑出屏幕（露出背后的列表页）
+        // 右滑退出：页面跟手向右移动，松手超过阈值向右滑出屏幕（露出背后的来源页）
         .offset(x: dragOffsetX)
+        // ⚠️ 整层不吃安全区：退出动画一开始状态栏就要恢复，
+        // 若本层跟着 safeArea 走，状态栏出现的瞬间整页会下移一截 —— 那下「闪」更明显
+        .ignoresSafeArea()
         .simultaneousGesture(exitDragGesture)
-        .statusBar(hidden: true)
+        // 状态栏由 RootView 统一控制（overlay 里 .statusBar 不一定生效，且退出时要
+        // 与动画同步提前恢复，不能写死 hidden: true）
         .onChange(of: currentID) {
             guard let id = currentID,
                   let idx = viewModel.items.firstIndex(where: { $0.id == id }) else { return }
@@ -103,20 +117,29 @@ struct ShortFeedView: View {
                 let dx = value.translation.width
                 let dy = value.translation.height
                 if dx > 100, dx > abs(dy) {
-                    isExiting = true
-                    let screenW = UIScreen.main.bounds.width
-                    withAnimation(.easeIn(duration: 0.28)) {
-                        dragOffsetX = screenW + 40
-                    }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                        onClose()
-                    }
+                    beginExit()
                 } else {
                     withAnimation(.easeOut(duration: 0.25)) {
                         dragOffsetX = 0
                     }
                 }
             }
+    }
+
+    /// 统一的退出：整页右移滑出屏幕 → 关闭。
+    /// ⚠️ 顺序很重要：先 onBeginExit（状态栏 / 底栏开始恢复，背后的来源页完成布局），
+    /// 再动画，最后 onClose 移除本层。反过来就会看到背后页面「整体下移」的一闪。
+    private func beginExit() {
+        guard !isExiting else { return }
+        isExiting = true
+        onBeginExit()
+        let screenW = UIScreen.main.bounds.width
+        withAnimation(.easeIn(duration: 0.28)) {
+            dragOffsetX = screenW + 40
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            onClose()
+        }
     }
 }
 
