@@ -49,14 +49,18 @@ struct RootView: View {
     // 各 tab 的导航栈（正常页面跳转用；看图器「进入相册」不走导航栈，见下面的相册层）
     @State private var homePath = NavigationPath()
     @State private var libraryPath = NavigationPath()
+    /// 媒体库 tab 内的二级分类（电影/相册/拍摄集）：提升到根，首页「拍摄集」卡
+    /// 切 tab 的同时能落准分类（只切 tab 会落在默认的电影分类，卡等于半死）。
+    /// 与 tab 对称：用户手动切分类也改这里，两边始终同源。
+    @State private var libraryCategory: LibraryHomeView.Category = .movie
 
     var body: some View {
         ZStack {
-            NavigationStack(path: $homePath) { HomeView(viewModel: viewModel, path: $homePath, tab: $tab) }
+            NavigationStack(path: $homePath) { HomeView(viewModel: viewModel, path: $homePath, tab: $tab, libraryCategory: $libraryCategory) }
                 .opacity(tab == .home ? 1 : 0)
                 .allowsHitTesting(tab == .home)
 
-            NavigationStack(path: $libraryPath) { LibraryHomeView() }
+            NavigationStack(path: $libraryPath) { LibraryHomeView(category: $libraryCategory) }
                 .opacity(tab == .library ? 1 : 0)
                 .allowsHitTesting(tab == .library)
 
@@ -227,7 +231,8 @@ struct LibraryHomeView: View {
         var type: String { rawValue }
     }
 
-    @State private var category: Category = .movie
+    /// 当前二级分类：由根视图持有（binding），首页「拍摄集」卡跨 tab 落准分类用
+    @Binding var category: Category
 
     var body: some View {
         VStack(spacing: 0) {
