@@ -1,5 +1,21 @@
 import SwiftUI
 
+// MARK: - 随机刷流请求（首页「短视频连播」卡 → 随机起始沉浸刷流）
+// 请求方（首页 DiscoverCard）与消费方（ShortsView）分处不同 tab 的 NavigationStack，
+// 没有共同祖先能传 binding，用单例广播（与 RootView 的 FullscreenOverlay 同思路）。
+// generation 自增触发：连点两次也各自生效；消费方不记已消费值，靠 feedEntry == nil 去重。
+final class ShortsRandomRequest: ObservableObject {
+    static let shared = ShortsRandomRequest()
+    /// 自增即代表一次新请求
+    @Published private(set) var generation = 0
+
+    private init() {}
+
+    func request() {
+        generation += 1
+    }
+}
+
 // MARK: - 短视频页
 // 对齐网页端 ShortsPage（消费侧）：池筛选 + 搜索 + 封面墙 + 点开播放
 struct ShortsView: View {
@@ -8,6 +24,10 @@ struct ShortsView: View {
     @State private var feedEntry: ShortFeedEntry?
     /// 播放地址构造失败时给出明确原因，而不是静默什么都不发生
     @State private var playError: String?
+    /// 随机刷流请求（首页「短视频连播」卡）：generation 自增即触发一次
+    @ObservedObject private var randomRequest = ShortsRandomRequest.shared
+    /// 请求到达时 items 还没加载完（首帧 loading 中）：置位，items 到达后补开
+    @State private var pendingRandomOpen = false
 
     private let gridSpacing: CGFloat = 12
     private let edgePadding: CGFloat = 16
@@ -97,6 +117,23 @@ struct ShortsView: View {
             }
         }
         .task { await viewModel.loadInitial() }
+        // 首页「短视频连播」卡 → 随机起始的沉浸刷流
+        .onChange(of: randomRequest.generation) { _ in
+            // 已在刷流中：忽略（连点只第一次生效）
+            guard feedEntry == nil else { return }
+            if viewModel.items.isEmpty {
+                // 首帧 loading 未回：置位，items 到达后由下面的 onChange 补开
+                pendingRandomOpen = true
+            } else {
+                startRandomFeed()
+            }
+        }
+        .onChange(of: viewModel.items.count) { _ in
+            if pendingRandomOpen, !viewModel.items.isEmpty {
+                pendingRandomOpen = false
+                startRandomFeed()
+            }
+        }
 
             // 刷流：用 ZStack overlay 呈现（不用 fullScreenCover），
             // 右滑退出时页面右移、露出背后的列表页
@@ -121,6 +158,15 @@ struct ShortsView: View {
         } message: {
             Text(playError ?? "")
         }
+    }
+
+    // MARK: 随机刷流
+
+    /// 随机起始下标开沉浸刷流：短视频池内随机，沿用当前选中的池 / 搜索范围
+    private func startRandomFeed() {
+        guard !viewModel.items.isEmpty else { return }
+        let idx = Int.random(in: 0..<viewModel.items.count)
+        feedEntry = ShortFeedEntry(id: viewModel.items[idx].id, startIndex: idx)
     }
 }
 

@@ -16,6 +16,8 @@ enum HomeRoute: Hashable {
 struct HomeView: View {
     @ObservedObject var viewModel: HomeViewModel
     @Binding var path: NavigationPath
+    /// 当前底 bar tab：发现区「短视频连播」卡要切到短视频 tab 再开随机刷流
+    @Binding var tab: RootTab
     @Environment(\.horizontalSizeClass) private var hSizeClass
 
     @State private var showingAlbums = false
@@ -204,7 +206,13 @@ struct HomeView: View {
                 }
                 DiscoverCard(icon: "person.2.fill", title: "人物", subtitle: "人脸聚类结果", tint: .cyan)
                 DiscoverCard(icon: "photo.on.rectangle.angled", title: "拍摄集", subtitle: "按拍摄批次浏览", tint: .pink)
-                DiscoverCard(icon: "play.rectangle.fill", title: "短视频连播", subtitle: "刷起来停不下", tint: .orange)
+                DiscoverCard(icon: "play.rectangle.fill", title: "短视频连播", subtitle: "刷起来停不下", tint: .orange) {
+                    // 切到短视频 tab + 请求随机起始的沉浸刷流。
+                    // ShortsView 常驻挂载（四个 tab 都在 ZStack 里，opacity 切换），
+                    // 请求经 ShortsRandomRequest 单例广播；items 没加载完会等到了再开。
+                    tab = .short
+                    ShortsRandomRequest.shared.request()
+                }
             }
         }
     }
