@@ -267,10 +267,13 @@ private struct ShortFeedPage: View {
                                 // 正好和左上角固定的退出按钮挤在一起 —— 刷流里关掉，
                                 // 信息区由本视图统一画在固定位置（左下角标题）
                                 showsControlBar: false,
+                                // 本页成为当前页时把引擎交给外层（右上角固定图标要用）。
+                                // ⚠️ 参数顺序必须和 VideoPlayerView 的声明顺序一致：
+                                // Swift 不允许实参乱序（会报 “must precede argument”）
+                                onEngineReady: onEngineReady,
                                 // 刷流里状态栏常驻（退出时才不会「闪」）：
                                 // 播放器别再自己藏一次，控制条也会自动让开状态栏
-                                hidesStatusBar: false,
-                                onEngineReady: onEngineReady)
+                                hidesStatusBar: false)
             } else {
                 placeholder
             }
