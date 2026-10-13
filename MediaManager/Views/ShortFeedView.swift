@@ -73,13 +73,6 @@ struct ShortFeedView: View {
         _currentID = State(initialValue: viewModel.items.indices.contains(idx) ? viewModel.items[idx].id : nil)
     }
 
-    /// 当前页的标题（左下角固定信息区用，跟着 currentIndex 更新）
-    private var currentTitle: String {
-        viewModel.items.indices.contains(currentIndex)
-            ? viewModel.items[currentIndex].titleText
-            : ""
-    }
-
     var body: some View {
         ZStack(alignment: .topLeading) {
             Color.black.ignoresSafeArea()
@@ -140,28 +133,9 @@ struct ShortFeedView: View {
             .padding(.trailing, 16)
             .padding(.top, 8)
 
-            // 左下角信息区：固定在屏幕上（不随上下滑切换视频移动），内容跟着当前页变。
-            // ⚠️ 之前标题画在内嵌播放器的控制条里 = 每页一份，既跟着视频一起滚，
-            // 又和左上角那个固定不动的退出按钮挤在一起。信息区统一收在这里：
-            // 控制条关掉（里面那套每页一份的 UI 不再跟着滚），标题归左下（抖音式）。
-            VStack(alignment: .leading, spacing: 4) {
-                Text(currentTitle)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
-                    .shadow(color: .black.opacity(0.65), radius: 4, y: 1)
-                // 不显示「第 n / 总数」：刷流是消费场景，用户不需要知道自己在第几条，
-                // 更不该知道总共有多少条（短列表会暴露库规模）。
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-            .padding(.leading, 16)
-            // 右侧留白：标题不顶到屏幕边（也给将来的竖排操作位留地方）
-            .padding(.trailing, 72)
-            // 抬高一点：底部进度条在每页内部跟着滚，标题别压在上面
-            .padding(.bottom, 18)
-            // 撑满整屏只为定位，不能吃掉滑动手势
-            .allowsHitTesting(false)
+            // 刷流的固定 UI 只剩三个角：左上 × / 右上 画中画+投屏 / 左下什么都不放。
+            // 标题和进度条都在每页内部（见 ShortFeedPage），跟着上下滑一起滚 ——
+            // 抖音式：信息是属于那条视频的，不该钉在屏幕上。
         }
         // 右滑退出：页面跟手向右移动，松手超过阈值向右滑出屏幕（露出背后的来源页）
         .offset(x: dragOffsetX)
@@ -262,7 +236,7 @@ private struct ShortFeedPage: View {
                                 dragGesturesEnabled: false,
                                 // 控制条每页一份会跟着上下滑一起滚，且它的片名在左上角、
                                 // 正好和左上角固定的退出按钮挤在一起 —— 刷流里关掉，
-                                // 信息区由本视图统一画在固定位置（左下角标题）
+                                // 信息区由本视图自己画在页面左下角（同样跟着滚）
                                 showsControlBar: false,
                                 // 本页成为当前页时把引擎交给外层（右上角固定图标要用）。
                                 // ⚠️ 参数顺序必须和 VideoPlayerView 的声明顺序一致：
@@ -276,6 +250,25 @@ private struct ShortFeedPage: View {
                                 showsBottomProgressBar: true)
             } else {
                 placeholder
+            }
+            // 左下角标题：画在**本页**内部，和进度条同一层，跟着上下滑一起滚。
+            // ⚠️ 之前它在 ShortFeedView 根层，是钉在屏幕上不动的；用户要的是跟着滚 ——
+            // 抖音式：标题属于这条视频，滑走就该跟它一起走。
+            // 只在拿到播放地址后画：占位图自己已经在中央显示标题了，别叠两份。
+            if target != nil {
+                Text(video.titleText)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                    .shadow(color: .black.opacity(0.65), radius: 4, y: 1)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                    .padding(.leading, 16)
+                    .padding(.trailing, 16)
+                    // 抬高一点，别压到页面底部那条进度条
+                    .padding(.bottom, 18)
+                    // 只为定位，不能吃掉上下滑 / 右滑退出手势
+                    .allowsHitTesting(false)
             }
         }
         // inWindow 或 attempt 变化都重跑；拿到地址后 guard 直接返回，不重复解析
