@@ -218,8 +218,9 @@ struct HomeView: View {
                     // 切到短视频 tab + 请求随机起始的沉浸刷流。
                     // ShortsView 常驻挂载（四个 tab 都在 ZStack 里，opacity 切换），
                     // 请求经 ShortsRandomRequest 单例广播；items 没加载完会等到了再开。
+                    // fromHome：退出刷流后切回首页，不留在短视频列表页。
                     tab = .short
-                    ShortsRandomRequest.shared.request()
+                    ShortsRandomRequest.shared.request(fromHome: true)
                 }
             }
         }

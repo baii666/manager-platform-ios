@@ -8,10 +8,15 @@ final class ShortsRandomRequest: ObservableObject {
     static let shared = ShortsRandomRequest()
     /// 自增即代表一次新请求
     @Published private(set) var generation = 0
+    /// 本次请求是否来自首页「短视频连播」卡。
+    /// 首页进来的，退出刷流要退回首页 tab —— 用户的心理路径是
+    ///「首页 → 刷完 → 回首页」，留在短视频列表页等于把他扔在半路。
+    private(set) var fromHome = false
 
     private init() {}
 
-    func request() {
+    func request(fromHome: Bool = false) {
+        self.fromHome = fromHome
         generation += 1
     }
 }
@@ -20,8 +25,12 @@ final class ShortsRandomRequest: ObservableObject {
 // 对齐网页端 ShortsPage（消费侧）：池筛选 + 搜索 + 封面墙 + 点开播放
 struct ShortsView: View {
     @StateObject private var viewModel = ShortsViewModel()
+    /// 底 bar tab：从首页卡发起的刷流，退出后要切回首页
+    @Binding var tab: RootTab
     /// 刷流入口：点卡片后带着起始下标弹全屏抖音式刷流
     @State private var feedEntry: ShortFeedEntry?
+    /// 当前这次刷流是否由首页「短视频连播」卡发起（决定退出后切不切回首页）
+    @State private var feedFromHome = false
     /// 播放地址构造失败时给出明确原因，而不是静默什么都不发生
     @State private var playError: String?
     /// 随机刷流请求（首页「短视频连播」卡）：generation 自增即触发一次
@@ -141,7 +150,15 @@ struct ShortsView: View {
             // 右滑退出时页面右移、露出背后的列表页
             if let entry = feedEntry {
                 ShortFeedView(viewModel: viewModel, startIndex: entry.startIndex,
-                              onClose: { feedEntry = nil })
+                              onClose: {
+                    feedEntry = nil
+                    // 首页卡进来的：退出刷流直接回首页。
+                    // 与 feedEntry 同一次渲染更新，不会先闪一下短视频列表页再跳。
+                    if feedFromHome {
+                        feedFromHome = false
+                        tab = .home
+                    }
+                })
                     .transition(.move(edge: .trailing))
                     .zIndex(1)
             }
@@ -168,6 +185,8 @@ struct ShortsView: View {
     private func startRandomFeed() {
         guard !viewModel.items.isEmpty else { return }
         let idx = Int.random(in: 0..<viewModel.items.count)
+        // 记下来源：startRandomFeed 只被首页卡的请求触发，卡片点进来的不走这里
+        feedFromHome = randomRequest.fromHome
         feedEntry = ShortFeedEntry(id: viewModel.items[idx].id, startIndex: idx)
     }
 }

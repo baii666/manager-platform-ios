@@ -64,7 +64,8 @@ struct RootView: View {
                 .opacity(tab == .library ? 1 : 0)
                 .allowsHitTesting(tab == .library)
 
-            NavigationStack { ShortsView() }
+            // 传 tab：首页「短视频连播」卡进的刷流，退出后要切回首页
+            NavigationStack { ShortsView(tab: $tab) }
                 .opacity(tab == .short ? 1 : 0)
                 .allowsHitTesting(tab == .short)
 
