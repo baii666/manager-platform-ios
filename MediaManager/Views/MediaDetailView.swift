@@ -152,14 +152,22 @@ struct MediaDetailView: View {
                     }
                 }
 
-                // 演员
+                // 演员（有 id 的跳演员详情页；后端 2026-10-13 起在 actors 里输出 id，
+                // 老数据 / JSON 兜底没有 id → 保持不可点，不会坏）
                 if !d.actors.isEmpty {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("演员").font(.headline)
                         ScrollView(.horizontal, showsIndicators: false) {
                             LazyHStack(spacing: 14) {
                                 ForEach(d.actors) { actor in
-                                    ActorChip(actor: actor)
+                                    if let actorId = actor.actorId {
+                                        NavigationLink(value: ActorRoute(id: actorId)) {
+                                            ActorChip(actor: actor)
+                                        }
+                                        .buttonStyle(.plain)
+                                    } else {
+                                        ActorChip(actor: actor)
+                                    }
                                 }
                             }
                             .padding(.horizontal, 2)
@@ -231,6 +239,10 @@ struct MediaDetailView: View {
             .bottomBarClearance()
         }
         .appBackground()
+        // 演员头像 → 演员详情页（ActorRoute 包一层，避免与栈里其它 Int value 撞车）
+        .navigationDestination(for: ActorRoute.self) { route in
+            ActorDetailView(actorId: route.id)
+        }
     }
 
     // 把剧照 URL 适配成 Photo（看图器需要）

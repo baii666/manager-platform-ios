@@ -618,12 +618,16 @@ struct Actor: Identifiable, Codable, Sendable {
     let name: String
     var role: String? = nil
     var thumbURL: URL? = nil
+    /// 演员库 id。⚠️ 后端 media.go 2026-10-13 起在 actors 里输出 id（列表/详情两处），
+    /// 老数据 / JSON 兜底分支没有这个字段 → 可选。详情页演员头像靠它跳演员页。
+    var actorId: Int? = nil
 
     var initial: String { String((name.first ?? "?").uppercased()) }
 
     enum CodingKeys: String, CodingKey {
         case id, name, role
         case thumbURL = "thumb"
+        case actorId = "id"
     }
 
     init(name: String, role: String? = nil, thumbURL: URL? = nil) {
@@ -639,6 +643,118 @@ struct Actor: Identifiable, Codable, Sendable {
         id = name
         role = optString(c, .role)
         thumbURL = flexURL(c, .thumbURL)
+        actorId = optInt(c, .actorId)
+    }
+}
+
+// MARK: - 人物（人脸聚类）
+// 对应 GET /api/persons 列表项（face_cluster_persons_* 分表，跨媒体库全局聚合）
+struct Person: Identifiable, Codable, Sendable, Hashable {
+    let id: Int
+    var name: String = ""
+    var faceCount: Int = 0
+    var representativeFaceId: Int?
+    var representativePhotoId: Int?
+
+    /// 未命名的人物（聚类产物默认名为空）显示「未命名」
+    var displayName: String { name.isEmpty ? "未命名" : name }
+
+    enum CodingKeys: String, CodingKey {
+        case id, name
+        case faceCount = "face_count"
+        case representativeFaceId = "representative_face_id"
+        case representativePhotoId = "representative_photo_id"
+    }
+}
+
+// MARK: - 演员库条目
+// 对应 GET /api/actors 列表项。⚠️ 与上面内嵌的 Actor 区分：那个是影片详情里的
+// {name, role, thumb}（ historically 没有 id），这个是演员库条目，必有 id。
+struct ActorItem: Identifiable, Codable, Sendable, Hashable {
+    let id: Int
+    var name: String = ""
+    var displayName: String?
+    /// /raw?path= 相对地址，APIClient 取出时会 resolve 成完整 URL
+    var thumbURL: URL? = nil
+    var movieCount: Int = 0
+    var seriesCount: Int = 0
+
+    /// 展示名优先 display_name（后台人工改过的名），回退 name
+    var title: String {
+        if let d = displayName, !d.isEmpty { return d }
+        return name
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, name
+        case displayName = "display_name"
+        case thumbURL = "thumb"
+        case movieCount = "movie_count"
+        case seriesCount = "series_count"
+    }
+}
+
+// MARK: - 演员详情
+// 对应 GET /api/actors/:id 的 actor 对象
+struct ActorProfile: Identifiable, Decodable, Sendable {
+    let id: Int
+    var name: String = ""
+    var displayName: String?
+    var thumbURL: URL? = nil
+    var biography: String?
+    var birthday: String?
+    var aliases: [String] = []
+    var linkedActors: [ActorItem] = []
+
+    var title: String {
+        if let d = displayName, !d.isEmpty { return d }
+        return name
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, biography, birthday, aliases
+        case displayName = "display_name"
+        case thumbURL = "thumb"
+        case linkedActors = "linked_actors"
+    }
+}
+
+// MARK: - 演员作品
+// 对应 GET /api/actors/:id 的 movies[] / series[] 项。
+// ⚠️ rating 后端是 *string（"8.5"），按 Double 解会 typeMismatch 整页挂掉
+struct ActorWork: Identifiable, Decodable, Sendable {
+    let id: Int
+    var title: String = ""
+    var year: Int?
+    var rating: Double?
+    var role: String?
+    var libraryId: Int = 0
+    var libraryName: String = ""
+    /// 海报地址（后端已拼成 /raw?path= 相对地址，APIClient resolve）
+    var posterURL: URL? = nil
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, year, rating, role
+        case libraryId = "library_id"
+        case libraryName = "library_name"
+        case posterURL = "poster_path"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(Int.self, forKey: .id)
+        title = (try? c.decode(String.self, forKey: .title)) ?? ""
+        year = optInt(c, .year)
+        role = optString(c, .role)
+        libraryId = optInt(c, .libraryId) ?? 0
+        libraryName = (try? c.decode(String.self, forKey: .libraryName)) ?? ""
+        posterURL = flexURL(c, .posterURL)
+        // rating：兼容 "8.5" / 8.5 / null
+        if let d = try? c.decode(Double.self, forKey: .rating) {
+            rating = d
+        } else if let s = try? c.decode(String.self, forKey: .rating) {
+            rating = Double(s)
+        }
     }
 }
 

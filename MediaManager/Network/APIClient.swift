@@ -371,6 +371,68 @@ final class APIClient: DataProviding, @unchecked Sendable {
         return detail
     }
 
+    // MARK: - 人物（人脸聚类）
+
+    /// 人物列表。GET /api/persons?page&size&sort&q
+    /// sort：face_count（默认，照片多的在前）/ name
+    func fetchPersons(page: Int = 1, size: Int = 60, sort: String = "face_count", q: String? = nil) async throws -> (items: [Person], total: Int) {
+        var qi: [URLQueryItem] = [
+            URLQueryItem(name: "page", value: "\(page)"),
+            URLQueryItem(name: "size", value: "\(size)"),
+            URLQueryItem(name: "sort", value: sort),
+        ]
+        if let q, !q.isEmpty { qi.append(URLQueryItem(name: "q", value: q)) }
+        let resp: PersonsPageResponse = try await request("/api/persons", queryItems: qi)
+        return (resp.persons, resp.total)
+    }
+
+    /// 人物照片。GET /api/persons/:id/photos?page&size
+    /// ⚠️ 后端返回的 photos 项字段（id/file_name/library_id/width/height/album_id）
+    /// 与 Photo 的 CodingKeys 全对齐，直接解成 [Photo]，复用 resolvePhoto 拼地址
+    func fetchPersonPhotos(personId: Int, page: Int = 1, size: Int = 60) async throws -> (items: [Photo], total: Int) {
+        let resp: PersonPhotosResponse = try await request(
+            "/api/persons/\(personId)/photos", queryItems: [
+                URLQueryItem(name: "page", value: "\(page)"),
+                URLQueryItem(name: "size", value: "\(size)"),
+            ]
+        )
+        return (resp.photos.map { resolvePhoto($0) }, resp.total)
+    }
+
+    // MARK: - 演员
+
+    /// 演员库列表。GET /api/actors?page&size&sort&q
+    /// sort：count（默认，作品多的在前）/ name
+    func fetchActors(page: Int = 1, size: Int = 60, sort: String = "count", q: String? = nil) async throws -> (items: [ActorItem], total: Int, hasMore: Bool) {
+        var qi: [URLQueryItem] = [
+            URLQueryItem(name: "page", value: "\(page)"),
+            URLQueryItem(name: "size", value: "\(size)"),
+            URLQueryItem(name: "sort", value: sort),
+        ]
+        if let q, !q.isEmpty { qi.append(URLQueryItem(name: "q", value: q)) }
+        let resp: ActorsPageResponse = try await request("/api/actors", queryItems: qi)
+        // thumb 是 /raw?path= 相对地址，resolve 成完整 URL 再交给 RemoteImage
+        let items = resp.actors.map { a -> ActorItem in
+            var item = a
+            item.thumbURL = resolve(a.thumbURL)
+            return item
+        }
+        return (items, resp.total, resp.hasMore)
+    }
+
+    /// 演员详情。GET /api/actors/:id → {actor, movies, series}
+    func fetchActorDetail(id: Int) async throws -> (profile: ActorProfile, movies: [ActorWork], series: [ActorWork]) {
+        let resp: ActorDetailResponse = try await request("/api/actors/\(id)")
+        var profile = resp.actor
+        profile.thumbURL = resolve(resp.actor.thumbURL)
+        let resolveWork: (ActorWork) -> ActorWork = { w in
+            var x = w
+            x.posterURL = resolve(w.posterURL)
+            return x
+        }
+        return (profile, resp.movies.map(resolveWork), resp.series.map(resolveWork))
+    }
+
     // MARK: - 拍摄集
 
     func fetchShoots(libraryId: Int? = nil, page: Int = 1, size: Int = 30,
@@ -836,6 +898,32 @@ private struct MediaListResponse: Decodable {
 private struct AlbumListResponse: Decodable {
     let folders: [Album]
     let total: Int
+}
+
+/// GET /api/persons 列表响应
+private struct PersonsPageResponse: Decodable {
+    let persons: [Person]
+    let total: Int
+}
+
+/// GET /api/persons/:id/photos 响应（photos 字段与 Photo 的 CodingKeys 全对齐）
+private struct PersonPhotosResponse: Decodable {
+    let photos: [Photo]
+    let total: Int
+}
+
+/// GET /api/actors 列表响应
+private struct ActorsPageResponse: Decodable {
+    let actors: [ActorItem]
+    let total: Int
+    let hasMore: Bool
+}
+
+/// GET /api/actors/:id 响应
+private struct ActorDetailResponse: Decodable {
+    let actor: ActorProfile
+    let movies: [ActorWork]
+    let series: [ActorWork]
 }
 
 private struct SearchResponse: Decodable {

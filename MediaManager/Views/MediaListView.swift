@@ -166,6 +166,8 @@ struct MediaListView: View {
     @StateObject private var viewModel: MediaListViewModel
     @StateObject private var layout: CardLayoutController
     @State private var selected: MediaItem?
+    /// 工具栏「演员」chip → 演员库页（按演员找片，电影/剧集共用）
+    @State private var showActors = false
     /// 捏合手势起始宽度（MagnificationGesture 的 scale 相对手势开始，需记下起始值）
     @State private var pinchStartWidth: CGFloat = 0
     /// 窄屏（iPhone）下隐藏滑块与计数 —— 一行塞不下时优先让出冗余信息（捏合也能缩放）
@@ -246,6 +248,10 @@ struct MediaListView: View {
             // 按钮之间等距等高，计数与按钮之间单独留 countGap（纯文本与可点按钮视觉分组）
             TrailingToolsItem {
                 sortMenu
+                // 演员库入口：按演员找片（对齐网页端左侧「演员」导航项）
+                ToolChip(label: "演员", icon: "person.2.fill") {
+                    showActors = true
+                }
                 // 只留图标：图标本身够直观，省下的宽度留给搜索框
                 ToolChip(label: layout.landscape ? "横版" : "竖版",
                          icon: layout.landscape ? "rectangle" : "rectangle.portrait",
@@ -298,6 +304,9 @@ struct MediaListView: View {
         .task { await viewModel.loadLibraries() }
         .navigationDestination(item: $selected) { item in
             MediaDetailView(media: item)
+        }
+        .navigationDestination(isPresented: $showActors) {
+            ActorsView()
         }
     }
 

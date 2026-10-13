@@ -185,6 +185,10 @@ struct AlbumListView: View {
         GeometryReader { geo in
             let grid = gridLayout(containerWidth: geo.size.width)
             ScrollView {
+                // 人物（人脸聚类）：照片的第二种组织方式，与相册并列。
+                // 自己拉数据（全局聚类，不按库/排序过滤），见 AlbumPersonsRow
+                AlbumPersonsRow()
+                    .padding(.horizontal, 16)
                 LazyVGrid(columns: grid.columns, spacing: 18) {
                     ForEach(viewModel.albums) { album in
                         NavigationLink(value: album) {
@@ -279,6 +283,10 @@ struct AlbumListView: View {
         }
         .navigationDestination(for: Album.self) { album in
             AlbumPhotosView(album: album, libID: viewModel.selectedLibID ?? 0)
+        }
+        // 顶部人物行 → 人物照片页（Person 是 Hashable，与 Album 同为 value 型 destination）
+        .navigationDestination(for: Person.self) { person in
+            PersonPhotosView(person: person)
         }
         .overlay {
             if viewModel.albums.isEmpty && !viewModel.isLoading {
@@ -440,6 +448,58 @@ struct AlbumCard: View {
                 .stroke(Color(uiColor: .separator).opacity(0.6), lineWidth: 0.5)
         }
         .shadow(color: .black.opacity(0.10), radius: 8, x: 0, y: 3)
+    }
+}
+
+// MARK: - 相册列表页顶部的人物行
+// 人物是全局人脸聚类（不按媒体库过滤），与相册并列作为「看照片」的第二种组织方式
+// （网页端 PersonsPage 是顶级路由，iOS 消费端收进相册分类内，见 IA 决策）。
+// 自己持一个 PersonsViewModel：不吃 AlbumListViewModel 的库/排序/搜索状态，
+// 也不参与相册网格翻页。加载中/失败/为空都不占位 —— 相册列表才是本页主角。
+private struct AlbumPersonsRow: View {
+    @StateObject private var viewModel = PersonsViewModel()
+
+    var body: some View {
+        Group {
+            if !viewModel.items.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    SectionHeader(icon: "person.2.fill", title: "人物")
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        LazyHStack(spacing: 12) {
+                            ForEach(viewModel.items.prefix(20)) { person in
+                                NavigationLink(value: person) {
+                                    VStack(spacing: 6) {
+                                        avatar(person)
+                                        Text(person.displayName)
+                                            .font(.caption2)
+                                            .lineLimit(1)
+                                            .frame(width: 64)
+                                    }
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.horizontal, 2)
+                    }
+                }
+                .padding(.bottom, 6)
+            }
+        }
+        .task { await viewModel.loadInitial() }
+    }
+
+    /// 代表脸头像（/face-thumb）；没有代表脸时 RemoteImage 走占位图标
+    private func avatar(_ person: Person) -> some View {
+        RemoteImage(url: avatarURL(person), fallbackIcon: "person.fill",
+                    fallbackColors: Theme.placeholderGradient(for: .photo))
+            .imageFilled()
+            .frame(width: 64, height: 64)
+            .clipShape(Circle())
+    }
+
+    private func avatarURL(_ person: Person) -> URL? {
+        guard let faceId = person.representativeFaceId else { return nil }
+        return AppSession.shared.client?.faceThumbURL(faceId)
     }
 }
 

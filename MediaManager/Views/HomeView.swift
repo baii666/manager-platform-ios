@@ -7,6 +7,7 @@ import UIKit
 // append 会把这些页面顶掉 → 返回直接回主页。统一改成 for: 类型 + path 驱动。
 enum HomeRoute: Hashable {
     case photoBrowser
+    case persons
     case search(initialQuery: String, semantic: Bool)
 }
 
@@ -62,6 +63,8 @@ struct HomeView: View {
             switch route {
             case .photoBrowser:
                 PhotoBrowserView()
+            case .persons:
+                PersonsView()
             case .search(let q, let semantic):
                 SearchView(initialQuery: q, semantic: semantic)
             }
@@ -204,7 +207,9 @@ struct HomeView: View {
                 DiscoverCard(icon: "shuffle", title: "随机照片", subtitle: "从图库里随便逛", tint: .green) {
                     path.append(HomeRoute.photoBrowser)
                 }
-                DiscoverCard(icon: "person.2.fill", title: "人物", subtitle: "人脸聚类结果", tint: .cyan)
+                DiscoverCard(icon: "person.2.fill", title: "人物", subtitle: "人脸聚类结果", tint: .cyan) {
+                    path.append(HomeRoute.persons)
+                }
                 DiscoverCard(icon: "photo.on.rectangle.angled", title: "拍摄集", subtitle: "按拍摄批次浏览", tint: .pink)
                 DiscoverCard(icon: "play.rectangle.fill", title: "短视频连播", subtitle: "刷起来停不下", tint: .orange) {
                     // 切到短视频 tab + 请求随机起始的沉浸刷流。
