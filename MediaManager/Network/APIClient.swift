@@ -403,11 +403,14 @@ final class APIClient: DataProviding, @unchecked Sendable {
 
     /// 演员库列表。GET /api/actors?page&size&sort&q
     /// sort：count（默认，作品多的在前）/ name
-    func fetchActors(page: Int = 1, size: Int = 60, sort: String = "count", q: String? = nil) async throws -> (items: [ActorItem], total: Int, hasMore: Bool) {
+    func fetchActors(page: Int = 1, size: Int = 60, sort: String = "count",
+                     descending: Bool = true, q: String? = nil) async throws -> (items: [ActorItem], total: Int, hasMore: Bool) {
         var qi: [URLQueryItem] = [
             URLQueryItem(name: "page", value: "\(page)"),
             URLQueryItem(name: "size", value: "\(size)"),
             URLQueryItem(name: "sort", value: sort),
+            // 后端只认 asc；其余（含不传）一律按 DESC 处理
+            URLQueryItem(name: "order", value: descending ? "desc" : "asc"),
         ]
         if let q, !q.isEmpty { qi.append(URLQueryItem(name: "q", value: q)) }
         let resp: ActorsPageResponse = try await request("/api/actors", queryItems: qi)
@@ -441,11 +444,13 @@ final class APIClient: DataProviding, @unchecked Sendable {
     // MARK: - 拍摄集
 
     func fetchShoots(libraryId: Int? = nil, page: Int = 1, size: Int = 30,
-                     sort: String = "mtime", search: String? = nil) async throws -> ([Shoot], Int) {
+                     sort: String = "mtime", descending: Bool = true, search: String? = nil) async throws -> ([Shoot], Int) {
         var qi: [URLQueryItem] = [
             URLQueryItem(name: "page", value: "\(page)"),
             URLQueryItem(name: "limit", value: "\(size)"),
             URLQueryItem(name: "sort", value: sort),
+            // 后端只认 asc；其余（含不传）一律按 DESC 处理
+            URLQueryItem(name: "order", value: descending ? "desc" : "asc"),
         ]
         if let libraryId, libraryId > 0 { qi.append(URLQueryItem(name: "libraryId", value: "\(libraryId)")) }
         if let search, !search.isEmpty { qi.append(URLQueryItem(name: "search", value: search)) }
@@ -484,10 +489,14 @@ final class APIClient: DataProviding, @unchecked Sendable {
     // MARK: - 短视频
 
     func fetchShortVideos(poolId: Int? = nil, page: Int = 1, size: Int = 60,
+                          sort: String = "created", descending: Bool = true,
                           q: String? = nil, cover: String = "all") async throws -> ([ShortVideo], Int) {
         var qi: [URLQueryItem] = [
             URLQueryItem(name: "page", value: "\(page)"),
             URLQueryItem(name: "size", value: "\(size)"),
+            URLQueryItem(name: "sort", value: sort),
+            // 后端只认 asc；其余（含不传）一律按 DESC 处理
+            URLQueryItem(name: "order", value: descending ? "desc" : "asc"),
         ]
         if let poolId, poolId > 0 { qi.append(URLQueryItem(name: "pool", value: "\(poolId)")) }
         if let q, !q.isEmpty { qi.append(URLQueryItem(name: "q", value: q)) }

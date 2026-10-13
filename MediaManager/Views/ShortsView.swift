@@ -126,6 +126,26 @@ struct ShortsView: View {
         .refreshable { await viewModel.refresh() }
         .searchable(text: $viewModel.searchText, prompt: "搜索文件名…")
         .toolbar {
+            // 排序字段（与电影/相册/拍摄集列表同一套 ToolMenuChip 胶囊样式）
+            ToolbarItem(placement: .topBarTrailing) {
+                ToolMenuChip(label: viewModel.sort.label) {
+                    ForEach(ShortsViewModel.Sort.allCases, id: \.self) { s in
+                        Button {
+                            Task { await viewModel.setSort(s) }
+                        } label: {
+                            if viewModel.sort == s { Label(s.label, systemImage: "checkmark") }
+                            else { Text(s.label) }
+                        }
+                    }
+                }
+            }
+            // 升/降序开关：只图标，箭头朝向即当前方向
+            ToolbarItem(placement: .topBarTrailing) {
+                ToolChip(label: "降序", icon: viewModel.descending ? "arrow.down" : "arrow.up",
+                         highlighted: viewModel.descending, iconOnly: true) {
+                    Task { await viewModel.toggleDirection() }
+                }
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     Button { Task { await viewModel.selectPool(nil) } } label: {
@@ -201,13 +221,40 @@ struct ShortsView: View {
 
 // MARK: - 短视频 VM
 final class ShortsViewModel: ObservableObject {
+    /// 排序字段。方向单独一档（descending）—— 后端 /api/shorts/videos 是
+    /// `sort=<字段>&order=asc|desc` 两个参数，别硬拼成一对枚举。
+    enum Sort: String, CaseIterable, Sendable {
+        case created, title, duration, size, year
+        var label: String {
+            switch self {
+            case .created: return "入库时间"
+            case .title: return "标题"
+            case .duration: return "时长"
+            case .size: return "文件大小"
+            case .year: return "年份"
+            }
+        }
+    }
+
     @Published var items: [ShortVideo] = []
     @Published var pools: [ShortPool] = []
     @Published var selectedPoolID: Int?
-    @Published var searchText = ""
+    @Published var searchText = "" {
+        didSet { ListSearchPrefs.saveSearch(prefsPage, searchText) }
+    }
+    @Published var sort: Sort {
+        didSet { ListSearchPrefs.saveSort(prefsPage, raw: sort.rawValue) }
+    }
+    /// 升/降序。true = 降序（默认）：新的/大的在前
+    @Published var descending: Bool {
+        didSet { ListSearchPrefs.saveDescending(prefsPage, descending) }
+    }
     @Published var totalCount = 0
     @Published var isLoading = false
     @Published var errorMessage: String?
+
+    /// 记忆键按「页」分
+    private let prefsPage = "shorts"
 
     var client: APIClient? { AppSession.shared.client }
     var selectedPoolName: String {
@@ -218,6 +265,13 @@ final class ShortsViewModel: ObservableObject {
     private var page = 1
     private let pageSize = 60
     private var hasMore = true
+
+    init() {
+        // 还原上次的搜索词 / 排序 / 方向（没记过就用默认值）
+        self.searchText = ListSearchPrefs.loadSearch(prefsPage)
+        self.sort = ListSearchPrefs.loadSort(prefsPage, fallback: .created)
+        self.descending = ListSearchPrefs.loadDescending(prefsPage, fallback: true)
+    }
 
     @MainActor
     func loadInitial() async {
@@ -233,6 +287,21 @@ final class ShortsViewModel: ObservableObject {
     @MainActor
     func selectPool(_ id: Int?) async {
         selectedPoolID = id
+        await reload()
+    }
+
+    /// 切换排序字段
+    @MainActor
+    func setSort(_ s: Sort) async {
+        guard sort != s else { return }
+        sort = s
+        await reload()
+    }
+
+    /// 切换升/降序（字段不变）
+    @MainActor
+    func toggleDirection() async {
+        descending.toggle()
         await reload()
     }
 
@@ -255,6 +324,7 @@ final class ShortsViewModel: ObservableObject {
         do {
             let (batch, total) = try await client.fetchShortVideos(
                 poolId: selectedPoolID, page: page, size: pageSize,
+                sort: sort.rawValue, descending: descending,
                 q: searchText.isEmpty ? nil : searchText)
             totalCount = total
             items = batch
@@ -273,6 +343,7 @@ final class ShortsViewModel: ObservableObject {
         do {
             let (batch, total) = try await client.fetchShortVideos(
                 poolId: selectedPoolID, page: page, size: pageSize,
+                sort: sort.rawValue, descending: descending,
                 q: searchText.isEmpty ? nil : searchText)
             totalCount = total
             items.append(contentsOf: batch)

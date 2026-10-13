@@ -31,11 +31,20 @@ final class AlbumListViewModel: ObservableObject {
     @Published var albums: [Album] = []
     @Published var libraries: [Library] = []
     @Published var selectedLibID: Int?
-    @Published var sort: Sort = .updatedDesc
-    @Published var searchText = ""
+    /// 排序：初值从本机记忆还原（见 ListSearchPrefs），didSet 里落盘
+    @Published var sort: Sort {
+        didSet { ListSearchPrefs.saveSort(prefsPage, raw: sort.rawValue) }
+    }
+    /// 搜索词：同样记忆 —— 离开页面再回来（含杀进程重开）不用重新打字
+    @Published var searchText = "" {
+        didSet { ListSearchPrefs.saveSearch(prefsPage, searchText) }
+    }
     @Published var totalCount = 0
     @Published var isLoading = false
     @Published var errorMessage: String?
+
+    /// 记忆键按「页」分：相册列表记一份
+    private let prefsPage = "albums"
 
     private var page = 1
     private let pageSize = 60
@@ -48,6 +57,9 @@ final class AlbumListViewModel: ObservableObject {
     init(library: Library? = nil) {
         self.fixedLibrary = library
         self.selectedLibID = library?.id
+        // 还原上次的搜索词与排序（没记过就用默认值）
+        self.searchText = ListSearchPrefs.loadSearch(prefsPage)
+        self.sort = ListSearchPrefs.loadSort(prefsPage, fallback: .updatedDesc)
     }
 
     @MainActor

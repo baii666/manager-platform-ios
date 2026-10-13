@@ -4,22 +4,32 @@ import UIKit
 // MARK: - 影视列表状态
 // 对齐网页端 MediaListPage：selectedLibID 为 nil 时不传 lib，后端返回用户可见媒体库的全集
 final class MediaListViewModel: ObservableObject {
-    /// 排序方式（对齐网页版 MediaListPage 的 SORT_OPTIONS + 后端 /api/media sortMap）
+    /// 排序方式（对齐网页版 MediaListPage 的 SORT_OPTIONS + 后端 /api/media sortMap）。
+    /// ⚠️ 每个维度都做成降序在前、升序在后的一对：只有降序档的维度，
+    /// 用户没法按「最早的先看」，那正是这次要补的「升降序」。
     enum Sort: String, CaseIterable, Sendable {
         case updated = "updated_desc"
+        case updatedAsc = "updated_asc"
         case title = "title"
         case titleDesc = "title_desc"
         case year = "year_desc"
+        case yearAsc = "year_asc"
         case rating = "rating_desc"
+        case ratingAsc = "rating_asc"
         case premiered = "premiered_desc"
+        case premieredAsc = "premiered_asc"
         var label: String {
             switch self {
             case .updated: return "最新更新"
+            case .updatedAsc: return "最早更新"
             case .title: return "标题 A→Z"
             case .titleDesc: return "标题 Z→A"
-            case .year: return "年份"
-            case .rating: return "评分"
-            case .premiered: return "上映日期"
+            case .year: return "年份 新→旧"
+            case .yearAsc: return "年份 旧→新"
+            case .rating: return "评分 高→低"
+            case .ratingAsc: return "评分 低→高"
+            case .premiered: return "上映 新→旧"
+            case .premieredAsc: return "上映 旧→新"
             }
         }
     }
@@ -31,11 +41,20 @@ final class MediaListViewModel: ObservableObject {
     @Published var items: [MediaItem] = []
     @Published var libraries: [Library] = []
     @Published var selectedLibID: Int?
-    @Published var sort: Sort = .updated
-    @Published var searchText = ""
+    /// 排序：初值从本机记忆还原（见 ListSearchPrefs），didSet 里落盘
+    @Published var sort: Sort {
+        didSet { ListSearchPrefs.saveSort(prefsPage, raw: sort.rawValue) }
+    }
+    /// 搜索词：同样记忆 —— 离开页面再回来（含杀进程重开）不用重新打字
+    @Published var searchText = "" {
+        didSet { ListSearchPrefs.saveSearch(prefsPage, searchText) }
+    }
     @Published var totalCount = 0
     @Published var isLoading = false
     @Published var errorMessage: String?
+
+    /// 记忆键按「页」分：电影和剧集各记一份，互不串味
+    private let prefsPage: String
 
     private var page = 1
     private let pageSize = 60
@@ -49,6 +68,10 @@ final class MediaListViewModel: ObservableObject {
         self.type = type
         self.fixedLibrary = library
         self.selectedLibID = library?.id
+        self.prefsPage = "media.\(type)"
+        // 还原上次的搜索词与排序（没记过就用默认值）
+        self.searchText = ListSearchPrefs.loadSearch(prefsPage)
+        self.sort = ListSearchPrefs.loadSort(prefsPage, fallback: .updated)
     }
 
     @MainActor

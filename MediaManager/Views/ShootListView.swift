@@ -56,6 +56,11 @@ struct ShootListView: View {
             // 右侧整组收进一个 ToolbarItem（TrailingToolsItem），间距由 ToolbarMetrics 统一
             TrailingToolsItem {
                 sortMenu
+                // 升/降序开关：只图标，箭头朝向即当前方向
+                ToolChip(label: "降序", icon: viewModel.descending ? "arrow.down" : "arrow.up",
+                         highlighted: viewModel.descending, iconOnly: true) {
+                    Task { await viewModel.toggleDirection() }
+                }
                 // 固定库模式不显示库筛选
                 if library == nil && !viewModel.libraries.isEmpty { libraryMenu }
                 if hSizeClass == .regular {
@@ -133,6 +138,8 @@ struct ShootListView: View {
 
 // MARK: - 拍摄集列表 VM
 final class ShootListViewModel: ObservableObject {
+    /// 排序字段。方向单独一档（descending）—— 后端 /api/shoots 就是
+    /// `sort=<字段>&order=asc|desc` 两个参数，别硬拼成一对枚举。
     enum Sort: String, CaseIterable, Sendable {
         case mtime, name, size
         var label: String {
@@ -146,11 +153,22 @@ final class ShootListViewModel: ObservableObject {
     @Published var items: [Shoot] = []
     @Published var libraries: [Library] = []
     @Published var selectedLibID: Int?
-    @Published var searchText = ""
-    @Published var sort: Sort = .mtime
+    @Published var searchText = "" {
+        didSet { ListSearchPrefs.saveSearch(prefsPage, searchText) }
+    }
+    @Published var sort: Sort {
+        didSet { ListSearchPrefs.saveSort(prefsPage, raw: sort.rawValue) }
+    }
+    /// 升/降序。true = 降序（默认）：新的/大的在前
+    @Published var descending: Bool {
+        didSet { ListSearchPrefs.saveDescending(prefsPage, descending) }
+    }
     @Published var totalCount = 0
     @Published var isLoading = false
     @Published var errorMessage: String?
+
+    /// 记忆键按「页」分
+    private let prefsPage = "shoots"
 
     var client: APIClient? { AppSession.shared.client }
     var selectedLibrary: Library? { libraries.first { $0.id == selectedLibID } }
@@ -162,6 +180,10 @@ final class ShootListViewModel: ObservableObject {
     init(library: Library? = nil) {
         self.fixedLibrary = library
         self.selectedLibID = library?.id
+        // 还原上次的搜索词 / 排序 / 方向（没记过就用默认值）
+        self.searchText = ListSearchPrefs.loadSearch(prefsPage)
+        self.sort = ListSearchPrefs.loadSort(prefsPage, fallback: .mtime)
+        self.descending = ListSearchPrefs.loadDescending(prefsPage, fallback: true)
     }
 
     @MainActor
@@ -200,6 +222,13 @@ final class ShootListViewModel: ObservableObject {
         await reload()
     }
 
+    /// 切换升/降序（排序字段不变）
+    @MainActor
+    func toggleDirection() async {
+        descending.toggle()
+        await reload()
+    }
+
     @MainActor
     func reload() async {
         // 搜索词变化由 searchable 的 onAppear/change 触发，这里统一重置
@@ -220,7 +249,8 @@ final class ShootListViewModel: ObservableObject {
         do {
             let (batch, total) = try await client.fetchShoots(
                 libraryId: selectedLibID, page: page, size: pageSize,
-                sort: sort.rawValue, search: searchText.isEmpty ? nil : searchText)
+                sort: sort.rawValue, descending: descending,
+                search: searchText.isEmpty ? nil : searchText)
             totalCount = total
             items = batch
             page += 1
@@ -238,7 +268,8 @@ final class ShootListViewModel: ObservableObject {
         do {
             let (batch, total) = try await client.fetchShoots(
                 libraryId: selectedLibID, page: page, size: pageSize,
-                sort: sort.rawValue, search: searchText.isEmpty ? nil : searchText)
+                sort: sort.rawValue, descending: descending,
+                search: searchText.isEmpty ? nil : searchText)
             totalCount = total
             if replacing {
                 items = batch

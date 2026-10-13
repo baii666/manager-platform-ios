@@ -37,6 +37,28 @@ struct ActorsView: View {
         .appBackground()
         .searchable(text: $viewModel.searchText, prompt: "搜索演员…")
         .refreshable { await viewModel.reload() }
+        .toolbar {
+            // 排序字段（与电影/相册/拍摄集/短视频列表同一套 ToolMenuChip 胶囊样式）
+            ToolbarItem(placement: .topBarTrailing) {
+                ToolMenuChip(label: viewModel.sort.label) {
+                    ForEach(ActorsViewModel.Sort.allCases, id: \.self) { s in
+                        Button {
+                            Task { await viewModel.setSort(s) }
+                        } label: {
+                            if viewModel.sort == s { Label(s.label, systemImage: "checkmark") }
+                            else { Text(s.label) }
+                        }
+                    }
+                }
+            }
+            // 升/降序开关：只图标，箭头朝向即当前方向
+            ToolbarItem(placement: .topBarTrailing) {
+                ToolChip(label: "降序", icon: viewModel.descending ? "arrow.down" : "arrow.up",
+                         highlighted: viewModel.descending, iconOnly: true) {
+                    Task { await viewModel.toggleDirection() }
+                }
+            }
+        }
         // 搜索防抖 350ms（与三个列表页同一套）
         .onChange(of: viewModel.searchText) {
             Task {
@@ -248,11 +270,32 @@ struct ActorDetailView: View {
 
 // MARK: - 演员库 VM
 final class ActorsViewModel: ObservableObject {
+    /// 排序字段。方向单独一档（descending）—— 后端 /api/actors 是
+    /// `sort=<字段>&order=asc|desc` 两个参数，别硬拼成一对枚举。
+    enum Sort: String, CaseIterable, Sendable {
+        case count, name
+        var label: String {
+            switch self { case .count: return "作品数"; case .name: return "姓名" }
+        }
+    }
+
     @Published var items: [ActorItem] = []
     @Published var totalCount = 0
-    @Published var searchText = ""
+    @Published var searchText = "" {
+        didSet { ListSearchPrefs.saveSearch(prefsPage, searchText) }
+    }
+    @Published var sort: Sort {
+        didSet { ListSearchPrefs.saveSort(prefsPage, raw: sort.rawValue) }
+    }
+    /// 升/降序。true = 降序（默认）：作品多的在前 / 姓名 Z→A
+    @Published var descending: Bool {
+        didSet { ListSearchPrefs.saveDescending(prefsPage, descending) }
+    }
     @Published var isLoading = false
     @Published var errorMessage: String?
+
+    /// 记忆键按「页」分
+    private let prefsPage = "actors"
 
     private var page = 1
     private let pageSize = 60
@@ -260,9 +303,31 @@ final class ActorsViewModel: ObservableObject {
 
     private var client: APIClient? { AppSession.shared.client }
 
+    init() {
+        // 还原上次的搜索词 / 排序 / 方向（没记过就用默认值）
+        self.searchText = ListSearchPrefs.loadSearch(prefsPage)
+        self.sort = ListSearchPrefs.loadSort(prefsPage, fallback: .count)
+        self.descending = ListSearchPrefs.loadDescending(prefsPage, fallback: true)
+    }
+
     @MainActor
     func loadInitial() async {
         guard items.isEmpty else { return }
+        await reload()
+    }
+
+    /// 切换排序字段
+    @MainActor
+    func setSort(_ s: Sort) async {
+        guard sort != s else { return }
+        sort = s
+        await reload()
+    }
+
+    /// 切换升/降序（字段不变）
+    @MainActor
+    func toggleDirection() async {
+        descending.toggle()
         await reload()
     }
 
@@ -281,7 +346,8 @@ final class ActorsViewModel: ObservableObject {
         defer { isLoading = false }
         do {
             let (batch, total, more) = try await client.fetchActors(
-                page: page, size: pageSize, q: searchText.isEmpty ? nil : searchText)
+                page: page, size: pageSize, sort: sort.rawValue, descending: descending,
+                q: searchText.isEmpty ? nil : searchText)
             totalCount = total
             items.append(contentsOf: batch)
             page += 1
