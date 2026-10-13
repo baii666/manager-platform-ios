@@ -624,8 +624,10 @@ struct Actor: Identifiable, Codable, Sendable {
 
     var initial: String { String((name.first ?? "?").uppercased()) }
 
+    // ⚠️ 不能加 case id：String 型的 id 是 Identifiable 用的（= name），
+    // 而 JSON 的 "id"（演员库数字 id）归 actorId —— raw value 必须唯一
     enum CodingKeys: String, CodingKey {
-        case id, name, role
+        case name, role
         case thumbURL = "thumb"
         case actorId = "id"
     }
