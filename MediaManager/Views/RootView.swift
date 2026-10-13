@@ -45,6 +45,8 @@ struct RootView: View {
     // 全局看图器：挂在最外层 overlay，替代各页面的 .fullScreenCover
     //（fullScreen 呈现会把底层页面移出窗口层级，退出时露出的不是上一级而是空窗口 → 闪白）
     @ObservedObject private var photoViewer = PhotoViewerPresenter.shared
+    /// 短视频刷流（根层 overlay）：从哪个 tab 进来，右滑退出就露出哪个 tab
+    @ObservedObject private var shortsFeed = ShortFeedPresenter.shared
     @State private var tab: RootTab = .home
     // 各 tab 的导航栈（正常页面跳转用；看图器「进入相册」不走导航栈，见下面的相册层）
     @State private var homePath = NavigationPath()
@@ -64,8 +66,8 @@ struct RootView: View {
                 .opacity(tab == .library ? 1 : 0)
                 .allowsHitTesting(tab == .library)
 
-            // 传 tab：首页「短视频连播」卡进的刷流，退出后要切回首页
-            NavigationStack { ShortsView(tab: $tab) }
+            // 短视频刷流（tab = .short 时初始化，之后不再传）
+            NavigationStack { ShortsView() }
                 .opacity(tab == .short ? 1 : 0)
                 .allowsHitTesting(tab == .short)
 
@@ -126,9 +128,22 @@ struct RootView: View {
                     // 识别器在图解器里跟看图器的下拉退出手势抢触摸。
                     .allowsHitTesting(!photoViewer.viewerAboveAlbum)
                 }
+                // 短视频刷流：挂在 tab 层之上（z4），右滑退出时露出的是它背后的
+                // 那个 tab —— 首页卡进的露首页，短视频页点卡片进的露短视频页。
+                // ⚠️ 不能挂在 ShortsView 内部：那样右滑露出的永远是短视频列表页。
+                if shortsFeed.isActive, let vm = shortsFeed.viewModel {
+                    ShortFeedView(viewModel: vm, startIndex: shortsFeed.startIndex,
+                                  onClose: { shortsFeed.close() })
+                        // 每次打开都重建：起始下标是 init 时的快照（@State currentIndex）
+                        .id(shortsFeed.generation)
+                        .transition(.move(edge: .trailing))
+                        .zIndex(4)
+                }
             }
         }
         .animation(.easeIn(duration: 0.15), value: photoViewer.isVisible)
+        // 刷流插入/移除动画（右滑入场 + 底栏同步淡出）
+        .animation(.easeIn(duration: 0.15), value: shortsFeed.isActive)
         // overlay 里 .statusBarHidden 可能不生效，在根上按看图器显隐统一控制。
         // ⚠️ 绑 statusBarHidden 而不是 isVisible：退出淡出动画期间（isVisible 仍 true）
         // 状态栏就要开始恢复，与 closingFade 同步 —— 绑 isVisible 会晚 0.27s（dismiss
@@ -136,7 +151,8 @@ struct RootView: View {
         // ⚠️ 必须叠 isVisible：只看图器可见时才允许它藏状态栏。
         // 否则任何一条退出路径漏恢复（异常退出、手势被系统取消、相册层组合），
         // 残留的 statusBarHidden=true 会让整个 App 永久没有状态栏。
-        .statusBarHidden(photoViewer.isVisible && photoViewer.statusBarHidden)
+        // 刷流层自带 .statusBar(hidden:)，但根层 overlay 里不一定生效，与看图器一样在根上统一控制
+        .statusBarHidden((photoViewer.isVisible && photoViewer.statusBarHidden) || shortsFeed.isActive)
     }
 }
 

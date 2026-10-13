@@ -17,7 +17,8 @@ enum HomeRoute: Hashable {
 struct HomeView: View {
     @ObservedObject var viewModel: HomeViewModel
     @Binding var path: NavigationPath
-    /// 当前底 bar tab：发现区「短视频连播」卡要切到短视频 tab 再开随机刷流
+    /// 底 bar tab：当前没有卡片写入它（短视频连播改走根层 overlay，不再切 tab），
+    /// binding 保留，将来要从首页跨 tab 落位时不用再改 RootView 的传参
     @Binding var tab: RootTab
     /// 媒体库 tab 内的二级分类：预留给「首页卡切 tab 同时落准分类」用。
     /// 2026-10-13：发现区「拍摄集」卡已移除，当前无卡片写入它，
@@ -215,12 +216,12 @@ struct HomeView: View {
                     path.append(HomeRoute.persons)
                 }
                 DiscoverCard(icon: "play.rectangle.fill", title: "短视频连播", subtitle: "刷起来停不下", tint: .orange) {
-                    // 切到短视频 tab + 请求随机起始的沉浸刷流。
-                    // ShortsView 常驻挂载（四个 tab 都在 ZStack 里，opacity 切换），
-                    // 请求经 ShortsRandomRequest 单例广播；items 没加载完会等到了再开。
-                    // fromHome：退出刷流后切回首页，不留在短视频列表页。
-                    tab = .short
-                    ShortsRandomRequest.shared.request(fromHome: true)
+                    // 请求随机起始的沉浸刷流，经 ShortsRandomRequest 单例广播；
+                    // items 没加载完 ShortsView 会等到了再开。
+                    // ⚠️ 这里**不切 tab**：刷流挂在 RootView 根层 overlay，
+                    // 切到短视频 tab 的话它背后就是短视频列表页，右滑退出露出的
+                    // 也就是短视频页了。留在首页，退出即回首页。
+                    ShortsRandomRequest.shared.request()
                 }
             }
         }

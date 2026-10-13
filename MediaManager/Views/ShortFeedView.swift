@@ -15,7 +15,8 @@ import SwiftUI
 struct ShortFeedView: View {
     @ObservedObject var viewModel: ShortsViewModel
     let startIndex: Int
-    /// 退出回调：设置 feedEntry = nil 回到列表页（改用 ZStack overlay 呈现后，背后列表可见）
+    /// 退出回调：关掉根层 overlay 回到**进来时的那个 tab**（首页进的回首页、
+    /// 短视频页进的回短视频页）—— 刷流挂在 RootView 的 overlay 上，背后就是来源页
     var onClose: () -> Void = {}
 
     /// 当前正在看的页（scrollPosition 跟踪，滑到哪更新到哪）

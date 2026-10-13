@@ -3,21 +3,49 @@ import SwiftUI
 // MARK: - 随机刷流请求（首页「短视频连播」卡 → 随机起始沉浸刷流）
 // 请求方（首页 DiscoverCard）与消费方（ShortsView）分处不同 tab 的 NavigationStack，
 // 没有共同祖先能传 binding，用单例广播（与 RootView 的 FullscreenOverlay 同思路）。
-// generation 自增触发：连点两次也各自生效；消费方不记已消费值，靠 feedEntry == nil 去重。
+// generation 自增触发：连点两次也各自生效；消费方不记已消费值，靠刷流是否已开去重。
 final class ShortsRandomRequest: ObservableObject {
     static let shared = ShortsRandomRequest()
     /// 自增即代表一次新请求
     @Published private(set) var generation = 0
-    /// 本次请求是否来自首页「短视频连播」卡。
-    /// 首页进来的，退出刷流要退回首页 tab —— 用户的心理路径是
-    ///「首页 → 刷完 → 回首页」，留在短视频列表页等于把他扔在半路。
-    private(set) var fromHome = false
 
     private init() {}
 
-    func request(fromHome: Bool = false) {
-        self.fromHome = fromHome
+    func request() {
         generation += 1
+    }
+}
+
+// MARK: - 刷流呈现器（挂在根层 overlay，而不是短视频页内部）
+// ⚠️ 为什么提到根层：刷流原来挂在 ShortsView 内（短视频 tab 那一层），
+// 右滑退出时它右移，露出来的必然是它底下那一层 = 短视频列表页。
+// 从首页「短视频连播」卡进来的人，心理路径是「首页 → 刷完 → 回首页」，
+// 退出时露出短视频页等于把他扔在半路（切 tab 也救不了：切了 tab 承载刷流的
+// 那一层就 opacity 0，刷流跟着一起消失）。
+// 提到 RootView 的 overlay 后，刷流盖在**当前 tab 之上**，右滑露出的是它背后的
+// 那个 tab —— 首页进的露首页，短视频页进的露短视频页，各自回到来处。
+final class ShortFeedPresenter: ObservableObject {
+    static let shared = ShortFeedPresenter()
+    @Published var isActive = false
+    /// 每次打开自增：驱动 ShortFeedView 重建（换起始下标 / 换数据源）。
+    /// 不重建的话 ShortFeedView 的 @State currentIndex 还是上一次的。
+    @Published var generation = 0
+    /// 数据源：短视频页的 VM（ShortsView 常驻挂载，不会被释放）
+    private(set) var viewModel: ShortsViewModel?
+    private(set) var startIndex = 0
+
+    func open(viewModel: ShortsViewModel, startIndex: Int) {
+        self.viewModel = viewModel
+        self.startIndex = startIndex
+        generation += 1
+        isActive = true
+        // 底 bar 在 RootView 的 safeAreaInset 里、层级比刷流高，刷流盖不住它
+        FullscreenOverlay.shared.active = true
+    }
+
+    func close() {
+        isActive = false
+        FullscreenOverlay.shared.active = false
     }
 }
 
@@ -25,12 +53,8 @@ final class ShortsRandomRequest: ObservableObject {
 // 对齐网页端 ShortsPage（消费侧）：池筛选 + 搜索 + 封面墙 + 点开播放
 struct ShortsView: View {
     @StateObject private var viewModel = ShortsViewModel()
-    /// 底 bar tab：从首页卡发起的刷流，退出后要切回首页
-    @Binding var tab: RootTab
-    /// 刷流入口：点卡片后带着起始下标弹全屏抖音式刷流
-    @State private var feedEntry: ShortFeedEntry?
-    /// 当前这次刷流是否由首页「短视频连播」卡发起（决定退出后切不切回首页）
-    @State private var feedFromHome = false
+    /// 刷流呈现器：打开/关闭都走它，刷流本体挂在 RootView 根层
+    @ObservedObject private var feedPresenter = ShortFeedPresenter.shared
     /// 播放地址构造失败时给出明确原因，而不是静默什么都不发生
     @State private var playError: String?
     /// 随机刷流请求（首页「短视频连播」卡）：generation 自增即触发一次
@@ -55,8 +79,7 @@ struct ShortsView: View {
     }
 
     var body: some View {
-        ZStack {
-            ScrollView {
+        ScrollView {
             if viewModel.items.isEmpty && !viewModel.isLoading {
                 ContentUnavailableView(viewModel.errorMessage ?? "暂无短视频",
                                        systemImage: viewModel.errorMessage == nil ? "play.rectangle.fill" : "exclamationmark.triangle")
@@ -73,7 +96,9 @@ struct ShortsView: View {
                                 return
                             }
                             guard let idx = viewModel.items.firstIndex(where: { $0.id == v.id }) else { return }
-                            feedEntry = ShortFeedEntry(id: v.id, startIndex: idx)
+                            // 刷流在根层 overlay 打开：背后仍是当前 tab（短视频页），
+                            // 右滑退出就回到这里
+                            feedPresenter.open(viewModel: viewModel, startIndex: idx)
                         }
                         .task {
                             if v.id == viewModel.items.last?.id { await viewModel.loadMore() }
@@ -131,10 +156,13 @@ struct ShortsView: View {
         // 统一用零参数闭包，闭包内直接读属性即为新值
         .onChange(of: randomRequest.generation) {
             // 已在刷流中：忽略（连点只第一次生效）
-            guard feedEntry == nil else { return }
+            guard !feedPresenter.isActive else { return }
             if viewModel.items.isEmpty {
                 // 首帧 loading 未回：置位，items 到达后由下面的 onChange 补开
                 pendingRandomOpen = true
+                // ⚠️ 从首页卡进来时本页可能一次都没进过（items 还是空的），
+                // 光置位会一直等不到 —— 主动拉一次
+                Task { await viewModel.loadInitial() }
             } else {
                 startRandomFeed()
             }
@@ -144,30 +172,6 @@ struct ShortsView: View {
                 pendingRandomOpen = false
                 startRandomFeed()
             }
-        }
-
-            // 刷流：用 ZStack overlay 呈现（不用 fullScreenCover），
-            // 右滑退出时页面右移、露出背后的列表页
-            if let entry = feedEntry {
-                ShortFeedView(viewModel: viewModel, startIndex: entry.startIndex,
-                              onClose: {
-                    feedEntry = nil
-                    // 首页卡进来的：退出刷流直接回首页。
-                    // 与 feedEntry 同一次渲染更新，不会先闪一下短视频列表页再跳。
-                    if feedFromHome {
-                        feedFromHome = false
-                        tab = .home
-                    }
-                })
-                    .transition(.move(edge: .trailing))
-                    .zIndex(1)
-            }
-        }
-        // 刷流打开时隐藏导航栏（否则列表页导航栏盖在刷流上）
-        .toolbar(feedEntry == nil ? .automatic : .hidden, for: .navigationBar)
-        // 刷流打开时隐藏底 bar（底 bar 在 RootView 层级，刷流盖不住它）
-        .onChange(of: feedEntry) {
-            FullscreenOverlay.shared.active = feedEntry != nil
         }
         .alert("无法播放", isPresented: Binding(
             get: { playError != nil },
@@ -185,18 +189,8 @@ struct ShortsView: View {
     private func startRandomFeed() {
         guard !viewModel.items.isEmpty else { return }
         let idx = Int.random(in: 0..<viewModel.items.count)
-        // 记下来源：startRandomFeed 只被首页卡的请求触发，卡片点进来的不走这里
-        feedFromHome = randomRequest.fromHome
-        feedEntry = ShortFeedEntry(id: viewModel.items[idx].id, startIndex: idx)
+        feedPresenter.open(viewModel: viewModel, startIndex: idx)
     }
-}
-
-// MARK: - 刷流入口
-// 用 item 触发 overlay 呈现（而不是 isPresented + 分离 index），
-// 避免闭包读到「更新前」的下标。遵循 Equatable 供 .onChange(of:) 使用。
-private struct ShortFeedEntry: Identifiable, Equatable {
-    let id: Int
-    let startIndex: Int
 }
 
 // MARK: - 短视频 VM
