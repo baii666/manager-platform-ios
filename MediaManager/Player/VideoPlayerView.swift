@@ -56,6 +56,11 @@ struct VideoPlayerView: View {
     /// 刷流的信息区由外层统一画在屏幕固定位置（左下角标题）。
     /// 手势不受影响：双击暂停、长按倍速都在 gestureCapture 里，跟控制条无关。
     var showsControlBar: Bool = true
+    /// 内嵌场景（短视频刷流）用：本页成为当前页时，把引擎交给外层。
+    /// ⚠️ 外层要在屏幕**固定位置**画控制 UI（右上角投屏 / 画中画），就得拿到当前页的引擎。
+    /// 每页都上报会互相覆盖，所以只在 isActive 时上报；滑走再滑回来也会再报一次。
+    /// 独立全屏播放不用（控制条就画在自己身上）。
+    var onEngineReady: ((PlayerEngine) -> Void)? = nil
     /// 是否隐藏系统状态栏。独立全屏播放（fullScreenCover）时隐藏；
     /// ⚠️ 内嵌场景（短视频刷流）必须传 false —— 那里的状态栏由外层统一管，
     /// 播放器再来一句 hidden 只会和外层打架（且嵌套视图里它未必生效，行为不可预期）。
@@ -182,7 +187,14 @@ struct VideoPlayerView: View {
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarHidden(true)
         .statusBar(hidden: hidesStatusBar)
-        .onAppear { setup() }
+        .onAppear {
+            setup()
+            if isActive { onEngineReady?(engine) }
+        }
+        // 预加载的页先起来、后来才轮到它当当前页：onAppear 那时还没上报，补一次
+        .onChange(of: isActive) {
+            if isActive { onEngineReady?(engine) }
+        }
         .onDisappear { teardown() }
         // ⚠️ iOS 17 起 `onChange(of:) { v in }`（单参数）已废弃，用零参数闭包
         .onChange(of: engine.videoTrackDisabled) {
@@ -719,7 +731,9 @@ private struct PlayerLayerView: UIViewRepresentable {
 
 // MARK: - AirPlay
 // AVRoutePickerView 是 UIKit 视图，包一层才能在 SwiftUI 里用。
-private struct AirPlayButton: UIViewRepresentable {
+// AVRoutePickerView 不绑定具体 player（只切系统音频/视频路由），
+// 所以它可以被搬到任何层级 —— 刷流里就放在屏幕固定的右上角，不随视频滚。
+struct AirPlayButton: UIViewRepresentable {
     func makeUIView(context: Context) -> AVRoutePickerView {
         let view = AVRoutePickerView()
         view.tintColor = .white

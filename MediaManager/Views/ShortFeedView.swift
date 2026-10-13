@@ -1,4 +1,23 @@
 import SwiftUI
+import Combine
+
+// MARK: - 当前页播放引擎句柄
+// 刷流的右上角图标（画中画 / 投屏）钉在屏幕上不动，但要作用在**当前**那条视频上。
+// 每页播放器在成为当前页时把引擎报上来（换页就换引擎），这里只做持有 + 变更转发：
+// 引擎的 @Published 变化要能让外层 UI 刷新，光存一个引用是不够的。
+final class FeedEngineHandle: ObservableObject {
+    private(set) var engine: PlayerEngine?
+    private var bag: AnyCancellable?
+
+    func attach(_ engine: PlayerEngine) {
+        bag?.cancel()
+        self.engine = engine
+        // 转发引擎的 objectWillChange：isPiPActive 这类状态变了，外层按钮跟着换图标
+        bag = engine.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }
+    }
+}
 
 // MARK: - 抖音式短视频刷流
 // 短视频页点开某一条后，进入这个全屏的、上下滑切片的刷流。
@@ -28,6 +47,10 @@ struct ShortFeedView: View {
     /// 退出时零变化。
     var onBeginExit: () -> Void = {}
 
+    /// 刷流页：一屏一条，上下滑切视频，退到 RootView 根层呈现
+    /// 右上角固定图标（投屏 / 画中画）要作用在**当前**视频上 —— 每页播放器在成为
+    /// 当前页时把引擎报上来，换页就换引擎；按钮本身钉在屏幕上不动。
+    @StateObject private var engineHandle = FeedEngineHandle()
     /// 当前正在看的页（scrollPosition 跟踪，滑到哪更新到哪）
     @State private var currentID: Int?
     @State private var currentIndex: Int
@@ -67,7 +90,8 @@ struct ShortFeedView: View {
                         ShortFeedPage(video: video,
                                       client: viewModel.client,
                                       isActive: index == currentIndex,
-                                      inWindow: abs(index - currentIndex) <= windowRadius)
+                                      inWindow: abs(index - currentIndex) <= windowRadius,
+                                      onEngineReady: { engineHandle.attach($0) })
                             .containerRelativeFrame([.horizontal, .vertical])
                             .id(video.id)
                     }
@@ -93,10 +117,33 @@ struct ShortFeedView: View {
             .padding(.top, 8)
             .padding(.leading, 16)
 
+            // 右上角固定图标组：画中画 + 投屏。
+            // ⚠️ 与左下角标题同理 —— 钉在屏幕上，不随上下滑切视频移动；
+            // 作用的引擎换成当前页的（滑到哪一条就控制哪一条）。
+            // 这两个原本画在每页的控制条里，于是跟着视频一起滚了出去。
+            HStack(spacing: 12) {
+                if let engine = engineHandle.engine, engine.isPiPSupported {
+                    Button { engine.togglePiP() } label: {
+                        Image(systemName: engine.isPiPActive ? "pip.exit" : "pip.enter")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 34, height: 34)
+                            .background(Circle().fill(Color.black.opacity(0.35)))
+                    }
+                    .buttonStyle(.plain)
+                }
+                AirPlayButton()
+                    .frame(width: 30, height: 30)
+            }
+            // 撑满只为把按钮推到右上（透明区域不吃手势，滑动照常）
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+            .padding(.trailing, 16)
+            .padding(.top, 8)
+
             // 左下角信息区：固定在屏幕上（不随上下滑切换视频移动），内容跟着当前页变。
             // ⚠️ 之前标题画在内嵌播放器的控制条里 = 每页一份，既跟着视频一起滚，
             // 又和左上角那个固定不动的退出按钮挤在一起。信息区统一收在这里：
-            // 控制条关掉（右上角图标也不再跟着滚），标题归左下（抖音式）。
+            // 控制条关掉（里面那套每页一份的 UI 不再跟着滚），标题归左下（抖音式）。
             VStack(alignment: .leading, spacing: 4) {
                 Text(currentTitle)
                     .font(.subheadline.weight(.semibold))
@@ -187,6 +234,8 @@ private struct ShortFeedPage: View {
     let client: APIClient?
     let isActive: Bool
     let inWindow: Bool
+    /// 本页成为当前页时，把播放引擎交给外层（右上角固定图标要用）
+    var onEngineReady: ((PlayerEngine) -> Void)? = nil
 
     @State private var target: PlaybackTarget?
     @State private var error: String?
@@ -220,7 +269,8 @@ private struct ShortFeedPage: View {
                                 showsControlBar: false,
                                 // 刷流里状态栏常驻（退出时才不会「闪」）：
                                 // 播放器别再自己藏一次，控制条也会自动让开状态栏
-                                hidesStatusBar: false)
+                                hidesStatusBar: false,
+                                onEngineReady: onEngineReady)
             } else {
                 placeholder
             }
