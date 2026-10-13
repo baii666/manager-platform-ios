@@ -132,7 +132,10 @@ struct RootView: View {
         // ⚠️ 绑 statusBarHidden 而不是 isVisible：退出淡出动画期间（isVisible 仍 true）
         // 状态栏就要开始恢复，与 closingFade 同步 —— 绑 isVisible 会晚 0.27s（dismiss
         // 那一刻才出现），背景页「先无状态栏、后突然有」就是退出时那一「抖」。
-        .statusBarHidden(photoViewer.statusBarHidden)
+        // ⚠️ 必须叠 isVisible：只看图器可见时才允许它藏状态栏。
+        // 否则任何一条退出路径漏恢复（异常退出、手势被系统取消、相册层组合），
+        // 残留的 statusBarHidden=true 会让整个 App 永久没有状态栏。
+        .statusBarHidden(photoViewer.isVisible && photoViewer.statusBarHidden)
     }
 }
 

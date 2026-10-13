@@ -24,7 +24,11 @@ final class PhotoViewerPresenter: ObservableObject {
     /// **同步**恢复 —— 否则 0.27s 后 dismiss 那一刻才出现，背景页「先无状态栏、
     /// 后突然有」，视觉上抖一下（RootView 按它控制 .statusBarHidden）。
     /// show() 置 true；beginDismiss() 置 false（相册层盖着时除外）。
-    @Published var statusBarHidden = true
+    /// ⚠️ 初始值必须是 false（状态栏默认显示）：这个属性只表达「看图器自己想不想藏」，
+    /// 看图器没打开时它是没人管的残留值。RootView 无条件按它控制全 app 的状态栏，
+    /// 初值写成 true 会导致 App 一启动状态栏就是没的（且永远回不来）。
+    /// RootView 那边还叠了 isVisible 判断做双保险，但这里语义上就该是 false。
+    @Published var statusBarHidden = false
     /// 看图器当前的照片数组。调用方在网格翻页（loadMore）后要调 updatePhotos 同步，
     /// 否则看图器里翻不到新加载的图。
     @Published var photos: [Photo] = []
