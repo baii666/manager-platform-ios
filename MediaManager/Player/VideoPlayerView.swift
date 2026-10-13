@@ -50,6 +50,12 @@ struct VideoPlayerView: View {
     /// 抖音式刷流里上下滑要交给 ScrollView 切视频，亮度音量手势会跟它抢，
     /// 所以刷流里关掉，只保留单击显隐控制条 / 双击暂停。
     var dragGesturesEnabled: Bool = true
+    /// 是否显示自绘控制条（片名 / AirPlay / 进度条……）。
+    /// ⚠️ 内嵌进短视频刷流时传 false：控制条是**每页一份**的，会跟着上下滑一起滚，
+    /// 而且它的片名在左上角、正好和刷流固定不动的退出按钮挤在一起。
+    /// 刷流的信息区由外层统一画在屏幕固定位置（左下角标题）。
+    /// 手势不受影响：双击暂停、长按倍速都在 gestureCapture 里，跟控制条无关。
+    var showsControlBar: Bool = true
     /// 是否隐藏系统状态栏。独立全屏播放（fullScreenCover）时隐藏；
     /// ⚠️ 内嵌场景（短视频刷流）必须传 false —— 那里的状态栏由外层统一管，
     /// 播放器再来一句 hidden 只会和外层打架（且嵌套视图里它未必生效，行为不可预期）。
@@ -123,7 +129,7 @@ struct VideoPlayerView: View {
 
             gestureCapture
 
-            if showControls {
+            if showControls && showsControlBar {
                 controls
                     .transition(.opacity)
             }

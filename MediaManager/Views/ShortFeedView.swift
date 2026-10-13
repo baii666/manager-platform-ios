@@ -50,6 +50,13 @@ struct ShortFeedView: View {
         _currentID = State(initialValue: viewModel.items.indices.contains(idx) ? viewModel.items[idx].id : nil)
     }
 
+    /// 当前页的标题（左下角固定信息区用，跟着 currentIndex 更新）
+    private var currentTitle: String {
+        viewModel.items.indices.contains(currentIndex)
+            ? viewModel.items[currentIndex].titleText
+            : ""
+    }
+
     var body: some View {
         ZStack(alignment: .topLeading) {
             Color.black.ignoresSafeArea()
@@ -85,6 +92,32 @@ struct ShortFeedView: View {
             // 状态栏常驻不隐藏，按钮要落在它下面
             .padding(.top, 8)
             .padding(.leading, 16)
+
+            // 左下角信息区：固定在屏幕上（不随上下滑切换视频移动），内容跟着当前页变。
+            // ⚠️ 之前标题画在内嵌播放器的控制条里 = 每页一份，既跟着视频一起滚，
+            // 又和左上角那个固定不动的退出按钮挤在一起。信息区统一收在这里：
+            // 控制条关掉（右上角图标也不再跟着滚），标题归左下（抖音式）。
+            VStack(alignment: .leading, spacing: 4) {
+                Text(currentTitle)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                    .shadow(color: .black.opacity(0.65), radius: 4, y: 1)
+                if viewModel.items.count > 1 {
+                    Text("\(currentIndex + 1) / \(viewModel.items.count)")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.white.opacity(0.7))
+                        .shadow(color: .black.opacity(0.65), radius: 4, y: 1)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+            .padding(.leading, 16)
+            // 右侧留白：标题不顶到屏幕边（也给将来的竖排操作位留地方）
+            .padding(.trailing, 72)
+            .padding(.bottom, 12)
+            // 撑满整屏只为定位，不能吃掉滑动手势
+            .allowsHitTesting(false)
         }
         // 右滑退出：页面跟手向右移动，松手超过阈值向右滑出屏幕（露出背后的来源页）
         .offset(x: dragOffsetX)
@@ -181,6 +214,10 @@ private struct ShortFeedPage: View {
                                 isActive: isActive,
                                 showsCloseButton: false,
                                 dragGesturesEnabled: false,
+                                // 控制条每页一份会跟着上下滑一起滚，且它的片名在左上角、
+                                // 正好和左上角固定的退出按钮挤在一起 —— 刷流里关掉，
+                                // 信息区由本视图统一画在固定位置（左下角标题）
+                                showsControlBar: false,
                                 // 刷流里状态栏常驻（退出时才不会「闪」）：
                                 // 播放器别再自己藏一次，控制条也会自动让开状态栏
                                 hidesStatusBar: false)
