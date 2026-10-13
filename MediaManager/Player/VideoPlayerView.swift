@@ -279,9 +279,14 @@ struct VideoPlayerView: View {
         case .horizontal:
             let width = Double(max(bounds.width, 1))
             let delta = Double(t.width) / width * seekSpan
-            let target = min(max(seekBase + delta, 0), max(displayDuration, 0))
+            // ⚠️ 总时长未知（HLS 还没跑出 ENDLIST、调用方也没给 knownDuration）时
+            // 不能钳上限：min(x, 0) 会把任何位移钳成 0，横滑快进整个失效，
+            // 表现成「拖了没反应」。钳位只用于有可靠时长的情况。
+            let target = displayDuration > 0
+                ? min(max(seekBase + delta, 0), displayDuration)
+                : max(seekBase + delta, 0)
             pendingSeek = target
-            hud = PlayerTimeFormatter.string(target) + " / " + PlayerTimeFormatter.string(displayDuration)
+            hud = PlayerTimeFormatter.string(target) + " / " + durationText(displayDuration)
         case .vertical:
             let height = max(bounds.height, 1)
             if startOnLeft {
@@ -354,7 +359,7 @@ struct VideoPlayerView: View {
                 onStart: { engine.isScrubbing = true },
                 onChange: { value in
                     pendingSeek = value
-                    hud = PlayerTimeFormatter.string(value) + " / " + PlayerTimeFormatter.string(displayDuration)
+                    hud = PlayerTimeFormatter.string(value) + " / " + durationText(displayDuration)
                 },
                 onEnd: { value in
                     engine.isScrubbing = false
@@ -373,7 +378,7 @@ struct VideoPlayerView: View {
                 Text(PlayerTimeFormatter.string(display))
                     .font(.system(size: 13, weight: .medium))
                     .monospacedDigit()
-                Text("/ " + PlayerTimeFormatter.string(displayDuration))
+                Text("/ " + durationText(displayDuration))
                     .font(.system(size: 13))
                     .foregroundStyle(.white.opacity(0.7))
                     .monospacedDigit()
@@ -567,6 +572,12 @@ struct VideoPlayerView: View {
         }
     }
 
+    /// 总时长文案。HLS 在 FFmpeg 跑完前 AVPlayer 拿不到 duration（indefinite=0），
+    /// 此时显示 0:00 会误导人（看着像空文件）—— 显示 --:-- 表示「还不知道」。
+    private func durationText(_ seconds: Double) -> String {
+        seconds > 0 ? PlayerTimeFormatter.string(seconds) : "--:--"
+    }
+
     private func toggleControls() {
         withAnimation(.easeOut(duration: 0.18)) { showControls.toggle() }
         if showControls { scheduleHide() }
@@ -738,6 +749,9 @@ private struct ScrubberView: View {
             }
             .frame(height: 26)
             .contentShape(Rectangle())
+            // ⚠️ 总时长未知（HLS 还没跑出 ENDLIST）时必须禁掉拖动：
+            // 此时 seconds() 恒返回 0，拖任何位置都跳去 0:00，用户看到的就是
+            // 「拖了没反应 / 一点就跳回开头」。等 duration 到了自然恢复。
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { value in
@@ -750,7 +764,8 @@ private struct ScrubberView: View {
                     .onEnded { value in
                         dragging = false
                         onEnd(seconds(at: value.location.x, width: width))
-                    }
+                    },
+                isEnabled: duration > 0
             )
         }
         .frame(height: 26)

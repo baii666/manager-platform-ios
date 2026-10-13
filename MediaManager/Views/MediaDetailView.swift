@@ -284,7 +284,11 @@ struct MediaDetailView: View {
                                       assetType: "media",
                                       assetID: d.id,
                                       startAt: nil,
-                                      knownDuration: nil)
+                                      // ⚠️ 必须给：非直连容器走 HLS，FFmpeg 没跑完前 AVPlayer 的
+                                      // duration 是 indefinite(0)，进度条换算与快进钳位都依赖它，
+                                      // 缺了会表现成「进度条/快进拖了没反应」（全算成 0）。
+                                      // runtime 是分钟（nfo 元数据）。
+                                      knownDuration: d.runtime.map { Double($0) * 60 })
     }
 }
 
