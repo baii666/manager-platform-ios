@@ -164,6 +164,7 @@ struct ShootDetailView: View {
         }
         .padding(.top, 14)
     }
+}
 
 // MARK: - 拍摄集详情 VM
 final class ShootDetailViewModel: ObservableObject {
