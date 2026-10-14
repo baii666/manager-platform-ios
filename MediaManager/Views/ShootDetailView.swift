@@ -118,23 +118,28 @@ struct ShootDetailView: View {
 
     // MARK: 导航栏信息行
 
-    /// 第二行：视频数 / 照片数 / 体积 / 时长。详情拉回来后用权威值
-    /// （detail.videos.count / 后端 COUNT(*)），加载中才回退列表里带来的计数
+    /// 第二行：视频数 / 照片总数 / 已加载数。
+    /// ⚠️ 不用 Label：导航栏 principal 可用宽度很紧，Label 空间不够时会退化成
+    /// 「只有图标」（文本被压到 0 宽）——手写 Image + Text，文本永远在，
+    /// 超宽只截尾巴。体积/时长也从这行撤了（四个 Label 抢宽度正是文本全丢
+    /// 的帮凶），列表页卡片上有。
     private var infoRow: some View {
-        HStack(spacing: 8) {
-            Label("\(viewModel.videos.isEmpty ? shoot.videoCount : viewModel.videos.count)",
-                  systemImage: "film")
-            Label("\(viewModel.photoTotal > 0 ? viewModel.photoTotal : shoot.photoCount)",
-                  systemImage: "photo")
-            if let size = formatSize(shoot.totalSize) {
-                Label(size, systemImage: "internaldrive")
-            }
-            if shoot.totalDuration > 0 {
-                Label(formatDuration(Int(shoot.totalDuration)), systemImage: "clock")
+        HStack(spacing: 5) {
+            Image(systemName: "film").imageScale(.small)
+            // 视频整批返回，loaded == total；用权威值，空时回退列表计数
+            Text("\(viewModel.videos.isEmpty ? shoot.videoCount : viewModel.videos.count)")
+            Image(systemName: "photo").imageScale(.small)
+            // 总数用后端 COUNT(*)，第一页回来前回退列表里带来的值
+            Text("\(viewModel.photoTotal > 0 ? viewModel.photoTotal : shoot.photoCount)")
+            // 已加载数：分页进行中才显示（0 和不显示都比「已加载 0」干净），
+            // 加载完 total 即全部，不占位置
+            if viewModel.photos.count > 0, viewModel.photos.count < viewModel.photoTotal {
+                Text("已加载 \(viewModel.photos.count)")
             }
         }
         .font(.caption2)
         .foregroundStyle(.secondary)
+        .lineLimit(1)
     }
 
     // MARK: 视频横滑轨
