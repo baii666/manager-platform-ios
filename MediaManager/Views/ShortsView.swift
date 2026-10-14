@@ -56,7 +56,10 @@ final class ShortFeedPresenter: ObservableObject {
 }
 
 // MARK: - 短视频页
-// 对齐网页端 ShortsPage（消费侧）：池筛选 + 搜索 + 封面墙 + 点开播放
+// 对齐网页端 ShortsWall（消费侧）：池 chips + 搜索 + 封面墙 + 点开播放。
+// ⚠️ 池切换是内容上方的横滑 chips 行（poolChipsRow，safeAreaInset 钉在
+// 导航栏下方），不是 toolbar 下拉、也不是「进场先选池」的二级页 ——
+// 理由见 poolChipsRow 的注释。
 struct ShortsView: View {
     @StateObject private var viewModel = ShortsViewModel()
     /// 刷流呈现器：打开/关闭都走它，刷流本体挂在 RootView 根层
@@ -90,7 +93,9 @@ struct ShortsView: View {
     var body: some View {
         ScrollView {
             if viewModel.items.isEmpty && !viewModel.isLoading {
-                ContentUnavailableView(viewModel.errorMessage ?? "暂无短视频",
+                // 选中了具体池却一条没有时，说清楚是「这个池」空的，别让用户
+                // 以为整个库空了
+                ContentUnavailableView(viewModel.errorMessage ?? (viewModel.selectedPoolID == nil ? "暂无短视频" : "该池暂无短视频"),
                                        systemImage: viewModel.errorMessage == nil ? "play.rectangle.fill" : "exclamationmark.triangle")
                     .frame(maxWidth: .infinity, minHeight: 400)
             } else {
@@ -120,9 +125,16 @@ struct ShortsView: View {
                 }
             }
         }
+        // 池 chips 钉在导航栏下方。⚠️ 用 safeAreaInset 而不是塞进 ScrollView
+        // 里跟着滚：safeAreaInset 相当于扩展安全区，网格内容从它下面开始排，
+        // 滚到底也看得见、换池不用先滚回顶部
+        .safeAreaInset(edge: .top) {
+            poolChipsRow
+        }
         // ⚠️ 顶部栏与电影/相册/拍摄集/演员四个列表页完全同构（ ListTopBar.swift 那套）：
         // ListSearchBarItem（靠左死宽搜索框 + 页名）+ TrailingToolsItem
-        // （排序 / 降序 / 池筛选 / 计数，间距由 ToolbarMetrics 统一）。
+        // （排序 / 降序 / 计数，间距由 ToolbarMetrics 统一）。
+        // 池筛选是短视频页特有的，不塞工具栏 —— 搬到内容上方的 chips 行。
         // 以前这里是 .searchable + 居中 navigationTitle + 三个散装 ToolbarItem
         // + 品牌色自定义池菜单 label —— 跟其他 tab 摆在一起对比着看不一致。
         // 搜索词的防抖 reload 仍走下面的 .onChange(of: searchText)，换组件不影响。
@@ -141,7 +153,8 @@ struct ShortsView: View {
                          highlighted: viewModel.descending, iconOnly: true) {
                     Task { await viewModel.toggleDirection() }
                 }
-                poolMenu
+                // 池筛选不在工具栏里了：搬到内容上方的 chips 行（poolChipsRow），
+                // 下拉菜单不可见，多数用户根本不知道有池这回事
                 if hSizeClass == .regular {
                     Text("\(viewModel.items.count) / \(viewModel.totalCount)")
                         .font(.caption.monospacedDigit())
@@ -232,29 +245,83 @@ struct ShortsView: View {
         }
     }
 
-    /// 池筛选。与拍摄集页的 libraryMenu 同构：ToolMenuLabel（caption 字号 +
-    /// chevron + 次级灰）。⚠️ 以前用 subheadline 品牌色自定义 HStack，跟其他页
-    /// 的库筛选摆在一起一眼能看出不是一套。
-    /// 无条件渲染（哪怕 pools 还没加载完也显示「全部池」）：菜单本身可用，
-    /// 也避免加载中按钮闪进闪出
-    private var poolMenu: some View {
-        Menu {
-            Button { Task { await viewModel.selectPool(nil) } } label: {
-                if viewModel.selectedPoolID == nil { Label("全部池", systemImage: "checkmark") }
-                else { Text("全部池") }
-            }
-            ForEach(viewModel.pools) { pool in
-                Button { Task { await viewModel.selectPool(pool.id) } } label: {
-                    if pool.id == viewModel.selectedPoolID { Label(pool.name, systemImage: "checkmark") }
-                    else { Text(pool.name) }
+    /// 池切换 chips：「全部」+ 每个池（池名 + 数量），横滑。
+    ///
+    /// 为什么是 chips 而不是「进场先显示池子、再点进去看内容」：
+    /// ① 消费场景要零摩擦 —— 每次进场多点一层，而九成情况下用户要的就是
+    ///    「全部」（首页「短视频连播」卡更是直接进随机刷流）；
+    /// ② 数据形态不支持 —— 全库 5 个池 12525 条，两大池占 81%，「全部」
+    ///    本身就是主视图，单池筛选只是「排除另一大池」，一键就能做到；
+    /// ③ web 端的池卡片页是管理场景（扫描/抽帧/删除），iOS 没有管理页，
+    ///    纯导航层没有功能承载。
+    /// chips 把「池」摆到明面上（原来藏在 toolbar 下拉里没人发现），
+    /// 又不增加导航层级 —— 5 个池一屏放得下，横滑只为将来池变多留余量。
+    ///
+    /// ⚠️ 由 body 的 .safeAreaInset(edge: .top) 钉在导航栏下方：
+    /// 内容从它下面开始排，滚到底也换得了池。
+    private var poolChipsRow: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                PoolChip(title: "全部",
+                         // 「全部」= 各池计数之和（静态口径：切进单池时也显示
+                         // 全库总量，不会跟着当前筛选变）；pools 还没加载完时
+                         // 不显示数字，别闪个 0
+                         count: viewModel.pools.isEmpty ? nil : viewModel.pools.reduce(0) { $0 + $1.itemCount },
+                         selected: viewModel.selectedPoolID == nil) {
+                    Task { await viewModel.selectPool(nil) }
+                }
+                ForEach(viewModel.pools) { pool in
+                    PoolChip(title: pool.name, count: pool.itemCount,
+                             selected: viewModel.selectedPoolID == pool.id) {
+                        Task { await viewModel.selectPool(pool.id) }
+                    }
                 }
             }
-        } label: {
-            ToolMenuLabel(text: viewModel.selectedPoolName)
+            .padding(.horizontal, edgePadding)
+            .padding(.vertical, 8)
         }
-        // ⚠️ Menu 是控件，页面上的 .tint(Theme.brand) 会盖掉 label 里的
-        // foregroundStyle（标题和展开后的菜单都变品牌色），必须给控件本身换 tint
-        .tint(Color.secondary)
+    }
+}
+
+// MARK: - 池切换胶囊
+private struct PoolChip: View {
+    let title: String
+    /// 池内视频数。nil = 不显示数字（「全部」在 pools 加载完成前）
+    var count: Int? = nil
+    let selected: Bool
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            // 两种态分开写而不是条件修饰符：选中 = 品牌色实底 + 白字；
+            // 未选中 = 和其他卡片同一套 appSurface + 分隔线描边。
+            // 整行只有选中一颗是彩色的，不会花花绿绿
+            if selected {
+                chipContent
+                    .foregroundStyle(.white)
+                    .background(Theme.brand, in: Capsule())
+            } else {
+                chipContent
+                    .foregroundStyle(.secondary)
+                    .appSurface(in: Capsule())
+                    .overlay(Capsule().stroke(.separator, lineWidth: 1))
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var chipContent: some View {
+        HStack(spacing: 5) {
+            Text(title)
+                .font(.caption.weight(.medium))
+                .lineLimit(1)
+            if let count {
+                Text("\(count)")
+                    .font(.caption2.monospacedDigit())
+            }
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 28)
     }
 }
 
@@ -296,10 +363,6 @@ final class ShortsViewModel: ObservableObject {
     private let prefsPage = "shorts"
 
     var client: APIClient? { AppSession.shared.client }
-    var selectedPoolName: String {
-        if let id = selectedPoolID, let p = pools.first(where: { $0.id == id }) { return p.name }
-        return "全部池"
-    }
 
     private var page = 1
     private let pageSize = 60
