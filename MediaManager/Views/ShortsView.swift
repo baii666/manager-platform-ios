@@ -67,6 +67,9 @@ struct ShortsView: View {
     @ObservedObject private var randomRequest = ShortsRandomRequest.shared
     /// 请求到达时 items 还没加载完（首帧 loading 中）：置位，items 到达后补开
     @State private var pendingRandomOpen = false
+    /// 窄屏（iPhone）：搜索框缩短、计数隐藏，避免导航栏一行塞不下。
+    /// 与电影/相册/拍摄集列表同一判据，保证各 tab 顶栏行为一致
+    @Environment(\.horizontalSizeClass) private var hSizeClass
 
     private let gridSpacing: CGFloat = 12
     private let edgePadding: CGFloat = 16
@@ -117,57 +120,51 @@ struct ShortsView: View {
                 }
             }
         }
-        .navigationTitle("短视频")
+        // ⚠️ 顶部栏与电影/相册/拍摄集/演员四个列表页完全同构（ ListTopBar.swift 那套）：
+        // ListSearchBarItem（靠左死宽搜索框 + 页名）+ TrailingToolsItem
+        // （排序 / 降序 / 池筛选 / 计数，间距由 ToolbarMetrics 统一）。
+        // 以前这里是 .searchable + 居中 navigationTitle + 三个散装 ToolbarItem
+        // + 品牌色自定义池菜单 label —— 跟其他 tab 摆在一起对比着看不一致。
+        // 搜索词的防抖 reload 仍走下面的 .onChange(of: searchText)，换组件不影响。
+        .toolbar {
+            // 靠左 + 固定宽度（窄屏缩短），五个列表页共用同一个组件
+            ListSearchBarItem(text: $viewModel.searchText,
+                              placeholder: "搜索文件名…",
+                              title: "短视频",
+                              narrow: hSizeClass == .compact)
+            // 右侧整组收进一个 ToolbarItem：间距由 ToolbarMetrics 说了算，
+            // 不再吃 ToolbarItemGroup 的系统默认间距
+            TrailingToolsItem {
+                sortMenu
+                // 升/降序开关：只图标，箭头朝向即当前方向
+                ToolChip(label: "降序", icon: viewModel.descending ? "arrow.down" : "arrow.up",
+                         highlighted: viewModel.descending, iconOnly: true) {
+                    Task { await viewModel.toggleDirection() }
+                }
+                poolMenu
+                if hSizeClass == .regular {
+                    Text("\(viewModel.items.count) / \(viewModel.totalCount)")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        // ⚠️ 不加 fixedSize：工具栏空间紧张时 Text 会被压缩换行，
+                        // 变成「1234 / 5678」上下两行，把导航栏撑高
+                        .fixedSize(horizontal: true, vertical: false)
+                        .lineLimit(1)
+                        // ⚠️ 给计数留固定槽位：整排锚定屏幕右缘，数字位数一变
+                        // 整排按钮就被推着左右挪
+                        .frame(minWidth: ToolbarMetrics.countMinWidth, alignment: .trailing)
+                        // 与前面按钮的间隔独立于按钮间距（见 ToolbarMetrics.countGap）
+                        .padding(.leading, ToolbarMetrics.countGap)
+                }
+            }
+        }
+        .tint(Theme.brand)
         .navigationBarTitleDisplayMode(.inline)
         // ⚠️ 每个 tab / 每个 push 进来的页面都要自己垫一层背景：
         // NavigationStack 只渲染栈顶那一层，App 根的背景透不进来
         .appBackground()
         // 下拉刷新
         .refreshable { await viewModel.refresh() }
-        .searchable(text: $viewModel.searchText, prompt: "搜索文件名…")
-        .toolbar {
-            // 排序字段（与电影/相册/拍摄集列表同一套 ToolMenuChip 胶囊样式）
-            ToolbarItem(placement: .topBarTrailing) {
-                ToolMenuChip(label: viewModel.sort.label) {
-                    ForEach(ShortsViewModel.Sort.allCases, id: \.self) { s in
-                        Button {
-                            Task { await viewModel.setSort(s) }
-                        } label: {
-                            if viewModel.sort == s { Label(s.label, systemImage: "checkmark") }
-                            else { Text(s.label) }
-                        }
-                    }
-                }
-            }
-            // 升/降序开关：只图标，箭头朝向即当前方向
-            ToolbarItem(placement: .topBarTrailing) {
-                ToolChip(label: "降序", icon: viewModel.descending ? "arrow.down" : "arrow.up",
-                         highlighted: viewModel.descending, iconOnly: true) {
-                    Task { await viewModel.toggleDirection() }
-                }
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    Button { Task { await viewModel.selectPool(nil) } } label: {
-                        if viewModel.selectedPoolID == nil { Label("全部池", systemImage: "checkmark") }
-                        else { Text("全部池") }
-                    }
-                    ForEach(viewModel.pools) { pool in
-                        Button { Task { await viewModel.selectPool(pool.id) } } label: {
-                            if pool.id == viewModel.selectedPoolID { Label(pool.name, systemImage: "checkmark") }
-                            else { Text(pool.name) }
-                        }
-                    }
-                } label: {
-                    HStack(spacing: 4) {
-                        Text(viewModel.selectedPoolName)
-                            .font(.subheadline.weight(.medium))
-                        Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold))
-                    }
-                    .foregroundStyle(Theme.brand)
-                }
-            }
-        }
         // ⚠️ iOS 17 起 `onChange(of:) { newValue in }`（单参数）已废弃，用零参数闭包
         .onChange(of: viewModel.searchText) {
             Task {
@@ -216,6 +213,48 @@ struct ShortsView: View {
         guard !viewModel.items.isEmpty else { return }
         let idx = Int.random(in: 0..<viewModel.items.count)
         feedPresenter.open(viewModel: viewModel, startIndex: idx)
+    }
+
+    // MARK: 顶部栏控件（与电影/相册/拍摄集/演员列表同一套组件）
+
+    /// 排序字段。ToolMenuChip 的 label 样式与池筛选共用 ToolMenuLabel，
+    /// 大小/边距必然一致
+    private var sortMenu: some View {
+        ToolMenuChip(label: viewModel.sort.label) {
+            ForEach(ShortsViewModel.Sort.allCases, id: \.self) { s in
+                Button {
+                    Task { await viewModel.setSort(s) }
+                } label: {
+                    if viewModel.sort == s { Label(s.label, systemImage: "checkmark") }
+                    else { Text(s.label) }
+                }
+            }
+        }
+    }
+
+    /// 池筛选。与拍摄集页的 libraryMenu 同构：ToolMenuLabel（caption 字号 +
+    /// chevron + 次级灰）。⚠️ 以前用 subheadline 品牌色自定义 HStack，跟其他页
+    /// 的库筛选摆在一起一眼能看出不是一套。
+    /// 无条件渲染（哪怕 pools 还没加载完也显示「全部池」）：菜单本身可用，
+    /// 也避免加载中按钮闪进闪出
+    private var poolMenu: some View {
+        Menu {
+            Button { Task { await viewModel.selectPool(nil) } } label: {
+                if viewModel.selectedPoolID == nil { Label("全部池", systemImage: "checkmark") }
+                else { Text("全部池") }
+            }
+            ForEach(viewModel.pools) { pool in
+                Button { Task { await viewModel.selectPool(pool.id) } } label: {
+                    if pool.id == viewModel.selectedPoolID { Label(pool.name, systemImage: "checkmark") }
+                    else { Text(pool.name) }
+                }
+            }
+        } label: {
+            ToolMenuLabel(text: viewModel.selectedPoolName)
+        }
+        // ⚠️ Menu 是控件，页面上的 .tint(Theme.brand) 会盖掉 label 里的
+        // foregroundStyle（标题和展开后的菜单都变品牌色），必须给控件本身换 tint
+        .tint(Color.secondary)
     }
 }
 
