@@ -71,6 +71,15 @@ struct ShootDetailView: View {
                             // 直接塞 ScrollView 高度会塌成 0 —— 照片整块不显示的根因。
                             // 开启后网格不自己滚，高度=内容总高，由外层 ScrollView 统管。
                             .padding(.horizontal, 16)
+                    } else if viewModel.photos.isEmpty, let e = viewModel.photoErrorMessage {
+                        // 照片加载失败：明确说出来，不留一片空白让人以为是布局问题
+                        VStack(spacing: 6) {
+                            Image(systemName: "exclamationmark.triangle").foregroundStyle(.secondary)
+                            Text("照片加载失败：\(e)")
+                                .font(.caption).foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                        }
+                        .frame(maxWidth: .infinity).padding(.top, 24)
                     }
                 }
 
@@ -164,6 +173,9 @@ final class ShootDetailViewModel: ObservableObject {
     @Published var photoTotal = 0
     @Published var photoHasMore = false
     @Published var isLoading = false
+    /// 照片加载失败原因。⚠️ 以前三处 catch 全吞掉，请求一失败就只剩一片空白，
+    /// 看着和「布局塌了」一模一样，排障全靠猜 —— 现在至少把原因说出来。
+    @Published var photoErrorMessage: String? = nil
 
     private var photoPage = 1
     private let photoSize = 50
@@ -225,7 +237,10 @@ final class ShootDetailViewModel: ObservableObject {
             photoTotal = photos.count // 后端未返回总页，用已加载数 + hasMore 近似
             photoPage += 1
             photoHasMore = !batch.isEmpty
-        } catch {}
+            photoErrorMessage = nil
+        } catch {
+            photoErrorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
     }
 }
 

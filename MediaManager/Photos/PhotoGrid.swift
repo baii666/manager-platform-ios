@@ -30,6 +30,11 @@ struct PhotoGrid: View {
 
     /// fitsContent 模式的内容总高，由布局回调持续更新
     @State private var contentHeight: CGFloat = 0
+    /// 自举高度。⚠️ 不能是 0：UICollectionView 的 bounds 为空（height=0）时
+    /// UIKit 不跑布局，MasonryLayout.prepare() 永远不会被调用 → 高度回调不来 →
+    /// 高度卡在 0，照片整块不显示（拍摄集详情页踩过两次）。先给 1pt 让布局跑起来，
+    /// 真实高度由下一次布局回调顶上来。
+    private static let bootstrapHeight: CGFloat = 1
 
     var body: some View {
         PhotoGridRepresentable(
@@ -42,15 +47,17 @@ struct PhotoGrid: View {
             onSelect: onSelect,
             onReachEnd: onReachEnd,
             onContentHeight: { height in
-                // 异步回写：prepare 可能跑在 SwiftUI 的布局流程里，同步改 @State
-                // 会触发 "Modifying state during view update" 警告
+                // 负高度/NaN 一律挡掉：.frame(height:) 收到负数等于没给，收到 NaN 更糟
+                guard height.isFinite, height > 0 else { return }
+                // 异步回写：updateUIView 与 prepare 都可能跑在 SwiftUI 的布局流程里，
+                // 同步改 @State 会触发 "Modifying state during view update" 警告
                 DispatchQueue.main.async {
                     if abs(height - contentHeight) > 0.5 { contentHeight = height }
                 }
             }
         )
         // 自适配模式按内容定高；根视图模式不干涉，撑满外层给的空间
-        .frame(height: fitsContent ? contentHeight : nil)
+        .frame(height: fitsContent ? max(contentHeight, Self.bootstrapHeight) : nil)
     }
 }
 
@@ -123,6 +130,18 @@ private struct PhotoGridRepresentable: UIViewRepresentable {
         if token != context.coordinator.dataToken {
             context.coordinator.dataToken = token
             cv.reloadData()
+        }
+
+        // 自适配高度模式：内容高度必须主动算，不能只等布局回调。
+        // ⚠️ 只等回调会死锁 —— 网格高度初始为 0，UIKit 对空 bounds 不跑布局，
+        // prepare() 不执行 → 回调永远不来 → 高度卡在 0，照片整块不显示。
+        // 这里 invalidate + layoutIfNeeded 强跑一次，再把内容高度直接读出来上报；
+        // 外层 PhotoGrid 的 onContentHeight 是异步回写的，同步调它没有重入问题。
+        if fitsContent, let layout {
+            layout.invalidateLayout()
+            cv.layoutIfNeeded()
+            let h = layout.collectionViewContentSize.height
+            if h > 0 { onContentHeight?(h) }
         }
     }
 

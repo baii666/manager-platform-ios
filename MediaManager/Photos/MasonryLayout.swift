@@ -25,7 +25,8 @@ final class MasonryLayout: UICollectionViewLayout {
     private var contentWidth: CGFloat {
         guard let cv = collectionView else { return 0 }
         let insets = cv.contentInset
-        return cv.bounds.width - insets.left - insets.right
+        // 首帧 SwiftUI 可能还没定宽：夹到 0，别让下面的列宽算成负数
+        return max(0, cv.bounds.width - insets.left - insets.right)
     }
 
     override var collectionViewContentSize: CGSize {
@@ -38,8 +39,12 @@ final class MasonryLayout: UICollectionViewLayout {
         contentHeight = 0
 
         let count = cv.numberOfItems(inSection: 0)
-        guard count > 0 else {
-            reportContentHeightIfNeeded()
+        // 宽度为 0（SwiftUI 首帧 / 还没布局）时不能排：列宽会成负数，
+        // 算出来的负高度一旦上报，SwiftUI 侧 .frame(height:) 等于没给。
+        // 这里直接清掉不上报，等真正有宽度的那一轮再算。
+        guard contentWidth > 0, count > 0 else {
+            cache.removeAll()
+            contentHeight = 0
             return
         }
 
