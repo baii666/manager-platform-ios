@@ -3,7 +3,7 @@ import SwiftUI
 // MARK: - 随机刷流请求（首页「短视频连播」卡 → 随机起始沉浸刷流）
 // 请求方（首页 DiscoverCard）与消费方（ShortsView）分处不同 tab 的 NavigationStack，
 // 没有共同祖先能传 binding，用单例广播（与 RootView 的 FullscreenOverlay 同思路）。
-// generation 自增触发：连点两次也各自生效；消费方不记已消费值，靠刷流是否已开去重。
+// generation 自增触发：连点两次也各自生效；消费方不记已消耗值，靠刷流是否已开去重。
 final class ShortsRandomRequest: ObservableObject {
     static let shared = ShortsRandomRequest()
     /// 自增即代表一次新请求
@@ -55,43 +55,43 @@ final class ShortFeedPresenter: ObservableObject {
     }
 }
 
-// MARK: - 短视频页
-// 对齐网页端 ShortsWall（消费侧）：池 chips + 搜索 + 封面墙 + 点开播放。
-// ⚠️ 池切换是内容上方的横滑 chips 行（poolChipsRow，safeAreaInset 钉在
-// 导航栏下方），不是 toolbar 下拉、也不是「进场先选池」的二级页 ——
-// 理由见 poolChipsRow 的注释。
+// MARK: - 短视频页（池卡网格）
+// 与相册 / 拍摄集同一套展示逻辑：第一层是「集合卡」，点卡进入内容页。
+// 池卡只做入口，不带任何管理动作（扫描 / 抽帧 / 删除是网页端管理侧的事）。
+//
+// ⚠️ 2026-10-15 从「chips 行 + 视频墙」改成这个结构，两个原因：
+// ① 一致性：其他三个列表 tab 都是集合卡 → 内容，只有短视频是平铺视频墙
+// ② 规模化：chips 每颗约 98pt，千池就是约 130 屏横滑，等于不可用；
+//    池卡网格 + 搜索把找池成本压回 O(1)
+//
+// 「全部」为什么固定第一张：相册没有「全部」是因为相册互斥、单集小，
+// 短视频的全量视图是刚需（随机刷流的基线）—— 首页「连播」卡走的也是
+// 这条，把它藏进第二层会多一跳。
 struct ShortsView: View {
-    @StateObject private var viewModel = ShortsViewModel()
+    /// 「全部」数据源：只服务于随机刷流（首页卡 / 本页 shuffle 按钮）。
+    /// 池内播放走 PoolVideosView 自己的 VM，两个 VM 各管各的
+    @StateObject private var viewModel = ShortsViewModel(poolId: nil)
     /// 刷流呈现器：打开/关闭都走它，刷流本体挂在 RootView 根层
     @ObservedObject private var feedPresenter = ShortFeedPresenter.shared
-    /// 播放地址构造失败时给出明确原因，而不是静默什么都不发生
-    @State private var playError: String?
     /// 随机刷流请求（首页「短视频连播」卡）：generation 自增即触发一次
     @ObservedObject private var randomRequest = ShortsRandomRequest.shared
     /// 请求到达时 items 还没加载完（首帧 loading 中）：置位，items 到达后补开
     @State private var pendingRandomOpen = false
-    /// 池选择器（sheet）可见性。池多了以后 chips 行只显示常用 + 「更多」，
-    /// 全量检索进这个带搜索的 sheet
-    @State private var showPoolPicker = false
+    /// 池列表（卡片数据源）
+    @State private var pools: [ShortPool] = []
+    /// 池列表是否加载过（区分「加载中」与「真的没有池」，别闪空状态）
+    @State private var poolsLoaded = false
+    @State private var poolsError: String?
+    /// 池名搜索（本地过滤：池列表稳定，不需要持久化）
+    @State private var poolSearchText = ""
+    /// 导航目标：全部 / 某个池
+    @State private var route: PoolRoute?
     /// 窄屏（iPhone）：搜索框缩短、计数隐藏，避免导航栏一行塞不下。
     /// 与电影/相册/拍摄集列表同一判据，保证各 tab 顶栏行为一致
     @Environment(\.horizontalSizeClass) private var hSizeClass
 
     private let gridSpacing: CGFloat = 12
     private let edgePadding: CGFloat = 16
-    /// chips 行内联显示的池数上限。≤ 此值全量平铺（5 个池一屏放得下，
-    /// 横滑只为将来池变多留余量）；超过后 chips 只留常用位 + 「更多」，
-    /// 全量切换走带搜索的池选择器 —— 千池横滑约 130 屏，等于不可用
-    private let poolChipInlineLimit = 8
-    /// 封面高度写死成常量，不跟列宽挂钩。
-    ///
-    /// 短视频封面是 FFmpeg 抽帧，横屏 1920×1080 / 竖屏 1080×1920 / 4K 混在一起，
-    /// 尺寸完全没有统一标准。只要行高还会随内容变（列宽测量、图片加载完成），
-    /// LazyVGrid 就不会重算已布局的行 —— 表现就是卡片互相压住。
-    /// 所以这里连列宽都不自己量，改用 adaptive 交给系统，高度保持常量。
-    private let coverHeight: CGFloat = 240
-    /// 标题区高度也写死，让整卡高度成为常量
-    private let titleHeight: CGFloat = 28
 
     private var columns: [GridItem] {
         [GridItem(.adaptive(minimum: 160, maximum: 220), spacing: gridSpacing)]
@@ -99,82 +99,53 @@ struct ShortsView: View {
 
     var body: some View {
         ScrollView {
-            if viewModel.items.isEmpty && !viewModel.isLoading {
-                // 选中了具体池却一条没有时，说清楚是「这个池」空的，别让用户
-                // 以为整个库空了
-                ContentUnavailableView(viewModel.errorMessage ?? (viewModel.selectedPoolID == nil ? "暂无短视频" : "该池暂无短视频"),
-                                       systemImage: viewModel.errorMessage == nil ? "play.rectangle.fill" : "exclamationmark.triangle")
-                    .frame(maxWidth: .infinity, minHeight: 400)
-            } else {
-                LazyVGrid(columns: columns, spacing: gridSpacing) {
-                    ForEach(viewModel.items) { v in
-                        ShortCard(video: v, client: viewModel.client,
-                                  coverHeight: coverHeight,
-                                  titleHeight: titleHeight,
-                                  cardHeight: coverHeight + titleHeight) {
-                            guard let path = v.filePath, !path.isEmpty else {
-                                playError = "这条记录没有文件路径"
-                                return
-                            }
-                            guard let idx = viewModel.items.firstIndex(where: { $0.id == v.id }) else { return }
-                            // 刷流在根层 overlay 打开：背后仍是当前 tab（短视频页），
-                            // 右滑退出就回到这里
-                            feedPresenter.open(viewModel: viewModel, startIndex: idx)
-                        }
-                        .task {
-                            if v.id == viewModel.items.last?.id { await viewModel.loadMore() }
-                        }
+            LazyVGrid(columns: columns, spacing: gridSpacing) {
+                // 「全部」固定第一张，搜索时也在：它是回得来的「家」
+                PoolCard(title: "全部", count: totalVideoCount, coverURL: nil) {
+                    route = .all
+                }
+                ForEach(filteredPools) { pool in
+                    PoolCard(title: pool.name, count: pool.itemCount,
+                             coverURL: poolCoverURL(pool)) {
+                        route = .pool(id: pool.id, name: pool.name)
                     }
                 }
-                .padding(edgePadding)
-                if viewModel.isLoading {
-                    ProgressView().frame(maxWidth: .infinity).padding()
-                }
+            }
+            .padding(edgePadding)
+
+            if poolsLoaded && pools.isEmpty {
+                ContentUnavailableView(poolsError ?? "还没有池",
+                                       systemImage: poolsError == nil ? "square.stack.3d.up.slash" : "exclamationmark.triangle")
+                    .frame(maxWidth: .infinity, minHeight: 400)
+            } else if !poolSearchText.isEmpty && filteredPools.isEmpty {
+                ContentUnavailableView("没有匹配的池", systemImage: "magnifyingglass")
+                    .frame(maxWidth: .infinity, minHeight: 200)
             }
         }
-        // 池 chips 钉在导航栏下方。⚠️ 用 safeAreaInset 而不是塞进 ScrollView
-        // 里跟着滚：safeAreaInset 相当于扩展安全区，网格内容从它下面开始排，
-        // 滚到底也看得见、换池不用先滚回顶部
-        .safeAreaInset(edge: .top) {
-            poolChipsRow
-        }
-        // 池多以后的全量入口：chips 只留常用位，「更多」开这个带搜索的 sheet。
-        // 「更多」chip 只在池数超上限时才渲染，所以进来面对的一定是多池场景，
-        // 直接整屏（[.large]），不给半屏的犹豫
-        .sheet(isPresented: $showPoolPicker) {
-            PoolPickerSheet(viewModel: viewModel)
-                .presentationDetents([.large])
+        .navigationDestination(item: $route) { r in
+            PoolVideosView(poolId: r.poolId, poolName: r.name)
         }
         // ⚠️ 顶部栏与电影/相册/拍摄集/演员四个列表页完全同构（ ListTopBar.swift 那套）：
         // ListSearchBarItem（靠左死宽搜索框 + 页名）+ TrailingToolsItem
-        // （排序 / 降序 / 计数，间距由 ToolbarMetrics 统一）。
-        // 池筛选是短视频页特有的，不塞工具栏 —— 搬到内容上方的 chips 行。
-        // 以前这里是 .searchable + 居中 navigationTitle + 三个散装 ToolbarItem
-        // + 品牌色自定义池菜单 label —— 跟其他 tab 摆在一起对比着看不一致。
-        // 搜索词的防抖 reload 仍走下面的 .onChange(of: searchText)，换组件不影响。
+        // （随机 / 计数，间距由 ToolbarMetrics 统一）。
+        // 这里搜的是池名（本地过滤），不是视频 —— 视频搜索在池内页
         .toolbar {
-            // 靠左 + 固定宽度（窄屏缩短），五个列表页共用同一个组件
-            ListSearchBarItem(text: $viewModel.searchText,
-                              placeholder: "搜索文件名…",
+            ListSearchBarItem(text: $poolSearchText,
+                              placeholder: "搜索池名…",
                               title: "短视频",
                               narrow: hSizeClass == .compact)
-            // 右侧整组收进一个 ToolbarItem：间距由 ToolbarMetrics 说了算，
-            // 不再吃 ToolbarItemGroup 的系统默认间距
             TrailingToolsItem {
-                sortMenu
-                // 升/降序开关：只图标，箭头朝向即当前方向
-                ToolChip(label: "降序", icon: viewModel.descending ? "arrow.down" : "arrow.up",
-                         highlighted: viewModel.descending, iconOnly: true) {
-                    Task { await viewModel.toggleDirection() }
+                // 随机刷流：从「全部」范围随机起播 —— 首页「连播」卡同款能力，
+                // 现在 tab 内也能直接发起（池内随机在 PoolVideosView 里）
+                ToolChip(label: "随机", icon: "shuffle", iconOnly: true) {
+                    startRandomFeed()
                 }
-                // 池筛选不在工具栏里了：搬到内容上方的 chips 行（poolChipsRow），
-                // 下拉菜单不可见，多数用户根本不知道有池这回事
                 if hSizeClass == .regular {
-                    Text("\(viewModel.items.count) / \(viewModel.totalCount)")
+                    Text("\(pools.count) 池 · \(totalVideoCount) 支")
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
                         // ⚠️ 不加 fixedSize：工具栏空间紧张时 Text 会被压缩换行，
-                        // 变成「1234 / 5678」上下两行，把导航栏撑高
+                        // 变成上下两行，把导航栏撑高
                         .fixedSize(horizontal: true, vertical: false)
                         .lineLimit(1)
                         // ⚠️ 给计数留固定槽位：整排锚定屏幕右缘，数字位数一变
@@ -186,21 +157,13 @@ struct ShortsView: View {
             }
         }
         .tint(Theme.brand)
-        .navigationBarTitleDisplayMode(.inline)
         // ⚠️ 每个 tab / 每个 push 进来的页面都要自己垫一层背景：
         // NavigationStack 只渲染栈顶那一层，App 根的背景透不进来
         .appBackground()
-        // 下拉刷新
-        .refreshable { await viewModel.refresh() }
-        // ⚠️ iOS 17 起 `onChange(of:) { newValue in }`（单参数）已废弃，用零参数闭包
-        .onChange(of: viewModel.searchText) {
-            Task {
-                try? await Task.sleep(nanoseconds: 350_000_000)
-                guard !Task.isCancelled else { return }
-                await viewModel.reload()
-            }
-        }
+        // 「全部」VM 拉第一页：随机刷流的数据源（首页卡不等页面加载完就要能开）
         .task { await viewModel.loadInitial() }
+        .task { await loadPools() }
+        .refreshable { await loadPools() }
         // 首页「短视频连播」卡 → 随机起始的沉浸刷流
         // ⚠️ iOS 17 起 `onChange(of:) { newValue in }`（单参数，含 `{ _ in }`）已废弃，
         // 统一用零参数闭包，闭包内直接读属性即为新值
@@ -223,268 +186,144 @@ struct ShortsView: View {
                 startRandomFeed()
             }
         }
-        .alert("无法播放", isPresented: Binding(
-            get: { playError != nil },
-            set: { if !$0 { playError = nil } }
-        )) {
-            Button("好", role: .cancel) { playError = nil }
-        } message: {
-            Text(playError ?? "")
-        }
     }
 
     // MARK: 随机刷流
 
-    /// 随机起始下标开沉浸刷流：短视频池内随机，沿用当前选中的池 / 搜索范围
+    /// 随机起始下标开沉浸刷流：从「全部」范围随机
     private func startRandomFeed() {
         guard !viewModel.items.isEmpty else { return }
         let idx = Int.random(in: 0..<viewModel.items.count)
         feedPresenter.open(viewModel: viewModel, startIndex: idx)
     }
 
-    // MARK: 顶部栏控件（与电影/相册/拍摄集/演员列表同一套组件）
+    // MARK: 池列表
 
-    /// 排序字段。ToolMenuChip 的 label 样式与池筛选共用 ToolMenuLabel，
-    /// 大小/边距必然一致
-    private var sortMenu: some View {
-        ToolMenuChip(label: viewModel.sort.label) {
-            ForEach(ShortsViewModel.Sort.allCases, id: \.self) { s in
-                Button {
-                    Task { await viewModel.setSort(s) }
-                } label: {
-                    if viewModel.sort == s { Label(s.label, systemImage: "checkmark") }
-                    else { Text(s.label) }
-                }
-            }
+    private func loadPools() async {
+        guard let client = AppSession.shared.client else {
+            poolsLoaded = true
+            poolsError = "未连接服务器"
+            return
         }
+        do {
+            pools = try await client.fetchShortPools()
+            poolsError = nil
+        } catch {
+            pools = []
+            poolsError = "加载失败 · \(error.localizedDescription)"
+        }
+        poolsLoaded = true
     }
 
-    /// 池切换 chips：「全部」+ 每个池（池名 + 数量），横滑。
-    ///
-    /// 为什么是 chips 而不是「进场先显示池子、再点进去看内容」：
-    /// ① 消费场景要零摩擦 —— 每次进场多点一层，而九成情况下用户要的就是
-    ///    「全部」（首页「短视频连播」卡更是直接进随机刷流）；
-    /// ② 数据形态不支持 —— 全库 5 个池 12525 条，两大池占 81%，「全部」
-    ///    本身就是主视图，单池筛选只是「排除另一大池」，一键就能做到；
-    /// ③ web 端的池卡片页是管理场景（扫描/抽帧/删除），iOS 没有管理页，
-    ///    纯导航层没有功能承载。
-    /// chips 把「池」摆到明面上（原来藏在 toolbar 下拉里没人发现），
-    /// 又不增加导航层级 —— 5 个池一屏放得下，横滑只为将来池变多留余量。
-    ///
-    /// ⚠️ 由 body 的 .safeAreaInset(edge: .top) 钉在导航栏下方：
-    /// 内容从它下面开始排，滚到底也换得了池。
-    private var poolChipsRow: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                PoolChip(title: "全部",
-                         // 「全部」= 各池计数之和（静态口径：切进单池时也显示
-                         // 全库总量，不会跟着当前筛选变）；pools 还没加载完时
-                         // 不显示数字，别闪个 0
-                         count: viewModel.pools.isEmpty ? nil : viewModel.pools.reduce(0) { $0 + $1.itemCount },
-                         selected: viewModel.selectedPoolID == nil) {
-                    Task { await viewModel.selectPool(nil) }
-                }
-
-                // 池少时全量平铺（一屏放得下，横滑只为将来变多留余量）；
-                // 池多以后 chips 只留常用位 + 「更多」—— 横滑 1000 颗约 130 屏，
-                // 等于不可用，全量检索交给 PoolPickerSheet 的搜索框
-                if viewModel.pools.count > poolChipInlineLimit {
-                    ForEach(inlinePools) { pool in
-                        PoolChip(title: pool.name, count: pool.itemCount,
-                                 selected: viewModel.selectedPoolID == pool.id) {
-                            Task { await viewModel.selectPool(pool.id) }
-                        }
-                    }
-                    PoolChip(title: "更多", icon: "ellipsis", selected: false) {
-                        showPoolPicker = true
-                    }
-                } else {
-                    ForEach(viewModel.pools) { pool in
-                        PoolChip(title: pool.name, count: pool.itemCount,
-                                 selected: viewModel.selectedPoolID == pool.id) {
-                            Task { await viewModel.selectPool(pool.id) }
-                        }
-                    }
-                }
-            }
-            .padding(.horizontal, edgePadding)
-            .padding(.vertical, 8)
-        }
+    /// 全库视频总数 = 各池计数之和（静态口径：搜索时也显示全库总量）
+    private var totalVideoCount: Int {
+        pools.reduce(0) { $0 + $1.itemCount }
     }
 
-    /// 多池模式下 chips 行内联显示的池：最近用过的优先；没有历史就退化成
-    /// 视频数最多的几个（热门池，新用户第一眼也有东西可点）。
-    /// 已删除的池 id 由 compactMap 自然过滤
-    private var inlinePools: [ShortPool] {
-        let recents = ShortsPoolRecents.load()
-            .compactMap { id in viewModel.pools.first(where: { $0.id == id }) }
-        let source = recents.isEmpty
-            ? viewModel.pools.sorted { $0.itemCount > $1.itemCount }
-            : recents
-        // 留一颗给「更多」
-        Array(source.prefix(poolChipInlineLimit - 1))
+    /// 搜索过滤后的池，按视频数降序（大池在前：找热门的概率远大于翻长尾；
+    /// 数量打地用 id 升序兜底，保证顺序稳定）
+    private var filteredPools: [ShortPool] {
+        let q = poolSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let base = q.isEmpty ? pools : pools.filter { $0.name.localizedCaseInsensitiveContains(q) }
+        return base.sorted { $0.itemCount == $1.itemCount ? $0.id < $1.id : $0.itemCount > $1.itemCount }
+    }
+
+    /// 池封面 URL：后端给的是相对路径（/raw?path=…），过一遍 client 解析成绝对地址。
+    /// nil（空池 / 没抽帧）→ RemoteImage 走渐变占位
+    private func poolCoverURL(_ pool: ShortPool) -> URL? {
+        guard let raw = pool.coverUrl, let u = URL(string: raw) else { return nil }
+        return AppSession.shared.client?.resolve(u) ?? u
     }
 }
 
-// MARK: - 池切换胶囊
-private struct PoolChip: View {
+// MARK: - 池网格 → 池内视频墙 的路由值
+/// 用 enum 而不是 Int?：Int? 做 navigationDestination(item:) 时「全部」与
+/// 「具体池」含糊，nil 的 id 也不好给
+enum PoolRoute: Identifiable, Hashable {
+    case all
+    case pool(id: Int, name: String)
+
+    var id: String {
+        switch self {
+        case .all: return "all"
+        case .pool(let id, _): return "pool-\(id)"
+        }
+    }
+
+    var poolId: Int? {
+        switch self {
+        case .all: return nil
+        case .pool(let id, _): return id
+        }
+    }
+
+    var name: String {
+        switch self {
+        case .all: return "全部短视频"
+        case .pool(_, let name): return name
+        }
+    }
+}
+
+// MARK: - 池卡（对齐相册卡：封面 + 右下角计数 + 标题区）
+/// 只做入口：没有管理动作（扫描 / 抽帧 / 删除在网页端管理侧）
+private struct PoolCard: View {
     let title: String
-    /// 池内视频数。nil = 不显示数字（「全部」在 pools 加载完成前）
-    var count: Int? = nil
-    /// 前缀图标（「更多」用 ellipsis）。池名 chip 不带图标
-    var icon: String? = nil
-    let selected: Bool
-    var action: () -> Void
+    let count: Int
+    var coverURL: URL? = nil
+
+    /// 封面高度写死：视频海报混了横屏 / 竖屏 / 4K，行高随内容变
+    /// LazyVGrid 就不重排已布局的行 → 卡片互相压（同 ShortCard 的理由）
+    private let coverHeight: CGFloat = 150
+    /// 标题区高度（名字一行 + 计数一行）
+    private let infoHeight: CGFloat = 46
 
     var body: some View {
-        Button(action: action) {
-            // 两种态分开写而不是条件修饰符：选中 = 品牌色实底 + 白字；
-            // 未选中 = 和其他卡片同一套 appSurface + 分隔线描边。
-            // 整行只有选中一颗是彩色的，不会花花绿绿
-            if selected {
-                chipContent
-                    .foregroundStyle(.white)
-                    .background(Theme.brand, in: Capsule())
-            } else {
-                chipContent
-                    .foregroundStyle(.secondary)
-                    .appSurface(in: Capsule())
-                    .overlay(Capsule().stroke(.separator, lineWidth: 1))
+        Button(action: onTap) {
+            VStack(alignment: .leading, spacing: 0) {
+                ZStack(alignment: .bottomTrailing) {
+                    RemoteImage(url: coverURL,
+                                fallbackIcon: "play.rectangle.on.rectangle",
+                                fallbackColors: Theme.placeholderGradient(for: .short))
+                        .imageFilled()
+                        .frame(height: coverHeight)
+                        .frame(maxWidth: .infinity)
+                        .clipped()
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    // 右下角计数角标（同 AlbumCard）
+                    Text("\(count)")
+                        .font(.caption2.weight(.semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(.black.opacity(0.55), in: Capsule())
+                        .padding(7)
+                }
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Text("\(count) 支")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 9)
+                .frame(height: infoHeight, alignment: .leading)
             }
+            // 整卡高度也钉死，理由同 ShortCard
+            .frame(height: coverHeight + infoHeight, alignment: .top)
+            .clipped()
+            .appSurface(in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(.separator))
         }
         .buttonStyle(.plain)
     }
 
-    private var chipContent: some View {
-        HStack(spacing: 5) {
-            if let icon {
-                Image(systemName: icon).font(.system(size: 11, weight: .semibold))
-            }
-            Text(title)
-                .font(.caption.weight(.medium))
-                .lineLimit(1)
-            if let count {
-                Text("\(count)")
-                    .font(.caption2.monospacedDigit())
-            }
-        }
-        .padding(.horizontal, 10)
-        .frame(height: 28)
-    }
-}
-
-// MARK: - 最近用过的短视频池
-/// UserDefaults 持久化，cap 8。池多了以后 poolChipsRow 的常用位 +
-/// PoolPickerSheet 的「最近使用」分组都用它。
-/// 存 id 不存名字：池改名后历史仍然有效；池删掉后由 compactMap 自然过滤
-enum ShortsPoolRecents {
-    private static let key = "shorts.recentPoolIDs"
-    private static let cap = 8
-
-    static func load() -> [Int] {
-        UserDefaults.standard.array(forKey: key) as? [Int] ?? []
-    }
-
-    /// 记一次使用：移到最前、去重、截断。nil 不记（调用方已说明理由）
-    static func record(_ id: Int?) {
-        guard let id else { return }
-        var ids = load().filter { $0 != id }
-        ids.insert(id, at: 0)
-        UserDefaults.standard.set(Array(ids.prefix(cap)), forKey: key)
-    }
-}
-
-// MARK: - 池选择器（池多以后的全量入口）
-/// chips 行是「快捷位」，这里才是「全量」：搜索框 + 按视频数降序 + 最近使用。
-/// 千池规模下横滑 chips 不可用（约 130 屏），搜索把找池成本压到 O(1)。
-/// 不做缩略图：每池取一张封面 = N 个请求，列表场景不值
-private struct PoolPickerSheet: View {
-    @ObservedObject var viewModel: ShortsViewModel
-    @Environment(\.dismiss) private var dismiss
-    @State private var searchText = ""
-
-    var body: some View {
-        NavigationStack {
-            List {
-                // 「全部」永远在第一位，与 chips 第一颗对应
-                poolRow(title: "全部池",
-                        count: viewModel.pools.reduce(0) { $0 + $1.itemCount },
-                        selected: viewModel.selectedPoolID == nil) {
-                    dismiss()
-                    Task { await viewModel.selectPool(nil) }
-                }
-                // 有历史且没在搜索时才显示「最近使用」，否则和下面的全量列表重复
-                if searchText.isEmpty, !recentPools.isEmpty {
-                    Section("最近使用") {
-                        rows(recentPools)
-                    }
-                }
-                Section(searchText.isEmpty ? "全部池 · \(viewModel.pools.count)" : "搜索结果 · \(filtered.count)") {
-                    rows(sortedPools)
-                }
-            }
-            .navigationTitle("选择池")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("关闭") { dismiss() }
-                }
-            }
-            .searchable(text: $searchText, prompt: "搜索池名")
-            .overlay {
-                if viewModel.pools.isEmpty {
-                    ContentUnavailableView("还没有池", systemImage: "square.stack.3d.up.slash")
-                } else if filtered.isEmpty {
-                    ContentUnavailableView("没有匹配的池", systemImage: "magnifyingglass")
-                }
-            }
-        }
-    }
-
-    private func rows(_ pools: [ShortPool]) -> some View {
-        ForEach(pools) { pool in
-            poolRow(title: pool.name, count: pool.itemCount,
-                    selected: viewModel.selectedPoolID == pool.id) {
-                dismiss()
-                Task { await viewModel.selectPool(pool.id) }
-            }
-        }
-    }
-
-    private func poolRow(title: String, count: Int, selected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 10) {
-                Text(title).lineLimit(1)
-                Spacer(minLength: 8)
-                Text("\(count)")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                if selected {
-                    Image(systemName: "checkmark")
-                        .foregroundStyle(Theme.brand)
-                        .font(.body.weight(.semibold))
-                }
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-
-    private var recentPools: [ShortPool] {
-        ShortsPoolRecents.load()
-            .compactMap { id in viewModel.pools.first(where: { $0.id == id }) }
-    }
-
-    private var filtered: [ShortPool] {
-        let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !q.isEmpty else { return viewModel.pools }
-        return viewModel.pools.filter { $0.name.localizedCaseInsensitiveContains(q) }
-    }
-
-    /// 全量列表按视频数降序：大池在前 —— 用户找「热门」的概率远大于翻长尾
-    private var sortedPools: [ShortPool] {
-        filtered.sorted { $0.itemCount > $1.itemCount }
-    }
+    var onTap: () -> Void
 }
 
 // MARK: - 短视频 VM
@@ -504,9 +343,12 @@ final class ShortsViewModel: ObservableObject {
         }
     }
 
+    /// 数据范围：nil = 全部池，非 nil = 指定池。构造时定死，运行期不改 ——
+    /// 换范围就是换 VM（池网格的「全部」VM 只管随机刷流；每个池页各持
+    /// 自己的 VM，互不干扰）
+    let poolId: Int?
+
     @Published var items: [ShortVideo] = []
-    @Published var pools: [ShortPool] = []
-    @Published var selectedPoolID: Int?
     @Published var searchText = "" {
         didSet { ListSearchPrefs.saveSearch(prefsPage, searchText) }
     }
@@ -530,7 +372,8 @@ final class ShortsViewModel: ObservableObject {
     private let pageSize = 60
     private var hasMore = true
 
-    init() {
+    init(poolId: Int? = nil) {
+        self.poolId = poolId
         // 还原上次的搜索词 / 排序 / 方向（没记过就用默认值）
         self.searchText = ListSearchPrefs.loadSearch(prefsPage)
         self.sort = ListSearchPrefs.loadSort(prefsPage, fallback: .created)
@@ -540,21 +383,10 @@ final class ShortsViewModel: ObservableObject {
     @MainActor
     func loadInitial() async {
         guard let client else { errorMessage = "未连接服务器"; return }
-        do { pools = try await client.fetchShortPools() } catch { pools = [] }
         // 同 AlbumListView：从详情返回本页时 .task 可能重跑，此时 reload 会清空 items
         // 让 ScrollView 弹回顶部。已有数据就跳过，保住滚动位置。
-        // 搜索 / 切换合集仍各自直接调 reload()，不受影响。
+        // 搜索 / 排序变更仍各自直接调 reload()，不受影响。
         guard items.isEmpty else { return }
-        await reload()
-    }
-
-    @MainActor
-    func selectPool(_ id: Int?) async {
-        selectedPoolID = id
-        // 记进「最近使用」：池多了以后 chips 行的常用位 + 选择器的
-        // 「最近使用」分组都靠它。nil（全部）不记 —— 它本来就在 chips
-        // 第一位，记了反而挤掉真正的常用池
-        ShortsPoolRecents.record(id)
         await reload()
     }
 
@@ -591,7 +423,7 @@ final class ShortsViewModel: ObservableObject {
         hasMore = true
         do {
             let (batch, total) = try await client.fetchShortVideos(
-                poolId: selectedPoolID, page: page, size: pageSize,
+                poolId: poolId, page: page, size: pageSize,
                 sort: sort.rawValue, descending: descending,
                 q: searchText.isEmpty ? nil : searchText)
             totalCount = total
@@ -610,7 +442,7 @@ final class ShortsViewModel: ObservableObject {
         defer { isLoading = false }
         do {
             let (batch, total) = try await client.fetchShortVideos(
-                poolId: selectedPoolID, page: page, size: pageSize,
+                poolId: poolId, page: page, size: pageSize,
                 sort: sort.rawValue, descending: descending,
                 q: searchText.isEmpty ? nil : searchText)
             totalCount = total
@@ -628,7 +460,8 @@ final class ShortsViewModel: ObservableObject {
 }
 
 // MARK: - 短视频封面卡（高度全常量：封面 coverHeight + 标题 titleHeight）
-private struct ShortCard: View {
+// ⚠️ internal 而不是 private：PoolVideosView 在另一个文件里用它
+struct ShortCard: View {
     let video: ShortVideo
     let client: APIClient?
     let coverHeight: CGFloat
@@ -653,7 +486,7 @@ private struct ShortCard: View {
                         .frame(maxWidth: .infinity)
                         .clipped()
                     LinearGradient(colors: [.clear, .black.opacity(0.75)],
-                                  startPoint: .top, endPoint: .bottom)
+                                   startPoint: .top, endPoint: .bottom)
                         .frame(height: 70)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                         .clipped()

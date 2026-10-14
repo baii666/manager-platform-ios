@@ -1013,11 +1013,15 @@ struct ShortPool: Identifiable, Codable, Sendable, Hashable {
     var name: String = ""
     var itemCount: Int = 0
     var enabled: Int = 1
+    /// 池封面（后端 = 该池最新一支视频的静态海报 URL，相对路径 /raw?path=…）。
+    /// nil = 空池或没抽帧，前端走渐变占位
+    var coverUrl: String? = nil
 
     enum CodingKeys: String, CodingKey {
         case id, name
         case itemCount = "item_count"
         case enabled
+        case coverUrl = "cover_url"
     }
 }
 
