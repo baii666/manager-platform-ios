@@ -382,7 +382,10 @@ final class ShortsViewModel: ObservableObject {
 
     @MainActor
     func loadInitial() async {
-        guard let client else { errorMessage = "未连接服务器"; return }
+        // ⚠️ 只探活不绑定：函数体只用 reload()，client 在 loadMore() 里
+        // 会重新绑一次 —— 写成 `guard let client else` 会绑个没人用的变量，
+        // 编译器警告 "immutable value 'client' was never used"
+        guard AppSession.shared.client != nil else { errorMessage = "未连接服务器"; return }
         // 同 AlbumListView：从详情返回本页时 .task 可能重跑，此时 reload 会清空 items
         // 让 ScrollView 弹回顶部。已有数据就跳过，保住滚动位置。
         // 搜索 / 排序变更仍各自直接调 reload()，不受影响。
