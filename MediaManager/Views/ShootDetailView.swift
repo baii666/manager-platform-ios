@@ -1,11 +1,14 @@
 import SwiftUI
 
 // MARK: - 拍摄集详情页
-// Hero 封面头 + 视频横滑轨(播放) + 照片瀑布流(看图器) + 无限滚动。
-// ⚠️ 2026-10-14 从「全部/视频/照片 三段 tab」改成这个结构：库里的形状是
-// 每个拍摄集 1-2 个视频、100+ 张照片（全库 134 视频 vs 13900 照片），
-// 视频不配占一个 tab —— 降级成照片流上方的一条 16:9 横滑轨，整页只有
-// 照片流一种滚动节奏。网页端 ShootDetailPage 仍是 tab，待对齐。
+// 视频横滑轨(播放) + 照片瀑布流(看图器) + 无限滚动；信息全部收进导航栏。
+// ⚠️ 2026-10-14 两次改版：
+// 1. 从「全部/视频/照片 三段 tab」改成「视频横滑轨 + 照片瀑布流」—— 库里的
+//    形状是每个拍摄集 1-2 个视频、100+ 张照片（全库 134 视频 vs 13900 照片），
+//    视频不配占一个 tab；整页只有照片流一种滚动节奏
+// 2. 去掉 172pt Hero 大图头 —— 照片是主体，进场就该直接看到网格；标题和
+//    数量/体积/时长收进导航栏 principal（两行）
+// 网页端 ShootDetailPage 仍是 tab + 大头图结构，待对齐。
 struct ShootDetailView: View {
     let shoot: Shoot
 
@@ -24,8 +27,6 @@ struct ShootDetailView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            heroHeader
-
             ScrollView {
                 // 视频横滑轨。1-2 个视频时就是固定一行，横滑只为视频变多留余量；
                 // 一个视频都没有时整节不渲染，不留空标题
@@ -86,8 +87,19 @@ struct ShootDetailView: View {
             }
             .refreshable { await viewModel.refresh() }
         }
-        .navigationTitle(shoot.displayTitle)
         .navigationBarTitleDisplayMode(.inline)
+        // 信息全部收进导航栏：第一行标题，第二行数量/体积/时长。
+        // principal 顶掉 inline 标题，所以不再需要 navigationTitle
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                VStack(spacing: 2) {
+                    Text(shoot.displayTitle)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1).truncationMode(.tail)
+                    infoRow
+                }
+            }
+        }
         // ⚠️ 每个 tab / 每个 push 进来的页面都要自己垫一层背景：
         // NavigationStack 只渲染栈顶那一层，App 根的背景透不进来
         .appBackground()
@@ -102,6 +114,27 @@ struct ShootDetailView: View {
             }
         }
         // 看图器走全局 overlay（PhotoViewerPresenter），不再用 fullScreenCover
+    }
+
+    // MARK: 导航栏信息行
+
+    /// 第二行：视频数 / 照片数 / 体积 / 时长。详情拉回来后用权威值
+    /// （detail.videos.count / 后端 COUNT(*)），加载中才回退列表里带来的计数
+    private var infoRow: some View {
+        HStack(spacing: 8) {
+            Label("\(viewModel.videos.isEmpty ? shoot.videoCount : viewModel.videos.count)",
+                  systemImage: "film")
+            Label("\(viewModel.photoTotal > 0 ? viewModel.photoTotal : shoot.photoCount)",
+                  systemImage: "photo")
+            if let size = formatSize(shoot.totalSize) {
+                Label(size, systemImage: "internaldrive")
+            }
+            if shoot.totalDuration > 0 {
+                Label(formatDuration(Int(shoot.totalDuration)), systemImage: "clock")
+            }
+        }
+        .font(.caption2)
+        .foregroundStyle(.secondary)
     }
 
     // MARK: 视频横滑轨
@@ -131,57 +164,6 @@ struct ShootDetailView: View {
         }
         .padding(.top, 14)
     }
-
-    // MARK: Hero 封面头
-
-    /// 封面大图 + 底部渐变 + 标题 + 统计胶囊。没有封面时 RemoteImage 自己出
-    /// 渐变占位，布局不变。
-    private var heroHeader: some View {
-        ZStack(alignment: .bottomLeading) {
-            RemoteImage(url: client?.shootCoverURL(shoot.id, size: 900),
-                        fallbackIcon: "photo.on.rectangle.angled",
-                        fallbackColors: Theme.placeholderGradient(for: .shoot))
-                .imageFilled()
-                .frame(height: 172)
-                .clipped()
-            // 底部压暗，保证白字在亮封面上也可读
-            LinearGradient(colors: [.clear, .black.opacity(0.72)],
-                           startPoint: .top, endPoint: .bottom)
-            VStack(alignment: .leading, spacing: 6) {
-                Text(shoot.displayTitle)
-                    .font(.title3.weight(.bold))
-                    .foregroundStyle(.white)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
-                    .shadow(color: .black.opacity(0.5), radius: 4, y: 1)
-                HStack(spacing: 8) {
-                    // 详情拉回来后用权威值（detail.videos.count / 后端 COUNT(*)），
-                    // 加载中先用列表里带来的计数顶上，不闪 0
-                    statChip("film", "\(viewModel.videos.isEmpty ? shoot.videoCount : viewModel.videos.count)")
-                    statChip("photo", "\(viewModel.photoTotal > 0 ? viewModel.photoTotal : shoot.photoCount)")
-                    if let size = formatSize(shoot.totalSize) { statChip("internaldrive", size) }
-                    if shoot.totalDuration > 0 {
-                        statChip("clock", formatDuration(Int(shoot.totalDuration)))
-                    }
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 12)
-        }
-        .frame(height: 172)
-        .clipped()
-    }
-
-    private func statChip(_ icon: String, _ text: String) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: icon).font(.system(size: 10))
-            Text(text).font(.caption2.weight(.medium)).monospacedDigit()
-        }
-        .foregroundStyle(.white.opacity(0.92))
-        .padding(.horizontal, 7).padding(.vertical, 4)
-        .background(.black.opacity(0.35), in: Capsule())
-    }
-}
 
 // MARK: - 拍摄集详情 VM
 final class ShootDetailViewModel: ObservableObject {
