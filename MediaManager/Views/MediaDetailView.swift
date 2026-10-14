@@ -124,10 +124,17 @@ struct MediaDetailView: View {
                     .disabled(favLoading)
                 }
 
-                if !d.genres.isEmpty {
+                // ⚠️ 已经去重：ForEach 用 id: \.self 时，重复的类型名会让两个标签
+                // 拿到同一个 id，SwiftUI 会把它们画在同一个位置（看着就是「叠在一起」）
+                if !genreTags.isEmpty {
                     FlowLayout(spacing: 8) {
-                        ForEach(d.genres, id: \.self) { g in
+                        ForEach(genreTags, id: \.self) { g in
                             Text(g).font(.footnote)
+                                // ⚠️ 标签自己内部不许断行：换行由外层 FlowLayout 负责。
+                                // 一个长标签在胶囊里折成两行时，实际高度会和布局量到的
+                                // 高度对不上 —— 这就是「标签压到下面内容」的来源。
+                                .lineLimit(1)
+                                .truncationMode(.tail)
                                 .padding(.horizontal, 12).padding(.vertical, 5)
                                 .appSurface(in: Capsule())
                         }
@@ -243,6 +250,14 @@ struct MediaDetailView: View {
         .navigationDestination(for: ActorRoute.self) { route in
             ActorDetailView(actorId: route.id)
         }
+    }
+
+    /// 类型标签：去空白 + 去重（保序）。见调用处的 id 说明。
+    private var genreTags: [String] {
+        var seen = Set<String>()
+        return (detail?.genres ?? [])
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && seen.insert($0).inserted }
     }
 
     // 把剧照 URL 适配成 Photo（看图器需要）
@@ -419,47 +434,73 @@ private struct InfoRow: View {
 }
 
 // MARK: - 流式布局（类型标签）
+// 手写 wrapping layout 有两条铁律，之前踩的都是这两条：
+//   ① **测量和摆放必须用同一份尺寸**。老实现两处都把父视图给的 proposal 原封不动
+//      往下传：那个 proposal 的宽度是整行宽，子视图量出来的和真正摆出来的不是一回事，
+//      于是胶囊互相压，整块还会压到下面的简介。现在统一用 .unspecified 量「理想尺寸」，
+//      摆放时把这个尺寸原样当 proposal 传进去 —— 渲染尺寸 == 测量尺寸，结构上不可能重叠。
+//   ② **换行判定里 x 已经是下一个的左边缘**（放完一个就 += width + spacing），
+//      所以判定写成 `x + width > maxX`，不能再加一个 spacing。
+//      老实现写成 `x + w + spacing > maxX`，本该放得下的标签会被挤到下一行。
 private struct FlowLayout: Layout {
     var spacing: CGFloat = 8
     static var layoutProperties: LayoutProperties { LayoutProperties() }
 
-    func sizeThatFits(proposal: ProposedViewSize, subviews: LayoutSubviews, cache: inout ()) -> CGSize {
-        let sizes = subviews.map { $0.sizeThatFits(proposal) }
-        let maxWidth = proposal.width ?? .infinity
-        var width: CGFloat = 0
-        var height: CGFloat = 0
-        var currentRowWidth: CGFloat = 0
-        var currentRowHeight: CGFloat = 0
-        for size in sizes {
-            if currentRowWidth + size.width + spacing > maxWidth, currentRowWidth > 0 {
-                width = max(width, currentRowWidth - spacing)
-                height += currentRowHeight + spacing
-                currentRowWidth = 0
-                currentRowHeight = 0
-            }
-            currentRowWidth += size.width + spacing
-            currentRowHeight = max(currentRowHeight, size.height)
+    /// 量一次，sizeThatFits 与 placeSubviews 共用（见 ①）
+    private func idealSizes(_ subviews: LayoutSubviews, maxWidth: CGFloat) -> [CGSize] {
+        subviews.map { s in
+            var size = s.sizeThatFits(.unspecified)
+            // 单个超宽标签夹回一行内，靠 lineLimit 截断，不许它撑破整行
+            size.width = min(size.width, maxWidth)
+            return size
         }
-        width = max(width, currentRowWidth - spacing)
-        height += currentRowHeight
-        return CGSize(width: min(width, maxWidth), height: height)
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: LayoutSubviews, cache: inout ()) -> CGSize {
+        guard !subviews.isEmpty else { return .zero }
+        let maxWidth = proposal.width ?? .greatestFiniteMagnitude
+        let sizes = idealSizes(subviews, maxWidth: maxWidth)
+
+        var x: CGFloat = 0          // 下一个标签的左边缘（已含与前一个的 spacing）
+        var rowHeight: CGFloat = 0
+        var total: CGFloat = 0
+        var widest: CGFloat = 0
+        for size in sizes {
+            if x > 0, x + size.width > maxWidth {
+                total += rowHeight + spacing
+                widest = max(widest, x - spacing)
+                x = 0
+                rowHeight = 0
+            }
+            x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+        }
+        total += rowHeight
+        widest = max(widest, max(0, x - spacing))
+        // 宽度报满容器：这样摆放时拿到的 bounds 宽度 == 测量时的 maxWidth，行断点完全一致
+        let width = maxWidth == .greatestFiniteMagnitude ? widest : maxWidth
+        return CGSize(width: width, height: total)
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: LayoutSubviews, cache: inout ()) {
-        let sizes = subviews.map { $0.sizeThatFits(proposal) }
+        guard !subviews.isEmpty else { return }
+        let sizes = idealSizes(subviews, maxWidth: bounds.width)
+
         var x = bounds.minX
         var y = bounds.minY
-        var currentRowHeight: CGFloat = 0
+        var rowHeight: CGFloat = 0
         for index in subviews.indices {
             let size = sizes[index]
-            if x + size.width + spacing > bounds.maxX, x > bounds.minX {
+            if x > bounds.minX, x + size.width > bounds.maxX {
                 x = bounds.minX
-                y += currentRowHeight + spacing
-                currentRowHeight = 0
+                y += rowHeight + spacing
+                rowHeight = 0
             }
-            subviews[index].place(at: CGPoint(x: x, y: y), proposal: proposal)
+            subviews[index].place(at: CGPoint(x: x, y: y),
+                                  anchor: .topLeading,
+                                  proposal: ProposedViewSize(width: size.width, height: size.height))
             x += size.width + spacing
-            currentRowHeight = max(currentRowHeight, size.height)
+            rowHeight = max(rowHeight, size.height)
         }
     }
 }
