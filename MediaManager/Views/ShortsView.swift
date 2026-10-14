@@ -70,12 +70,19 @@ struct ShortsView: View {
     @ObservedObject private var randomRequest = ShortsRandomRequest.shared
     /// 请求到达时 items 还没加载完（首帧 loading 中）：置位，items 到达后补开
     @State private var pendingRandomOpen = false
+    /// 池选择器（sheet）可见性。池多了以后 chips 行只显示常用 + 「更多」，
+    /// 全量检索进这个带搜索的 sheet
+    @State private var showPoolPicker = false
     /// 窄屏（iPhone）：搜索框缩短、计数隐藏，避免导航栏一行塞不下。
     /// 与电影/相册/拍摄集列表同一判据，保证各 tab 顶栏行为一致
     @Environment(\.horizontalSizeClass) private var hSizeClass
 
     private let gridSpacing: CGFloat = 12
     private let edgePadding: CGFloat = 16
+    /// chips 行内联显示的池数上限。≤ 此值全量平铺（5 个池一屏放得下，
+    /// 横滑只为将来池变多留余量）；超过后 chips 只留常用位 + 「更多」，
+    /// 全量切换走带搜索的池选择器 —— 千池横滑约 130 屏，等于不可用
+    private let poolChipInlineLimit = 8
     /// 封面高度写死成常量，不跟列宽挂钩。
     ///
     /// 短视频封面是 FFmpeg 抽帧，横屏 1920×1080 / 竖屏 1080×1920 / 4K 混在一起，
@@ -130,6 +137,13 @@ struct ShortsView: View {
         // 滚到底也看得见、换池不用先滚回顶部
         .safeAreaInset(edge: .top) {
             poolChipsRow
+        }
+        // 池多以后的全量入口：chips 只留常用位，「更多」开这个带搜索的 sheet。
+        // 「更多」chip 只在池数超上限时才渲染，所以进来面对的一定是多池场景，
+        // 直接整屏（[.large]），不给半屏的犹豫
+        .sheet(isPresented: $showPoolPicker) {
+            PoolPickerSheet(viewModel: viewModel)
+                .presentationDetents([.large])
         }
         // ⚠️ 顶部栏与电影/相册/拍摄集/演员四个列表页完全同构（ ListTopBar.swift 那套）：
         // ListSearchBarItem（靠左死宽搜索框 + 页名）+ TrailingToolsItem
@@ -270,16 +284,45 @@ struct ShortsView: View {
                          selected: viewModel.selectedPoolID == nil) {
                     Task { await viewModel.selectPool(nil) }
                 }
-                ForEach(viewModel.pools) { pool in
-                    PoolChip(title: pool.name, count: pool.itemCount,
-                             selected: viewModel.selectedPoolID == pool.id) {
-                        Task { await viewModel.selectPool(pool.id) }
+
+                // 池少时全量平铺（一屏放得下，横滑只为将来变多留余量）；
+                // 池多以后 chips 只留常用位 + 「更多」—— 横滑 1000 颗约 130 屏，
+                // 等于不可用，全量检索交给 PoolPickerSheet 的搜索框
+                if viewModel.pools.count > poolChipInlineLimit {
+                    ForEach(inlinePools) { pool in
+                        PoolChip(title: pool.name, count: pool.itemCount,
+                                 selected: viewModel.selectedPoolID == pool.id) {
+                            Task { await viewModel.selectPool(pool.id) }
+                        }
+                    }
+                    PoolChip(title: "更多", icon: "ellipsis", selected: false) {
+                        showPoolPicker = true
+                    }
+                } else {
+                    ForEach(viewModel.pools) { pool in
+                        PoolChip(title: pool.name, count: pool.itemCount,
+                                 selected: viewModel.selectedPoolID == pool.id) {
+                            Task { await viewModel.selectPool(pool.id) }
+                        }
                     }
                 }
             }
             .padding(.horizontal, edgePadding)
             .padding(.vertical, 8)
         }
+    }
+
+    /// 多池模式下 chips 行内联显示的池：最近用过的优先；没有历史就退化成
+    /// 视频数最多的几个（热门池，新用户第一眼也有东西可点）。
+    /// 已删除的池 id 由 compactMap 自然过滤
+    private var inlinePools: [ShortPool] {
+        let recents = ShortsPoolRecents.load()
+            .compactMap { id in viewModel.pools.first(where: { $0.id == id }) }
+        let source = recents.isEmpty
+            ? viewModel.pools.sorted { $0.itemCount > $1.itemCount }
+            : recents
+        // 留一颗给「更多」
+        Array(source.prefix(poolChipInlineLimit - 1))
     }
 }
 
@@ -288,6 +331,8 @@ private struct PoolChip: View {
     let title: String
     /// 池内视频数。nil = 不显示数字（「全部」在 pools 加载完成前）
     var count: Int? = nil
+    /// 前缀图标（「更多」用 ellipsis）。池名 chip 不带图标
+    var icon: String? = nil
     let selected: Bool
     var action: () -> Void
 
@@ -312,6 +357,9 @@ private struct PoolChip: View {
 
     private var chipContent: some View {
         HStack(spacing: 5) {
+            if let icon {
+                Image(systemName: icon).font(.system(size: 11, weight: .semibold))
+            }
             Text(title)
                 .font(.caption.weight(.medium))
                 .lineLimit(1)
@@ -322,6 +370,120 @@ private struct PoolChip: View {
         }
         .padding(.horizontal, 10)
         .frame(height: 28)
+    }
+}
+
+// MARK: - 最近用过的短视频池
+/// UserDefaults 持久化，cap 8。池多了以后 poolChipsRow 的常用位 +
+/// PoolPickerSheet 的「最近使用」分组都用它。
+/// 存 id 不存名字：池改名后历史仍然有效；池删掉后由 compactMap 自然过滤
+enum ShortsPoolRecents {
+    private static let key = "shorts.recentPoolIDs"
+    private static let cap = 8
+
+    static func load() -> [Int] {
+        UserDefaults.standard.array(forKey: key) as? [Int] ?? []
+    }
+
+    /// 记一次使用：移到最前、去重、截断。nil 不记（调用方已说明理由）
+    static func record(_ id: Int?) {
+        guard let id else { return }
+        var ids = load().filter { $0 != id }
+        ids.insert(id, at: 0)
+        UserDefaults.standard.set(Array(ids.prefix(cap)), forKey: key)
+    }
+}
+
+// MARK: - 池选择器（池多以后的全量入口）
+/// chips 行是「快捷位」，这里才是「全量」：搜索框 + 按视频数降序 + 最近使用。
+/// 千池规模下横滑 chips 不可用（约 130 屏），搜索把找池成本压到 O(1)。
+/// 不做缩略图：每池取一张封面 = N 个请求，列表场景不值
+private struct PoolPickerSheet: View {
+    @ObservedObject var viewModel: ShortsViewModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var searchText = ""
+
+    var body: some View {
+        NavigationStack {
+            List {
+                // 「全部」永远在第一位，与 chips 第一颗对应
+                poolRow(title: "全部池",
+                        count: viewModel.pools.reduce(0) { $0 + $1.itemCount },
+                        selected: viewModel.selectedPoolID == nil) {
+                    dismiss()
+                    Task { await viewModel.selectPool(nil) }
+                }
+                // 有历史且没在搜索时才显示「最近使用」，否则和下面的全量列表重复
+                if searchText.isEmpty, !recentPools.isEmpty {
+                    Section("最近使用") {
+                        rows(recentPools)
+                    }
+                }
+                Section(searchText.isEmpty ? "全部池 · \(viewModel.pools.count)" : "搜索结果 · \(filtered.count)") {
+                    rows(sortedPools)
+                }
+            }
+            .navigationTitle("选择池")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("关闭") { dismiss() }
+                }
+            }
+            .searchable(text: $searchText, prompt: "搜索池名")
+            .overlay {
+                if viewModel.pools.isEmpty {
+                    ContentUnavailableView("还没有池", systemImage: "square.stack.3d.up.slash")
+                } else if filtered.isEmpty {
+                    ContentUnavailableView("没有匹配的池", systemImage: "magnifyingglass")
+                }
+            }
+        }
+    }
+
+    private func rows(_ pools: [ShortPool]) -> some View {
+        ForEach(pools) { pool in
+            poolRow(title: pool.name, count: pool.itemCount,
+                    selected: viewModel.selectedPoolID == pool.id) {
+                dismiss()
+                Task { await viewModel.selectPool(pool.id) }
+            }
+        }
+    }
+
+    private func poolRow(title: String, count: Int, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Text(title).lineLimit(1)
+                Spacer(minLength: 8)
+                Text("\(count)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                if selected {
+                    Image(systemName: "checkmark")
+                        .foregroundStyle(Theme.brand)
+                        .font(.body.weight(.semibold))
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var recentPools: [ShortPool] {
+        ShortsPoolRecents.load()
+            .compactMap { id in viewModel.pools.first(where: { $0.id == id }) }
+    }
+
+    private var filtered: [ShortPool] {
+        let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return viewModel.pools }
+        return viewModel.pools.filter { $0.name.localizedCaseInsensitiveContains(q) }
+    }
+
+    /// 全量列表按视频数降序：大池在前 —— 用户找「热门」的概率远大于翻长尾
+    private var sortedPools: [ShortPool] {
+        filtered.sorted { $0.itemCount > $1.itemCount }
     }
 }
 
@@ -389,6 +551,10 @@ final class ShortsViewModel: ObservableObject {
     @MainActor
     func selectPool(_ id: Int?) async {
         selectedPoolID = id
+        // 记进「最近使用」：池多了以后 chips 行的常用位 + 选择器的
+        // 「最近使用」分组都靠它。nil（全部）不记 —— 它本来就在 chips
+        // 第一位，记了反而挤掉真正的常用池
+        ShortsPoolRecents.record(id)
         await reload()
     }
 
