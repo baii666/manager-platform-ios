@@ -462,14 +462,17 @@ final class APIClient: DataProviding, @unchecked Sendable {
         try await request("/api/shoots/\(id)")
     }
 
-    func fetchShootPhotos(id: Int, page: Int = 1, size: Int = 50) async throws -> [ShootFile] {
-        let resp: ShootPhotosResponse = try await request(
+    /// GET /api/shoots/:id/photos 一页照片。
+    /// ⚠️ 返回整个 page（含 total）而不是只给数组：tab 上的「照片 (N)」要的是
+    /// 后端 COUNT(*) 的权威总数。以前只返回数组、调用方拿 photos.count 近似，
+    /// 第一页回来之前数字只能是 0。
+    func fetchShootPhotos(id: Int, page: Int = 1, size: Int = 50) async throws -> ShootPhotosPage {
+        try await request(
             "/api/shoots/\(id)/photos", queryItems: [
                 URLQueryItem(name: "page", value: "\(page)"),
                 URLQueryItem(name: "limit", value: "\(size)"),
             ]
         )
-        return resp.photos
     }
 
     func shootCoverURL(_ id: Int, size: Int = 600) -> URL? {
@@ -1010,7 +1013,8 @@ private struct ShootsPageResponse: Decodable {
     let total: Int
 }
 
-private struct ShootPhotosResponse: Decodable {
+/// GET /api/shoots/:id/photos 的响应：一页照片 + 后端 COUNT(*) 权威总数
+struct ShootPhotosPage: Decodable, Sendable {
     let photos: [ShootFile]
     let total: Int
 }

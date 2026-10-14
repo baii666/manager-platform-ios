@@ -180,7 +180,12 @@ final class ShootDetailViewModel: ObservableObject {
     private var photoPage = 1
     private let photoSize = 50
 
-    init(shoot: Shoot) { self.shoot = shoot }
+    init(shoot: Shoot) {
+        self.shoot = shoot
+        // 先用列表里带来的 photo_count 顶上：第一页照片请求回来之前，
+        // tab 上的「照片 (N)」就已经是对的（后端 COUNT(*) 回来后覆盖）
+        photoTotal = shoot.photoCount
+    }
 
     var totalCount: Int { videos.count + photoTotal }
 
@@ -207,6 +212,10 @@ final class ShootDetailViewModel: ObservableObject {
             let detail = try await client.fetchShootDetail(id: shoot.id)
             videos = detail.videos
         } catch {}
+        // ⚠️ 必须先松锁再调 loadMorePhotos：它的 guard 里有 !isLoading，
+        // 父任务攥着 flag 不退，子任务永远被挡在门外 —— 照片请求根本发不出去，
+        // tab 数字一直停在 0（下拉刷新不走这条路径所以看着「拉一下才有」）。
+        isLoading = false
         await loadMorePhotos()
     }
 
@@ -231,12 +240,15 @@ final class ShootDetailViewModel: ObservableObject {
         isLoading = true
         defer { isLoading = false }
         do {
-            let batch = try await client.fetchShootPhotos(id: shoot.id, page: photoPage, size: photoSize)
+            let page = try await client.fetchShootPhotos(id: shoot.id, page: photoPage, size: photoSize)
             let existing = Set(photos.map { $0.id })
-            photos.append(contentsOf: batch.filter { !existing.contains($0.id) })
-            photoTotal = photos.count // 后端未返回总页，用已加载数 + hasMore 近似
+            photos.append(contentsOf: page.photos.filter { !existing.contains($0.id) })
+            // 总数用后端 COUNT(*)；后端给出 0（不该发生）才退回已加载数
+            if page.total > 0 { photoTotal = page.total }
             photoPage += 1
-            photoHasMore = !batch.isEmpty
+            // 两个信号取或：总数没到底，或这一页是满的（后端 COUNT 偶尔比实际少，
+            // 满页就再要一页，空页自然收尾）
+            photoHasMore = photos.count < photoTotal || page.photos.count >= photoSize
             photoErrorMessage = nil
         } catch {
             photoErrorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
