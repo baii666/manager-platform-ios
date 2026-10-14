@@ -12,6 +12,9 @@ import UIKit
 struct PlayerTarget: Identifiable {
     let id = UUID()
     let url: URL
+    /// 播放器标题。拍摄集详情页传文件名（剥前缀去扩展名），比整个拍摄集标题
+    /// 更知道当前在放哪个；其他入口不传，回退各自页面的标题
+    var title: String? = nil
 }
 
 // MARK: - 视频播放器

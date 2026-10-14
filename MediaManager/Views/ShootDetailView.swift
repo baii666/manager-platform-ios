@@ -1,8 +1,11 @@
 import SwiftUI
 
 // MARK: - 拍摄集详情页
-// 对齐网页端 ShootDetailPage：Hero 封面头 + Tab(全部/视频/照片) + 视频列表(播放)
-// + 照片瀑布流(看图器) + 无限滚动。
+// Hero 封面头 + 视频横滑轨(播放) + 照片瀑布流(看图器) + 无限滚动。
+// ⚠️ 2026-10-14 从「全部/视频/照片 三段 tab」改成这个结构：库里的形状是
+// 每个拍摄集 1-2 个视频、100+ 张照片（全库 134 视频 vs 13900 照片），
+// 视频不配占一个 tab —— 降级成照片流上方的一条 16:9 横滑轨，整页只有
+// 照片流一种滚动节奏。网页端 ShootDetailPage 仍是 tab，待对齐。
 struct ShootDetailView: View {
     let shoot: Shoot
 
@@ -23,64 +26,51 @@ struct ShootDetailView: View {
         VStack(spacing: 0) {
             heroHeader
 
-            Picker("内容", selection: $viewModel.activeTab) {
-                Text("全部 (\(viewModel.totalCount))").tag(ShootDetailViewModel.Tab.all)
-                Text("视频 (\(viewModel.videos.count))").tag(ShootDetailViewModel.Tab.videos)
-                Text("照片 (\(viewModel.photoTotal))").tag(ShootDetailViewModel.Tab.photos)
-            }
-            .pickerStyle(.segmented)
-            .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 8)
-
             ScrollView {
-                if viewModel.activeTab == .videos || viewModel.activeTab == .all {
-                    if !viewModel.videos.isEmpty {
-                        LazyVStack(spacing: 8) {
-                            ForEach(viewModel.videos) { file in
-                                ShootVideoRow(file: file) {
-                                    if let url = client?.shootFileURL(file.id) {
-                                        playTarget = PlayerTarget(url: url)
-                                    }
-                                }
-                            }
-                        }
-                        .padding(.horizontal, 16)
-                    }
+                // 视频横滑轨。1-2 个视频时就是固定一行，横滑只为视频变多留余量；
+                // 一个视频都没有时整节不渲染，不留空标题
+                if !viewModel.videos.isEmpty {
+                    videoStrip
                 }
 
-                if viewModel.activeTab == .photos || viewModel.activeTab == .all {
-                    if !viewModel.photos.isEmpty {
-                        // ⚠️ fitsContent 必须按 PhotoGrid 的声明顺序传（onColumnsChange
-                        // 等闭包参数之前）—— Swift 不允许实参乱序
-                        PhotoGrid(photos: viewModel.viewerPhotos, columns: photoColumns,
-                                  fitsContent: true,
-                                  onColumnsChange: { photoColumns = $0; PhotoGridPrefs.save("shootPhotos", $0) },
-                                  onSelect: { photo in
-                            guard let idx = viewModel.viewerPhotos.firstIndex(where: { $0.id == photo.id }) else { return }
-                            PhotoViewerPresenter.shared.show(
-                                viewModel.viewerPhotos, index: idx,
-                                hasMore: viewModel.photoHasMore, onLoadMore: {
-                                    Task {
-                                        await viewModel.loadMorePhotos()
-                                        PhotoViewerPresenter.shared.updatePhotos(viewModel.viewerPhotos)
-                                    }
-                                })
-                        }, onReachEnd: {
-                            Task { await viewModel.loadMorePhotos() }
-                        })
-                            // 🔧 fitsContent：UICollectionView 没有 intrinsicContentSize，
-                            // 直接塞 ScrollView 高度会塌成 0 —— 照片整块不显示的根因。
-                            // 开启后网格不自己滚，高度=内容总高，由外层 ScrollView 统管。
-                            .padding(.horizontal, 16)
-                    } else if viewModel.photos.isEmpty, let e = viewModel.photoErrorMessage {
-                        // 照片加载失败：明确说出来，不留一片空白让人以为是布局问题
-                        VStack(spacing: 6) {
-                            Image(systemName: "exclamationmark.triangle").foregroundStyle(.secondary)
-                            Text("照片加载失败：\(e)")
-                                .font(.caption).foregroundStyle(.secondary)
-                                .multilineTextAlignment(.center)
-                        }
-                        .frame(maxWidth: .infinity).padding(.top, 24)
+                if !viewModel.photos.isEmpty {
+                    // ⚠️ fitsContent 必须按 PhotoGrid 的声明顺序传（onColumnsChange
+                    // 等闭包参数之前）—— Swift 不允许实参乱序
+                    PhotoGrid(photos: viewModel.viewerPhotos, columns: photoColumns,
+                              fitsContent: true,
+                              onColumnsChange: { photoColumns = $0; PhotoGridPrefs.save("shootPhotos", $0) },
+                              onSelect: { photo in
+                        guard let idx = viewModel.viewerPhotos.firstIndex(where: { $0.id == photo.id }) else { return }
+                        PhotoViewerPresenter.shared.show(
+                            viewModel.viewerPhotos, index: idx,
+                            hasMore: viewModel.photoHasMore, onLoadMore: {
+                                Task {
+                                    await viewModel.loadMorePhotos()
+                                    PhotoViewerPresenter.shared.updatePhotos(viewModel.viewerPhotos)
+                                }
+                            })
+                    }, onReachEnd: {
+                        Task { await viewModel.loadMorePhotos() }
+                    })
+                        // 🔧 fitsContent：UICollectionView 没有 intrinsicContentSize，
+                        // 直接塞 ScrollView 高度会塌成 0 —— 照片整块不显示的根因。
+                        // 开启后网格不自己滚，高度=内容总高，由外层 ScrollView 统管。
+                        .padding(.horizontal, 16)
+                        .padding(.top, viewModel.videos.isEmpty ? 12 : 18)
+                } else if let e = viewModel.photoErrorMessage {
+                    // 照片加载失败：明确说出来，不留一片空白让人以为是布局问题
+                    VStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle").foregroundStyle(.secondary)
+                        Text("照片加载失败：\(e)")
+                            .font(.caption).foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
                     }
+                    .frame(maxWidth: .infinity).padding(.top, 24)
+                } else if !viewModel.videos.isEmpty {
+                    // 有视频、没照片（库里有 3 个集是这样）：说清楚，别留白
+                    Text("暂无照片")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity).padding(.top, 24)
                 }
 
                 if viewModel.isLoading {
@@ -104,13 +94,42 @@ struct ShootDetailView: View {
         .task { await viewModel.loadInitial() }
         .fullScreenCover(item: $playTarget) { target in
             NavigationStack {
-                VideoPlayerView(url: target.url, title: shoot.displayTitle)
+                // 标题优先用视频文件名（视频轨点进来时带上），回退拍摄集标题
+                VideoPlayerView(url: target.url, title: target.title ?? shoot.displayTitle)
                     .toolbar { ToolbarItem(placement: .cancellationAction) {
                         Button("关闭") { playTarget = nil }
                     } }
             }
         }
         // 看图器走全局 overlay（PhotoViewerPresenter），不再用 fullScreenCover
+    }
+
+    // MARK: 视频横滑轨
+
+    private var videoStrip: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text("视频").font(.headline)
+                Text("\(viewModel.videos.count)")
+                    .font(.caption).foregroundStyle(.secondary)
+                Spacer()
+            }
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    ForEach(viewModel.videos) { file in
+                        ShootVideoCard(file: file) {
+                            if let url = client?.shootFileURL(file.id) {
+                                playTarget = PlayerTarget(
+                                    url: url,
+                                    title: file.filename.strippingSitePrefix.deletingPathExtension)
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
+        }
+        .padding(.top, 14)
     }
 
     // MARK: Hero 封面头
@@ -136,8 +155,10 @@ struct ShootDetailView: View {
                     .multilineTextAlignment(.leading)
                     .shadow(color: .black.opacity(0.5), radius: 4, y: 1)
                 HStack(spacing: 8) {
-                    statChip("film", "\(shoot.videoCount)")
-                    statChip("photo", "\(shoot.photoCount)")
+                    // 详情拉回来后用权威值（detail.videos.count / 后端 COUNT(*)），
+                    // 加载中先用列表里带来的计数顶上，不闪 0
+                    statChip("film", "\(viewModel.videos.isEmpty ? shoot.videoCount : viewModel.videos.count)")
+                    statChip("photo", "\(viewModel.photoTotal > 0 ? viewModel.photoTotal : shoot.photoCount)")
                     if let size = formatSize(shoot.totalSize) { statChip("internaldrive", size) }
                     if shoot.totalDuration > 0 {
                         statChip("clock", formatDuration(Int(shoot.totalDuration)))
@@ -164,10 +185,7 @@ struct ShootDetailView: View {
 
 // MARK: - 拍摄集详情 VM
 final class ShootDetailViewModel: ObservableObject {
-    enum Tab: Hashable { case all, videos, photos }
-
     let shoot: Shoot
-    @Published var activeTab: Tab = .all
     @Published var videos: [ShootFile] = []
     @Published var photos: [ShootFile] = []
     @Published var photoTotal = 0
@@ -183,11 +201,9 @@ final class ShootDetailViewModel: ObservableObject {
     init(shoot: Shoot) {
         self.shoot = shoot
         // 先用列表里带来的 photo_count 顶上：第一页照片请求回来之前，
-        // tab 上的「照片 (N)」就已经是对的（后端 COUNT(*) 回来后覆盖）
+        // hero 统计胶囊里的照片数就已经是对的（后端 COUNT(*) 回来后覆盖）
         photoTotal = shoot.photoCount
     }
-
-    var totalCount: Int { videos.count + photoTotal }
 
     /// 把照片 ShootFile 适配成 Photo 供看图器使用
     var viewerPhotos: [Photo] {
@@ -214,7 +230,7 @@ final class ShootDetailViewModel: ObservableObject {
         } catch {}
         // ⚠️ 必须先松锁再调 loadMorePhotos：它的 guard 里有 !isLoading，
         // 父任务攥着 flag 不退，子任务永远被挡在门外 —— 照片请求根本发不出去，
-        // tab 数字一直停在 0（下拉刷新不走这条路径所以看着「拉一下才有」）。
+        // 页面安安静静一片空白（下拉刷新不走这条路径所以看着「拉一下才有」）。
         isLoading = false
         await loadMorePhotos()
     }
@@ -256,48 +272,45 @@ final class ShootDetailViewModel: ObservableObject {
     }
 }
 
-// MARK: - 视频行
-private struct ShootVideoRow: View {
+// MARK: - 视频横滑卡
+private struct ShootVideoCard: View {
     let file: ShootFile
+    /// 卡宽。约屏宽 60%：一屏露出一个半，暗示可以横滑
+    var width: CGFloat = 232
     var onPlay: () -> Void
 
     var body: some View {
         Button(action: onPlay) {
-            HStack(spacing: 12) {
-                // 16:9 缩略位。后端没有视频抽帧端点（shoot_files.has_thumb 也未生成），
-                // 用品牌渐变 + 播放键占位，比例先摆正
+            VStack(alignment: .leading, spacing: 6) {
                 ZStack {
+                    // 后端没有视频抽帧端点（shoot_files.has_thumb 也未生成），
+                    // 用品牌渐变 + 播放键占位，16:9 比例先摆正
                     LinearGradient(colors: Theme.placeholderGradient(for: .shoot),
                                    startPoint: .top, endPoint: .bottom)
                     Image(systemName: "play.fill")
-                        .font(.system(size: 18, weight: .semibold))
+                        .font(.system(size: 20, weight: .semibold))
                         .foregroundStyle(.white)
                 }
-                .frame(width: 96, height: 54)
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-
-                VStack(alignment: .leading, spacing: 3) {
-                    // 文件名同样剥掉站点前缀、去掉扩展名，短一半才好读
-                    Text(file.filename.strippingSitePrefix.deletingPathExtension)
-                        .font(.subheadline.weight(.medium))
-                        .lineLimit(1).truncationMode(.tail)
-                    HStack(spacing: 8) {
-                        if let d = file.durationText {
-                            Label(d, systemImage: "clock").font(.caption2)
-                        }
-                        if let dim = file.dimensionText {
-                            Text(dim).font(.caption2)
-                        }
-                        Text(file.sizeText).font(.caption2)
+                .frame(width: width, height: width * 9 / 16)
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(alignment: .bottomTrailing) {
+                    // 时长徽标：黑底白字，亮暗封面都可读
+                    if let d = file.durationText {
+                        Text(d)
+                            .font(.caption2.weight(.medium)).monospacedDigit()
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 6).padding(.vertical, 3)
+                            .background(.black.opacity(0.55), in: Capsule())
+                            .padding(6)
                     }
-                    .foregroundStyle(.secondary)
                 }
-                Spacer(minLength: 0)
+
+                Text(file.filename.strippingSitePrefix.deletingPathExtension)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1).truncationMode(.tail)
+                    .frame(width: width, alignment: .leading)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(10)
-            .appSurface(in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(.separator))
         }
         .buttonStyle(.plain)
     }
