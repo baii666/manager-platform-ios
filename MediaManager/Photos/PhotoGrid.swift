@@ -1,10 +1,15 @@
 import SwiftUI
 import UIKit
 
-// MARK: - 照片瀑布流网格
+// MARK: - 照片瀑布流网格（外层）
 // 用 UICollectionView 承载百万级照片：cell 复用 + 懒加载 + 预取 + 缩略图缓存，
 // 内存与滚动性能远好于 SwiftUI 自绘网格。
-struct PhotoGrid: UIViewRepresentable {
+//
+// 外层包一层 View 是为了 fitsContent 模式：UICollectionView 没有
+// intrinsicContentSize，嵌进 SwiftUI ScrollView 会塌成 0 高度（照片整块不显示，
+// 拍摄集详情页踩过）。此时内容高度经 @State 回到 SwiftUI 侧定高 —— 靠改
+// UIView 自己的高度约束是等不来 SwiftUI 重新布局的，必须走状态驱动。
+struct PhotoGrid: View {
     let photos: [Photo]
     /// 初始列数（各页面默认值不同）。⚠️ 它只是初始值 / 外部显式修改的入口：
     /// 用户捏合后的实时列数以 Coordinator 为准，父视图重渲染不会把它弹回去
@@ -13,11 +18,54 @@ struct PhotoGrid: UIViewRepresentable {
     /// 捏合缩放的列数范围。放大（分开手指）→ 列数变少，最小 1 列铺满全宽
     var minColumns: Int = 1
     var maxColumns: Int = 6
+    /// 自适配高度模式：网格自己不滚，高度 = 内容总高，交给外层滚动容器统管。
+    /// ⚠️ 嵌在 SwiftUI ScrollView 里**必须**开这个。根视图用法
+    /// （相册照片页 / 照片浏览页 / 搜索页）保持默认 false：网格自己滚。
+    var fitsContent: Bool = false
     /// 列数变化回调（每步触发）。父视图据此持久化（各页记忆自己的列数），
     /// 并把 columns 参数同步回来。不传 = 捏合只当场生效，不记忆。
     var onColumnsChange: ((Int) -> Void)? = nil
     var onSelect: (Photo) -> Void = { _ in }
     var onReachEnd: () -> Void = {}
+
+    /// fitsContent 模式的内容总高，由布局回调持续更新
+    @State private var contentHeight: CGFloat = 0
+
+    var body: some View {
+        PhotoGridRepresentable(
+            photos: photos,
+            columns: columns,
+            minColumns: minColumns,
+            maxColumns: maxColumns,
+            fitsContent: fitsContent,
+            onColumnsChange: onColumnsChange,
+            onSelect: onSelect,
+            onReachEnd: onReachEnd,
+            onContentHeight: { height in
+                // 异步回写：prepare 可能跑在 SwiftUI 的布局流程里，同步改 @State
+                // 会触发 "Modifying state during view update" 警告
+                DispatchQueue.main.async {
+                    if abs(height - contentHeight) > 0.5 { contentHeight = height }
+                }
+            }
+        )
+        // 自适配模式按内容定高；根视图模式不干涉，撑满外层给的空间
+        .frame(height: fitsContent ? contentHeight : nil)
+    }
+}
+
+// MARK: - 照片瀑布流网格（UIKit 承载）
+private struct PhotoGridRepresentable: UIViewRepresentable {
+    let photos: [Photo]
+    var columns: Int = 3
+    var minColumns: Int = 1
+    var maxColumns: Int = 6
+    var fitsContent: Bool = false
+    var onColumnsChange: ((Int) -> Void)? = nil
+    var onSelect: (Photo) -> Void = { _ in }
+    var onReachEnd: () -> Void = {}
+    /// 内容总高变化（MasonryLayout 每次 prepare 后高度变了就回调）
+    var onContentHeight: ((CGFloat) -> Void)? = nil
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -27,6 +75,9 @@ struct PhotoGrid: UIViewRepresentable {
         let layout = MasonryLayout()
         layout.columns = columns
         layout.spacing = 8
+        // 捕获闭包值而不是 self：避免 representable 结构体被布局长期持有
+        let reportHeight = onContentHeight
+        layout.onContentHeight = { height in reportHeight?(height) }
 
         let cv = UICollectionView(frame: .zero, collectionViewLayout: layout)
         cv.backgroundColor = .clear
@@ -35,6 +86,15 @@ struct PhotoGrid: UIViewRepresentable {
         cv.prefetchDataSource = context.coordinator
         cv.register(PhotoCell.self, forCellWithReuseIdentifier: PhotoCell.reuseID)
         cv.contentInset = UIEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)
+        if fitsContent {
+            // 自适配高度：滚动归外层 ScrollView，网格只负责排版。
+            // ⚠️ 此时所有 cell 都在 collectionView 的 bounds 内（没有虚拟化），
+            // willDisplay 会在 reload 时一次性全触发 → onReachEnd 连锁翻页直到
+            // 拉完。拍摄集单册通常几百张，可接受；大相册走根视图模式（自己滚）。
+            cv.isScrollEnabled = false
+            cv.alwaysBounceVertical = false
+            cv.showsVerticalScrollIndicator = false
+        }
         // 双指捏合缩放列数（对齐相册列表 / 影视列表页的捏合）。
         // 挂在 cv 上而不是 SwiftUI 侧：列数是离散档位，原生手势可以直接改布局，
         // 不经过父视图状态 → 没有每步 reloadData 的闪烁
@@ -72,7 +132,7 @@ struct PhotoGrid: UIViewRepresentable {
     // MARK: Coordinator
 
     final class Coordinator: NSObject, UICollectionViewDataSource, UICollectionViewDelegate, UICollectionViewDataSourcePrefetching, MasonryLayoutDelegate {
-        var parent: PhotoGrid
+        var parent: PhotoGridRepresentable
         weak var collectionView: UICollectionView?
         /// 图片加载后回填的真实宽高比（photo.id → 宽/高）。
         /// 对齐网页版 PhotoWaterfallGrid：真实加载尺寸 > 数据 width/height > 后备比例。
@@ -89,7 +149,7 @@ struct PhotoGrid: UIViewRepresentable {
         /// 每档步进的触感反馈（对齐系统相册捏合的手感）
         private let feedback = UISelectionFeedbackGenerator()
 
-        init(_ parent: PhotoGrid) {
+        init(_ parent: PhotoGridRepresentable) {
             self.parent = parent
             self.liveColumns = parent.columns
             self.dataToken = (parent.photos.count,

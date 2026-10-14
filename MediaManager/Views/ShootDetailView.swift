@@ -1,7 +1,8 @@
 import SwiftUI
 
 // MARK: - 拍摄集详情页
-// 对齐网页端 ShootDetailPage：Tab(全部/视频/照片) + 视频列表(播放) + 照片瀑布流(看图器) + 无限滚动
+// 对齐网页端 ShootDetailPage：Hero 封面头 + Tab(全部/视频/照片) + 视频列表(播放)
+// + 照片瀑布流(看图器) + 无限滚动。
 struct ShootDetailView: View {
     let shoot: Shoot
 
@@ -20,6 +21,8 @@ struct ShootDetailView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            heroHeader
+
             Picker("内容", selection: $viewModel.activeTab) {
                 Text("全部 (\(viewModel.totalCount))").tag(ShootDetailViewModel.Tab.all)
                 Text("视频 (\(viewModel.videos.count))").tag(ShootDetailViewModel.Tab.videos)
@@ -46,7 +49,10 @@ struct ShootDetailView: View {
 
                 if viewModel.activeTab == .photos || viewModel.activeTab == .all {
                     if !viewModel.photos.isEmpty {
+                        // ⚠️ fitsContent 必须按 PhotoGrid 的声明顺序传（onColumnsChange
+                        // 等闭包参数之前）—— Swift 不允许实参乱序
                         PhotoGrid(photos: viewModel.viewerPhotos, columns: photoColumns,
+                                  fitsContent: true,
                                   onColumnsChange: { photoColumns = $0; PhotoGridPrefs.save("shootPhotos", $0) },
                                   onSelect: { photo in
                             guard let idx = viewModel.viewerPhotos.firstIndex(where: { $0.id == photo.id }) else { return }
@@ -58,10 +64,13 @@ struct ShootDetailView: View {
                                         PhotoViewerPresenter.shared.updatePhotos(viewModel.viewerPhotos)
                                     }
                                 })
-                        }) {
+                        }, onReachEnd: {
                             Task { await viewModel.loadMorePhotos() }
-                        }
-                        .padding(.horizontal, 16)
+                        })
+                            // 🔧 fitsContent：UICollectionView 没有 intrinsicContentSize，
+                            // 直接塞 ScrollView 高度会塌成 0 —— 照片整块不显示的根因。
+                            // 开启后网格不自己滚，高度=内容总高，由外层 ScrollView 统管。
+                            .padding(.horizontal, 16)
                     }
                 }
 
@@ -76,8 +85,9 @@ struct ShootDetailView: View {
                 // 底部净空：滑到底时最后的内容不被底栏盖住
                 Spacer().frame(height: BottomTabBar.height)
             }
+            .refreshable { await viewModel.refresh() }
         }
-        .navigationTitle(shoot.title)
+        .navigationTitle(shoot.displayTitle)
         .navigationBarTitleDisplayMode(.inline)
         // ⚠️ 每个 tab / 每个 push 进来的页面都要自己垫一层背景：
         // NavigationStack 只渲染栈顶那一层，App 根的背景透不进来
@@ -85,13 +95,61 @@ struct ShootDetailView: View {
         .task { await viewModel.loadInitial() }
         .fullScreenCover(item: $playTarget) { target in
             NavigationStack {
-                VideoPlayerView(url: target.url, title: shoot.title)
+                VideoPlayerView(url: target.url, title: shoot.displayTitle)
                     .toolbar { ToolbarItem(placement: .cancellationAction) {
                         Button("关闭") { playTarget = nil }
                     } }
             }
         }
         // 看图器走全局 overlay（PhotoViewerPresenter），不再用 fullScreenCover
+    }
+
+    // MARK: Hero 封面头
+
+    /// 封面大图 + 底部渐变 + 标题 + 统计胶囊。没有封面时 RemoteImage 自己出
+    /// 渐变占位，布局不变。
+    private var heroHeader: some View {
+        ZStack(alignment: .bottomLeading) {
+            RemoteImage(url: client?.shootCoverURL(shoot.id, size: 900),
+                        fallbackIcon: "photo.on.rectangle.angled",
+                        fallbackColors: Theme.placeholderGradient(for: .shoot))
+                .imageFilled()
+                .frame(height: 172)
+                .clipped()
+            // 底部压暗，保证白字在亮封面上也可读
+            LinearGradient(colors: [.clear, .black.opacity(0.72)],
+                           startPoint: .top, endPoint: .bottom)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(shoot.displayTitle)
+                    .font(.title3.weight(.bold))
+                    .foregroundStyle(.white)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                    .shadow(color: .black.opacity(0.5), radius: 4, y: 1)
+                HStack(spacing: 8) {
+                    statChip("film", "\(shoot.videoCount)")
+                    statChip("photo", "\(shoot.photoCount)")
+                    if let size = formatSize(shoot.totalSize) { statChip("internaldrive", size) }
+                    if shoot.totalDuration > 0 {
+                        statChip("clock", formatDuration(Int(shoot.totalDuration)))
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 12)
+        }
+        .frame(height: 172)
+        .clipped()
+    }
+
+    private func statChip(_ icon: String, _ text: String) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon).font(.system(size: 10))
+            Text(text).font(.caption2.weight(.medium)).monospacedDigit()
+        }
+        .foregroundStyle(.white.opacity(0.92))
+        .padding(.horizontal, 7).padding(.vertical, 4)
+        .background(.black.opacity(0.35), in: Capsule())
     }
 }
 
@@ -140,6 +198,21 @@ final class ShootDetailViewModel: ObservableObject {
         await loadMorePhotos()
     }
 
+    /// 下拉刷新：重置照片分页重新拉（视频列表一起更新）
+    @MainActor
+    func refresh() async {
+        photoPage = 1
+        photos = []
+        photoHasMore = false
+        do {
+            if let client = AppSession.shared.client {
+                let detail = try await client.fetchShootDetail(id: shoot.id)
+                videos = detail.videos
+            }
+        } catch {}
+        await loadMorePhotos()
+    }
+
     @MainActor
     func loadMorePhotos() async {
         guard let client = AppSession.shared.client, !isLoading, photoHasMore || photoPage == 1 else { return }
@@ -164,16 +237,22 @@ private struct ShootVideoRow: View {
     var body: some View {
         Button(action: onPlay) {
             HStack(spacing: 12) {
+                // 16:9 缩略位。后端没有视频抽帧端点（shoot_files.has_thumb 也未生成），
+                // 用品牌渐变 + 播放键占位，比例先摆正
                 ZStack {
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(LinearGradient(colors: Theme.placeholderGradient(for: .shoot),
-                                             startPoint: .top, endPoint: .bottom))
-                        .frame(width: 56, height: 56)
+                    LinearGradient(colors: Theme.placeholderGradient(for: .shoot),
+                                   startPoint: .top, endPoint: .bottom)
                     Image(systemName: "play.fill")
-                        .font(.system(size: 20)).foregroundStyle(.white)
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(.white)
                 }
+                .frame(width: 96, height: 54)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(file.filename).font(.subheadline.weight(.medium))
+                    // 文件名同样剥掉站点前缀、去掉扩展名，短一半才好读
+                    Text(file.filename.strippingSitePrefix.deletingPathExtension)
+                        .font(.subheadline.weight(.medium))
                         .lineLimit(1).truncationMode(.tail)
                     HStack(spacing: 8) {
                         if let d = file.durationText {
@@ -186,6 +265,7 @@ private struct ShootVideoRow: View {
                     }
                     .foregroundStyle(.secondary)
                 }
+                Spacer(minLength: 0)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(10)
@@ -193,5 +273,23 @@ private struct ShootVideoRow: View {
             .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(.separator))
         }
         .buttonStyle(.plain)
+    }
+}
+
+// MARK: - 字符串清理
+extension String {
+    /// 剥掉站点目录名前缀："www.98T.la@蜃楼-02E4K MP4.mp4" → "蜃楼-02E4K MP4.mp4"。
+    /// 规则保守：第一个 @ 左边「含点且不含空格」才剥，正常文案原样返回。
+    var strippingSitePrefix: String {
+        guard let at = firstIndex(of: "@"), at > startIndex else { return self }
+        let prefix = self[startIndex..<at]
+        guard prefix.contains(".") && !prefix.contains(" ") else { return self }
+        return String(self[index(after: at)...])
+    }
+
+    /// 去扩展名（"a.mp4" → "a"）。Foundation 的 deletingPathExtension 在纯 Swift
+    /// 环境可用（NSString 桥接），这里包一层只为调用点读起来顺口
+    var deletingPathExtension: String {
+        (self as NSString).deletingPathExtension
     }
 }

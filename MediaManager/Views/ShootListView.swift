@@ -305,8 +305,8 @@ struct ShootCard: View {
                             fallbackColors: Theme.placeholderGradient(for: .shoot))
                     // 同短视频卡：封面是抽帧产物，横竖分辨率不一，必须钉进容器尺寸里
                     .imageFilled()
-                    .frame(height: 130)
-                    .frame(maxWidth: .infinity)
+                    // 16:10 横版（原来是写死 130pt 高，宽屏下比例失调）
+                    .aspectRatio(16.0 / 10.0, contentMode: .fit)
                     .clipped()
                     .overlay(alignment: .topTrailing) {
                         HStack(spacing: 6) {
@@ -330,20 +330,28 @@ struct ShootCard: View {
                         }
                     }
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(shoot.title)
+                VStack(alignment: .leading, spacing: 6) {
+                    // 清理后的标题（剥掉站点前缀和尾部统计标记），两行放得下
+                    Text(shoot.displayTitle)
                         .font(.subheadline.weight(.medium))
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                    HStack(spacing: 8) {
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                    HStack(spacing: 6) {
+                        // 尾部统计标记提成徽标："[104P1V-5.11G]" → "104P1V-5.11G"
+                        if let tag = shoot.specTag {
+                            Text(String(tag.dropFirst().dropLast()))
+                                .font(.caption2.monospacedDigit())
+                                .foregroundStyle(Theme.brand)
+                                .padding(.horizontal, 5).padding(.vertical, 2)
+                                .background(Theme.brand.opacity(0.12), in: Capsule())
+                        }
                         if let size = formatSize(shoot.totalSize) {
-                            Label(size, systemImage: "internaldrive").font(.caption2)
+                            Label(size, systemImage: "internaldrive")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
                         }
-                        if shoot.totalDuration > 0 {
-                            Label(formatDuration(Int(shoot.totalDuration)), systemImage: "clock").font(.caption2)
-                        }
+                        Spacer(minLength: 0)
                     }
-                    .foregroundStyle(.secondary)
                 }
                 .padding(10)
             }

@@ -11,9 +11,16 @@ protocol MasonryLayoutDelegate: AnyObject {
 final class MasonryLayout: UICollectionViewLayout {
     var columns: Int = 3 { didSet { invalidateLayout() } }
     var spacing: CGFloat = 8 { didSet { invalidateLayout() } }
+    /// 内容总高变化回调（每次 prepare 后内容高度变了就触发）。
+    /// 自适配高度模式（PhotoGrid.fitsContent）靠它把内容高度上报给 SwiftUI 侧定高 ——
+    /// UICollectionView 没有 intrinsicContentSize，不这么做嵌进 SwiftUI ScrollView
+    /// 会塌成 0 高度。
+    var onContentHeight: ((CGFloat) -> Void)?
 
     private var cache: [UICollectionViewLayoutAttributes] = []
     private var contentHeight: CGFloat = 0
+    /// 上次回调出去的内容高度：没变就不回调，避免 prepare 里反复改约束触发重入
+    private var lastReportedHeight: CGFloat = -1
 
     private var contentWidth: CGFloat {
         guard let cv = collectionView else { return 0 }
@@ -31,7 +38,10 @@ final class MasonryLayout: UICollectionViewLayout {
         contentHeight = 0
 
         let count = cv.numberOfItems(inSection: 0)
-        guard count > 0 else { return }
+        guard count > 0 else {
+            reportContentHeightIfNeeded()
+            return
+        }
 
         let colCount = max(1, columns)
         var columnHeights = Array(repeating: CGFloat(0), count: colCount)
@@ -53,6 +63,14 @@ final class MasonryLayout: UICollectionViewLayout {
             columnHeights[column] = y + height + spacing
             contentHeight = max(contentHeight, columnHeights[column])
         }
+        reportContentHeightIfNeeded()
+    }
+
+    /// 内容高度变了才回调：prepare 可能在一次布局流程里跑多次，没变就闭嘴
+    private func reportContentHeightIfNeeded() {
+        guard contentHeight != lastReportedHeight else { return }
+        lastReportedHeight = contentHeight
+        onContentHeight?(contentHeight)
     }
 
     override func layoutAttributesForElements(in rect: CGRect) -> [UICollectionViewLayoutAttributes]? {

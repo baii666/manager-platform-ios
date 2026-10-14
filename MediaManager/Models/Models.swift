@@ -873,6 +873,32 @@ struct Shoot: Identifiable, Codable, Sendable, Hashable {
 
     var title: String { displayName?.isEmpty == false ? displayName! : folderName }
 
+    /// 尾部统计标记，如 "[104P1V-5.11G]" / "[104P+1V／7.44GB]"（原样含方括号）。
+    /// 站点目录名把张数/视频数/体积塞在末尾，摘出来当徽标比混在标题里好读。
+    /// 没有（或不是以 [ 开头的尾部标记）返回 nil。
+    var specTag: String? {
+        let t = title
+        // 尾部标记：以 ] 结尾，且最后一个 [ 在它前面
+        guard t.hasSuffix("]"),
+              let close = t.lastIndex(of: "]"),
+              let open = t.lastIndex(of: "["),
+              open < close else { return nil }
+        return String(t[open...close])
+    }
+
+    /// 展示用标题：站点目录名直接上屏很难读
+    ///（"www.98T.la@森萝财团 写真 内部 蜃楼-02E4K [104P1V-5.11G]"）。
+    /// 剥掉「站点@」前缀 + 尾部统计标记，剩下的才是内容名。
+    /// 用户手动改过名（display_name）的不受影响：规则很保守，不带 @ / 不带
+    /// 尾部方括号的名字原样返回。
+    var displayTitle: String {
+        var name = title.strippingSitePrefix
+        if let tag = specTag {
+            name = name.replacingOccurrences(of: tag, with: "")
+        }
+        return name.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     enum CodingKeys: String, CodingKey {
         case id
         case libraryId = "library_id"
