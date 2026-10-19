@@ -19,13 +19,20 @@ struct MediaDetailView: View {
     // MARK: Hero 布局常量（对齐用户草图：海报左置跨区 + 右列信息/简介）
     /// 封面背景区高度（海报与信息都在这个区域内；之下是白屏区）
     private let coverHeight: CGFloat = 300
-    /// 海报尺寸（2:3）
+    /// 海报宽度（白屏区左列按钮列同宽，保证按钮正在海报下方）
     private let posterWidth: CGFloat = 200
-    private let posterHeight: CGFloat = 300
-    /// 海报绘制下探量：布局不动、绘制下移，底缘越过封面区扎进白屏（穿越效果）
-    private let posterDip: CGFloat = 52
-    /// 封面区顶部内边距（海报布局顶缘 = 12）
+    /// 封面区顶部内边距（海报/信息顶缘 = 12）
     private let posterTopPad: CGFloat = 12
+    /// 海报底缘越过封面区扎进白屏的深度（穿越量）
+    private let posterCross: CGFloat = 64
+    /// 海报高度：顶缘 12 + 352 = 底缘 364 = 封面区 300 + 穿越 64。
+    /// 比封面区高 → 布局自然向下溢出（不用 offset：offset 只移绘制不移布局，
+    /// 会把信息列和海实顶缘错开；父级无 .clipped，溢出那截盖在白屏上 = 穿越）
+    private var posterHeight: CGFloat { coverHeight + posterCross - posterTopPad }
+    /// 白屏区按钮列下移量：海报底缘 364 + 14 间距 = 378（相对白屏区顶 300）
+    private var buttonDip: CGFloat { posterCross + 14 }
+    /// 白屏区各列距「封面/白屏分界线」的间距
+    private let whiteGap: CGFloat = 12
 
     private var client: APIClient? { AppSession.shared.client }
 
@@ -60,11 +67,11 @@ struct MediaDetailView: View {
     @ViewBuilder
     private func content(_ d: MediaDetail) -> some View {
         ScrollView {
-            // ══ Hero（对齐草图）：海报左置放大、下探穿越封面进白屏 ══
+            // ══ Hero（对齐草图）：海报左置放大、加高自然溢出穿越封面进白屏 ══
             // ① 背景层：封面图 + 双层遮罩，高度钉死 coverHeight
-            // ② 封面区：海报在左（绘制下探 posterDip，底缘扎进白屏 = 穿越），
-            //    标题/原名/meta/tag 在海报右侧，白字叠封面
-            // ③ 白屏区：左列播放/收藏小按钮（海报正下方），右列简介（深色文字）
+            // ② 封面区：海报在左（比封面区高，底缘自然扎进白屏 = 穿越），
+            //    标题/原名/meta/tag 在海报右侧，白字叠封面，顶缘与海报齐平
+            // ③ 白屏区：左列播放/收藏小按钮（海报正下方），右列简介（贴分界线）
             VStack(spacing: 0) {
                 // ① 背景层
                 ZStack {
@@ -87,6 +94,8 @@ struct MediaDetailView: View {
                 }
 
                 // ② 封面区内容：海报 + 信息列（高度 = 封面区，内容顶对齐）
+                // 海报比封面区高（352 > 300）：布局自然向下溢出，底缘扎进白屏；
+                // 信息列与海报顶缘天然对齐（都在 12），无 offset 错位
                 HStack(alignment: .top, spacing: 12) {
                     RemoteImage(url: d.posterURL, fallbackIcon: "film",
                                 fallbackColors: Theme.placeholderGradient(for: .media))
@@ -96,10 +105,6 @@ struct MediaDetailView: View {
                         .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
                             .stroke(.white.opacity(0.12), lineWidth: 1))
                         .shadow(color: .black.opacity(0.45), radius: 16, y: 8)
-                        // 绘制位置下移 posterDip：布局仍在封面区内，绘制底缘
-                        // (posterTopPad + posterDip + posterHeight) 越过封面区底缘
-                        // 扎进白屏。外层无 .clipped，溢出部分盖在页面底色上 = 穿越效果
-                        .offset(y: posterDip)
 
                     // 信息列（封面区，白字）
                     VStack(alignment: .leading, spacing: 6) {
@@ -150,8 +155,9 @@ struct MediaDetailView: View {
                 .padding(.top, posterTopPad)
                 .frame(height: coverHeight, alignment: .top)
 
-                // ③ 白屏区：左列按钮（海报下方）+ 右列简介
-                // 顶部让开海报下探部分：绘制底缘(364) - 封面区底缘(300) + 14 间距
+                // ③ 白屏区：两列各自管理下移量（HStack 级不再统一下推）
+                // 左列按钮避开海报溢出部分（海报底缘 364，按钮从 378 开始）；
+                // 右列简介紧贴「封面/白屏分界线」下方（300 + 12 = 312）
                 HStack(alignment: .top, spacing: 12) {
                     // 播放 + 收藏：小胶囊同一行（白屏区，浅色常规样式）
                     HStack(spacing: 8) {
@@ -179,6 +185,8 @@ struct MediaDetailView: View {
                         .disabled(favLoading)
                     }
                     .frame(width: posterWidth, alignment: .leading)
+                    // 只在按钮列内部下移：简介列贴分界线，不被一起推走
+                    .padding(.top, buttonDip)
 
                     // 简介（白屏区，深色文字；可展开）
                     if let plot = d.plot, !plot.isEmpty {
@@ -196,10 +204,10 @@ struct MediaDetailView: View {
                                 .foregroundStyle(Theme.brand)
                             }
                         }
+                        .padding(.top, whiteGap)
                     }
                 }
                 .padding(.horizontal, 16)
-                .padding(.top, posterTopPad + posterDip + posterHeight - coverHeight + 14)
                 .padding(.bottom, 4)
             }
 
