@@ -16,6 +16,17 @@ struct MediaDetailView: View {
     @State private var isFavorite = false
     @State private var favLoading = false
 
+    // MARK: Hero 布局常量（对齐用户草图：海报左置跨区 + 右列信息/简介）
+    /// 封面背景区高度（海报与信息都在这个区域内；之下是白屏区）
+    private let coverHeight: CGFloat = 300
+    /// 海报尺寸（2:3）
+    private let posterWidth: CGFloat = 200
+    private let posterHeight: CGFloat = 300
+    /// 海报绘制下探量：布局不动、绘制下移，底缘越过封面区扎进白屏（穿越效果）
+    private let posterDip: CGFloat = 52
+    /// 封面区顶部内边距（海报布局顶缘 = 12）
+    private let posterTopPad: CGFloat = 12
+
     private var client: APIClient? { AppSession.shared.client }
 
     var body: some View {
@@ -49,110 +60,23 @@ struct MediaDetailView: View {
     @ViewBuilder
     private func content(_ d: MediaDetail) -> some View {
         ScrollView {
-            // ── Hero：海报左置跨区 + 右侧信息列 ──
-            // 海报放大，底缘溢出背景区扎进下方白屏（穿越封面与白屏）；
-            // 标题/信息全部在海报右侧、叠在背景封面上（白字）；白屏从简介开始
-            HStack(alignment: .top, spacing: 12) {
-                RemoteImage(url: d.posterURL, fallbackIcon: "film",
-                            fallbackColors: Theme.placeholderGradient(for: .media))
-                    .imageFilled()
-                    .frame(width: 200, height: 300)
-                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .stroke(.white.opacity(0.12), lineWidth: 1))
-                    .shadow(color: .black.opacity(0.45), radius: 16, y: 8)
-                    // 绘制位置下移 80：底缘越过 HStack 底缘（含 padding.bottom 16），
-                    // 净溢出 ~64pt 扎进白屏。HStack 无 .clipped，溢出部分按绘制
-                    // 顺序盖在页面背景上；HeroBackground 只铺 HStack 区域，所以
-                    // 溢出的那截海报底下是白屏 —— 「穿越」效果
-                    .offset(y: 80)
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(d.title).font(.title3.weight(.bold))
-                        .foregroundStyle(.white)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if let ot = d.originalTitle, ot != d.title {
-                        Text(ot).font(.caption).foregroundStyle(.white.opacity(0.6))
-                            .lineLimit(2)
-                    }
-
-                    // 窄列（~146pt）横排放不下 meta 三项，竖排
-                    VStack(alignment: .leading, spacing: 4) {
-                        if let year = d.year, year > 0 {
-                            Label("\(year)", systemImage: "calendar").font(.caption)
-                        }
-                        if let rating = d.rating, rating > 0 {
-                            Label(String(format: "%.1f", rating), systemImage: "star.fill")
-                                .font(.caption.weight(.semibold)).foregroundStyle(.yellow)
-                        }
-                        if let rt = d.runtimeText {
-                            Label(rt, systemImage: "clock").font(.caption)
-                        }
-                    }
-                    .foregroundStyle(.white.opacity(0.8))
-
-                    // 类型标签：玻璃胶囊（网页 bg-white/10 + border-white/10）
-                    if !genreTags.isEmpty {
-                        FlowLayout(spacing: 6) {
-                            ForEach(genreTags, id: \.self) { g in
-                                Text(g).font(.caption2)
-                                    // ⚠️ 标签自己内部不许断行：换行由外层 FlowLayout 负责。
-                                    // 一个长标签在胶囊里折成两行时，实际高度会和布局量到的
-                                    // 高度对不上 —— 这就是「标签压到下面内容」的来源。
-                                    .lineLimit(1)
-                                    .truncationMode(.tail)
-                                    .foregroundStyle(.white.opacity(0.85))
-                                    .padding(.horizontal, 10).padding(.vertical, 4)
-                                    .background(.white.opacity(0.1), in: Capsule())
-                                    .overlay(Capsule().stroke(.white.opacity(0.15), lineWidth: 1))
-                            }
-                        }
-                    }
-
-                    Spacer(minLength: 0)
-
-                    // 播放 + 收藏：小胶囊（窄列横排放不下，竖排全宽）
-                    if d.playable {
-                        Button {
-                            startPlayback(d)
-                        } label: {
-                            Label("播放", systemImage: "play.fill")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.black)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 8)
-                                .background(Capsule().fill(.white))
-                        }
-                    }
-                    Button {
-                        toggleFavorite()
-                    } label: {
-                        Label(isFavorite ? "已收藏" : "收藏",
-                              systemImage: isFavorite ? "heart.fill" : "heart")
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(isFavorite ? .red : .white)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 8)
-                            .background(.white.opacity(0.12), in: Capsule())
-                            .overlay(Capsule().stroke(.white.opacity(0.18), lineWidth: 1))
-                    }
-                    .disabled(favLoading)
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 16)
-            .padding(.bottom, 16)
-            .background(alignment: .top) {
+            // ══ Hero（对齐草图）：海报左置放大、下探穿越封面进白屏 ══
+            // ① 背景层：封面图 + 双层遮罩，高度钉死 coverHeight
+            // ② 封面区：海报在左（绘制下探 posterDip，底缘扎进白屏 = 穿越），
+            //    标题/原名/meta/tag 在海报右侧，白字叠封面
+            // ③ 白屏区：左列播放/收藏小按钮（海报正下方），右列简介（深色文字）
+            VStack(spacing: 0) {
+                // ① 背景层
                 ZStack {
                     // 背景图三级逻辑，对齐网页端 MediaDetailPage：
                     //   ① 有 fanart → 铺满 + 顶部对齐裁切（网页 object-cover object-top）
                     //   ② 没有 fanart（或加载失败）→ 海报模糊放大打底（网页 blur-2xl scale-110）
                     //   ③ 都没有 → 渐变占位
-                    HeroBackground(backdropURL: d.backdropURL, posterURL: d.posterURL, height: nil)
+                    HeroBackground(backdropURL: d.backdropURL, posterURL: d.posterURL, height: coverHeight)
 
                     // 双层遮罩（网页：底部 from-background 渐隐 + 右侧 from-background/80 压深）
                     // ⚠️ 两层都直接铺满：ZStack 里 Color.clear 会和渐变均分空间，渐变只盖一半
-                    // 底部：接白屏；右侧：信息列压深，保证亮 backdrop 上白字可读
+                    // 底部：压暗 + 与白屏衔接；右侧：信息列压深，保证亮 backdrop 上白字可读
                     LinearGradient(stops: [.init(color: .clear, location: 0),
                                            .init(color: .black.opacity(0.35), location: 0.5),
                                            .init(color: .black.opacity(0.85), location: 1)],
@@ -161,30 +85,126 @@ struct MediaDetailView: View {
                                            .init(color: .black.opacity(0.55), location: 1)],
                                    startPoint: .leading, endPoint: .trailing)
                 }
-            }
 
-            // 白屏区：海报绘制底缘越过 HStack 底缘 ~64pt（offset 80 - padding 16），
-            // 先让开，简介从这里开始
-            Spacer().frame(height: 80)
+                // ② 封面区内容：海报 + 信息列（高度 = 封面区，内容顶对齐）
+                HStack(alignment: .top, spacing: 12) {
+                    RemoteImage(url: d.posterURL, fallbackIcon: "film",
+                                fallbackColors: Theme.placeholderGradient(for: .media))
+                        .imageFilled()
+                        .frame(width: posterWidth, height: posterHeight)
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .stroke(.white.opacity(0.12), lineWidth: 1))
+                        .shadow(color: .black.opacity(0.45), radius: 16, y: 8)
+                        // 绘制位置下移 posterDip：布局仍在封面区内，绘制底缘
+                        // (posterTopPad + posterDip + posterHeight) 越过封面区底缘
+                        // 扎进白屏。外层无 .clipped，溢出部分盖在页面底色上 = 穿越效果
+                        .offset(y: posterDip)
 
-            VStack(alignment: .leading, spacing: 20) {
-                // 简介
-                if let plot = d.plot, !plot.isEmpty {
+                    // 信息列（封面区，白字）
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("简介").font(.headline)
-                        Text(plot)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(overviewExpanded ? nil : 4)
-                        if plot.count > 80 {
-                            Button(overviewExpanded ? "收起" : "展开全部") {
-                                overviewExpanded.toggle()
+                        Text(d.title).font(.title3.weight(.bold))
+                            .foregroundStyle(.white)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .lineLimit(2)
+                        if let ot = d.originalTitle, ot != d.title {
+                            Text(ot).font(.caption).foregroundStyle(.white.opacity(0.6))
+                                .lineLimit(2)
+                        }
+
+                        // 元信息横排可换行（网页 flex-wrap，评分黄色加粗）
+                        FlowLayout(spacing: 12) {
+                            if let year = d.year, year > 0 {
+                                Label("\(year)", systemImage: "calendar").font(.caption)
                             }
-                            .font(.footnote.weight(.medium))
-                            .foregroundStyle(Theme.brand)
+                            if let rating = d.rating, rating > 0 {
+                                Label(String(format: "%.1f", rating), systemImage: "star.fill")
+                                    .font(.caption.weight(.semibold)).foregroundStyle(.yellow)
+                            }
+                            if let rt = d.runtimeText {
+                                Label(rt, systemImage: "clock").font(.caption)
+                            }
+                        }
+                        .foregroundStyle(.white.opacity(0.8))
+
+                        // 类型标签：玻璃胶囊（网页 bg-white/10 + border-white/10）
+                        if !genreTags.isEmpty {
+                            FlowLayout(spacing: 6) {
+                                ForEach(genreTags, id: \.self) { g in
+                                    Text(g).font(.caption2)
+                                        // ⚠️ 标签自己内部不许断行：换行由外层 FlowLayout 负责。
+                                        // 一个长标签在胶囊里折成两行时，实际高度会和布局量到的
+                                        // 高度对不上 —— 这就是「标签压到下面内容」的来源。
+                                        .lineLimit(1)
+                                        .truncationMode(.tail)
+                                        .foregroundStyle(.white.opacity(0.85))
+                                        .padding(.horizontal, 10).padding(.vertical, 4)
+                                        .background(.white.opacity(0.1), in: Capsule())
+                                        .overlay(Capsule().stroke(.white.opacity(0.15), lineWidth: 1))
+                                }
+                            }
                         }
                     }
                 }
+                .padding(.horizontal, 16)
+                .padding(.top, posterTopPad)
+                .frame(height: coverHeight, alignment: .top)
+
+                // ③ 白屏区：左列按钮（海报下方）+ 右列简介
+                // 顶部让开海报下探部分：绘制底缘(364) - 封面区底缘(300) + 14 间距
+                HStack(alignment: .top, spacing: 12) {
+                    // 播放 + 收藏：小胶囊同一行（白屏区，浅色常规样式）
+                    HStack(spacing: 8) {
+                        if d.playable {
+                            Button {
+                                startPlayback(d)
+                            } label: {
+                                Label("播放", systemImage: "play.fill")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 14).padding(.vertical, 7)
+                                    .background(Capsule().fill(Theme.brand))
+                            }
+                        }
+                        Button {
+                            toggleFavorite()
+                        } label: {
+                            Label(isFavorite ? "已收藏" : "收藏",
+                                  systemImage: isFavorite ? "heart.fill" : "heart")
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(isFavorite ? .red : .primary)
+                                .padding(.horizontal, 14).padding(.vertical, 7)
+                                .appSurface(in: Capsule())
+                        }
+                        .disabled(favLoading)
+                    }
+                    .frame(width: posterWidth, alignment: .leading)
+
+                    // 简介（白屏区，深色文字；可展开）
+                    if let plot = d.plot, !plot.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("简介").font(.headline)
+                            Text(plot)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(overviewExpanded ? nil : 4)
+                            if plot.count > 80 {
+                                Button(overviewExpanded ? "收起" : "展开全部") {
+                                    overviewExpanded.toggle()
+                                }
+                                .font(.footnote.weight(.medium))
+                                .foregroundStyle(Theme.brand)
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, posterTopPad + posterDip + posterHeight - coverHeight + 14)
+                .padding(.bottom, 4)
+            }
+
+            VStack(alignment: .leading, spacing: 20) {
+                // 简介已移到 Hero 白屏区右列（海报右下，与封面区分界线衔接）
 
                 // 演员（有 id 的跳演员详情页；后端 2026-10-13 起在 actors 里输出 id，
                 // 老数据 / JSON 兜底没有 id → 保持不可点，不会坏）
