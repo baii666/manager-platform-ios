@@ -110,9 +110,8 @@ struct MediaDetailView: View {
                                    startPoint: .leading, endPoint: .trailing)
                 }
 
-                // ② 封面区内容：海报 + 信息列（高度 = 封面区，内容顶对齐）
-                // 海报比封面区高：布局自然向下溢出，底缘扎进白屏；
-                // 信息列与海报顶缘天然对齐（都在 posterTopPad），无 offset 错位
+                // ② 封面区内容：海报（左置、比封面区高 → 底缘扎进白屏）+ 信息列
+                // 信息列首部 Spacer 把整块内容压到列底：沉在分界线上方，不再贴顶
                 HStack(alignment: .top, spacing: heroGap) {
                     RemoteImage(url: d.posterURL, fallbackIcon: "film",
                                 fallbackColors: Theme.placeholderGradient(for: .media))
