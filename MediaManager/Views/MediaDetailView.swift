@@ -85,31 +85,11 @@ struct MediaDetailView: View {
     private func content(_ d: MediaDetail) -> some View {
         ScrollView {
             // ══ Hero（对齐草图）：海报左置放大、加高自然溢出穿越封面进白屏 ══
-            // ① 背景层：封面图 + 双层遮罩，高度钉死 coverHeight
+            // ① 背景层：封面图 + 双层遮罩，用 .background 垫在内容下面，不占空间
             // ② 封面区：海报在左（比封面区高，底缘自然扎进白屏 = 穿越）；
             //    标题/原名/meta/tag/按钮在海报右侧，整块沉到分界线上方（不贴顶）
             // ③ 白屏区：只剩简介（在海报下探部分的右侧）
             VStack(spacing: 0) {
-                // ① 背景层
-                ZStack {
-                    // 背景图三级逻辑，对齐网页端 MediaDetailPage：
-                    //   ① 有 fanart → 铺满 + 顶部对齐裁切（网页 object-cover object-top）
-                    //   ② 没有 fanart（或加载失败）→ 海报模糊放大打底（网页 blur-2xl scale-110）
-                    //   ③ 都没有 → 渐变占位
-                    HeroBackground(backdropURL: d.backdropURL, posterURL: d.posterURL, height: coverHeight)
-
-                    // 双层遮罩（网页：底部 from-background 渐隐 + 右侧 from-background/80 压深）
-                    // ⚠️ 两层都直接铺满：ZStack 里 Color.clear 会和渐变均分空间，渐变只盖一半
-                    // 底部：压暗 + 与白屏衔接；右侧：信息列压深，保证亮 backdrop 上白字可读
-                    LinearGradient(stops: [.init(color: .clear, location: 0),
-                                           .init(color: .black.opacity(0.35), location: 0.5),
-                                           .init(color: .black.opacity(0.85), location: 1)],
-                                   startPoint: .top, endPoint: .bottom)
-                    LinearGradient(stops: [.init(color: .clear, location: 0.3),
-                                           .init(color: .black.opacity(0.55), location: 1)],
-                                   startPoint: .leading, endPoint: .trailing)
-                }
-
                 // ② 封面区内容：海报（左置、比封面区高 → 底缘扎进白屏）+ 信息列
                 // 信息列首部 Spacer 把整块内容压到列底：沉在分界线上方，不再贴顶
                 HStack(alignment: .top, spacing: heroGap) {
@@ -206,6 +186,31 @@ struct MediaDetailView: View {
                 .padding(.horizontal, heroPad)
                 .padding(.top, posterTopPad)
                 .frame(height: coverHeight, alignment: .top)
+                // ① 背景层：必须用 .background 垫在内容**下面**——不占布局空间。
+                // ⚠️ 之前写成 VStack 里的兄弟块，它自己吃掉 coverHeight 那段高度，
+                // 海报与信息列被整块挤到封面图下方（背景上面空一大块，穿越/白字
+                // 叠封面全部失效，整个页面看着就是乱的）。
+                .background(alignment: .top) {
+                    ZStack {
+                        // 背景图三级逻辑，对齐网页端 MediaDetailPage：
+                        //   ① 有 fanart → 铺满 + 顶部对齐裁切（网页 object-cover object-top）
+                        //   ② 没有 fanart（或加载失败）→ 海报模糊放大打底（网页 blur-2xl scale-110）
+                        //   ③ 都没有 → 渐变占位
+                        // height: nil → 铺满外层（= 封面区高度 coverHeight）
+                        HeroBackground(backdropURL: d.backdropURL, posterURL: d.posterURL, height: nil)
+
+                        // 双层遮罩（网页：底部 from-background 渐隐 + 右侧 from-background/80 压深）
+                        // ⚠️ 两层都直接铺满：ZStack 里 Color.clear 会和渐变均分空间，渐变只盖一半
+                        // 底部：压暗 + 与白屏衔接；右侧：信息列压深，保证亮 backdrop 上白字可读
+                        LinearGradient(stops: [.init(color: .clear, location: 0),
+                                               .init(color: .black.opacity(0.35), location: 0.5),
+                                               .init(color: .black.opacity(0.85), location: 1)],
+                                       startPoint: .top, endPoint: .bottom)
+                        LinearGradient(stops: [.init(color: .clear, location: 0.3),
+                                               .init(color: .black.opacity(0.55), location: 1)],
+                                       startPoint: .leading, endPoint: .trailing)
+                    }
+                }
 
                 // ③ 白屏区：只剩简介（按钮已移入封面区信息列底部）
                 // 左侧是海报下探占的地盘，故右移让开；minHeight 保证即使没有简介，
