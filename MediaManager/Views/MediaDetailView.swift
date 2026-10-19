@@ -37,8 +37,6 @@ struct MediaDetailView: View {
     /// iPad: 440+150-24 = 566（380 宽 → 1.49≈2:3，几乎不裁）；
     /// iPhone: 300+64-12 = 352（信息列高，必须够高才盖得住，2:3 略裁一点）
     private var posterHeight: CGFloat { coverHeight + posterCross - posterTopPad }
-    /// 按钮列下移量：海报底缘 + heroGap，相对封面区底缘
-    private var buttonDip: CGFloat { posterCross + heroGap }
     /// 字号：iPad 上同一档 SwiftUI 字号偏小，整体上调一级
     private var titleFont: Font { isWide ? .title : .title3 }
     private var metaFont: Font { isWide ? .footnote : .caption }
@@ -88,9 +86,9 @@ struct MediaDetailView: View {
         ScrollView {
             // ══ Hero（对齐草图）：海报左置放大、加高自然溢出穿越封面进白屏 ══
             // ① 背景层：封面图 + 双层遮罩，高度钉死 coverHeight
-            // ② 封面区：海报在左（比封面区高，底缘自然扎进白屏 = 穿越），
-            //    标题/原名/meta/tag 在海报右侧，白字叠封面，顶缘与海报齐平
-            // ③ 白屏区：左列播放/收藏小按钮（海报正下方），右列简介（贴分界线）
+            // ② 封面区：海报在左（比封面区高，底缘自然扎进白屏 = 穿越）；
+            //    标题/原名/meta/tag/按钮在海报右侧，整块沉到分界线上方（不贴顶）
+            // ③ 白屏区：只剩简介（在海报下探部分的右侧）
             VStack(spacing: 0) {
                 // ① 背景层
                 ZStack {
@@ -125,8 +123,11 @@ struct MediaDetailView: View {
                             .stroke(.white.opacity(0.12), lineWidth: 1))
                         .shadow(color: .black.opacity(0.45), radius: 16, y: 8)
 
-                    // 信息列（封面区，白字）
+                    // 信息列（封面区，白字）——整体沉到分界线上方，不贴顶：
+                    // Spacer 吃掉上方空白，把内容压到列底（网页版 items-end 同款观感）
                     VStack(alignment: .leading, spacing: infoSpacing) {
+                        Spacer(minLength: 0)
+
                         Text(d.title).font(titleFont.weight(.bold))
                             .foregroundStyle(.white)
                             .fixedSize(horizontal: false, vertical: true)
@@ -169,68 +170,70 @@ struct MediaDetailView: View {
                                 }
                             }
                         }
+
+                        // 播放 + 收藏：小胶囊一行，紧跟标签下方、贴着分界线上方。
+                        // 深色封面上用白底主按钮 + 玻璃次按钮（不再是白屏区的浅色样式）
+                        FlowLayout(spacing: isWide ? 14 : 8) {
+                            if d.playable {
+                                Button {
+                                    startPlayback(d)
+                                } label: {
+                                    Label("播放", systemImage: "play.fill")
+                                        .font(buttonFont.weight(.semibold))
+                                        .foregroundStyle(.black)
+                                        .padding(.horizontal, isWide ? 22 : 14)
+                                        .padding(.vertical, isWide ? 11 : 7)
+                                        .background(Capsule().fill(.white))
+                                }
+                            }
+                            Button {
+                                toggleFavorite()
+                            } label: {
+                                Label(isFavorite ? "已收藏" : "收藏",
+                                      systemImage: isFavorite ? "heart.fill" : "heart")
+                                    .font(buttonFont.weight(.medium))
+                                    .foregroundStyle(isFavorite ? .red : .white)
+                                    .padding(.horizontal, isWide ? 22 : 14)
+                                    .padding(.vertical, isWide ? 11 : 7)
+                                    .background(.white.opacity(0.12), in: Capsule())
+                                    .overlay(Capsule().stroke(.white.opacity(0.18), lineWidth: 1))
+                            }
+                            .disabled(favLoading)
+                        }
                     }
+                    // 内容底缘距分界线留 heroGap，不直接压线上
+                    .padding(.bottom, heroGap)
                 }
                 .padding(.horizontal, heroPad)
                 .padding(.top, posterTopPad)
                 .frame(height: coverHeight, alignment: .top)
 
-                // ③ 白屏区：两列各自管理下移量（HStack 级不再统一下推）
-                // 左列按钮避开海报溢出部分（海报底缘之后 heroGap 开始）；
-                // 右列简介紧贴「封面/白屏分界线」下方（coverHeight + heroGap）
-                HStack(alignment: .top, spacing: heroGap) {
-                    // 播放 + 收藏：小胶囊同一行（白屏区，浅色常规样式）
-                    HStack(spacing: isWide ? 14 : 8) {
-                        if d.playable {
-                            Button {
-                                startPlayback(d)
-                            } label: {
-                                Label("播放", systemImage: "play.fill")
-                                    .font(buttonFont.weight(.semibold))
-                                    .foregroundStyle(.white)
-                                    .padding(.horizontal, isWide ? 22 : 14)
-                                    .padding(.vertical, isWide ? 11 : 7)
-                                    .background(Capsule().fill(Theme.brand))
+                // ③ 白屏区：只剩简介（按钮已移入封面区信息列底部）
+                // 左侧是海报下探占的地盘，故右移让开；minHeight 保证即使没有简介，
+                // 下一区块也不会被海报下探部分压住（海报底缘 = coverHeight + posterCross）
+                if let plot = d.plot, !plot.isEmpty {
+                    VStack(alignment: .leading, spacing: isWide ? 8 : 6) {
+                        Text("简介").font(sectionFont)
+                        Text(plot)
+                            .font(bodyFont)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(overviewExpanded ? nil : 4)
+                        if plot.count > 80 {
+                            Button(overviewExpanded ? "收起" : "展开全部") {
+                                overviewExpanded.toggle()
                             }
+                            .font((isWide ? Font.body : Font.footnote).weight(.medium))
+                            .foregroundStyle(Theme.brand)
                         }
-                        Button {
-                            toggleFavorite()
-                        } label: {
-                            Label(isFavorite ? "已收藏" : "收藏",
-                                  systemImage: isFavorite ? "heart.fill" : "heart")
-                                .font(buttonFont.weight(.medium))
-                                .foregroundStyle(isFavorite ? .red : .primary)
-                                .padding(.horizontal, isWide ? 22 : 14)
-                                .padding(.vertical, isWide ? 11 : 7)
-                                .appSurface(in: Capsule())
-                        }
-                        .disabled(favLoading)
                     }
-                    .frame(width: posterWidth, alignment: .leading)
-                    // 只在按钮列内部下移：简介列贴分界线，不被一起推走
-                    .padding(.top, buttonDip)
-
-                    // 简介（白屏区，深色文字；可展开）
-                    if let plot = d.plot, !plot.isEmpty {
-                        VStack(alignment: .leading, spacing: isWide ? 8 : 6) {
-                            Text("简介").font(sectionFont)
-                            Text(plot)
-                                .font(bodyFont)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(overviewExpanded ? nil : 4)
-                            if plot.count > 80 {
-                                Button(overviewExpanded ? "收起" : "展开全部") {
-                                    overviewExpanded.toggle()
-                                }
-                                .font((isWide ? Font.body : Font.footnote).weight(.medium))
-                                .foregroundStyle(Theme.brand)
-                            }
-                        }
-                        .padding(.top, heroGap)
-                    }
+                    .padding(.top, heroGap)
+                    .padding(.leading, heroPad + posterWidth + heroGap)
+                    .padding(.trailing, heroPad)
+                    .frame(minHeight: posterCross + heroGap, alignment: .top)
+                } else {
+                    // 无简介时也要让开海报下探部分
+                    Spacer().frame(height: posterCross + heroGap)
                 }
-                .padding(.horizontal, heroPad)
-                .padding(.bottom, 4)
             }
 
             VStack(alignment: .leading, spacing: 20) {
