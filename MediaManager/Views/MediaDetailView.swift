@@ -16,9 +16,6 @@ struct MediaDetailView: View {
     @State private var isFavorite = false
     @State private var favLoading = false
 
-    /// Hero 背景高度（海报 180 + 上方露出 ~50）
-    private let heroHeight: CGFloat = 300
-
     private var client: APIClient? { AppSession.shared.client }
 
     var body: some View {
@@ -53,97 +50,115 @@ struct MediaDetailView: View {
     private func content(_ d: MediaDetail) -> some View {
         ScrollView {
             // ── Hero ──
-            ZStack(alignment: .bottomLeading) {
-                // 背景图三级逻辑，对齐网页端 MediaDetailPage：
-                //   ① 有 fanart → 铺满 + 顶部对齐裁切（网页 object-cover object-top）
-                //   ② 没有 fanart（或加载失败）→ 海报模糊放大打底（网页 blur-2xl scale-110）
-                //   ③ 都没有 → 渐变占位
-                // 遮罩对三档统一生效（网页端遮罩 div 也是常驻的）
-                HeroBackground(backdropURL: d.backdropURL, posterURL: d.posterURL, height: heroHeight)
-                    .overlay(LinearGradient(
-                        colors: [.black.opacity(0.1), .black.opacity(0.85)],
-                        startPoint: .top, endPoint: .bottom))
+            // 高度不再写死：背景铺满内容（网页版 Hero 就是内容多高它多高）
+            HStack(alignment: .top, spacing: 12) {
+                RemoteImage(url: d.posterURL, fallbackIcon: "film",
+                            fallbackColors: Theme.placeholderGradient(for: .media))
+                    .imageFilled()
+                    .frame(width: 160, height: 240)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    // 网页：border-white/10 + ring-white/5 + shadow-2xl shadow-black/60
+                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(.white.opacity(0.12), lineWidth: 1))
+                    .shadow(color: .black.opacity(0.5), radius: 16, y: 8)
 
-                // 海报 + 右侧信息列：海报在合理范围内尽可能大（180×270 = 2:3 标准海报比例），
-                // 播放/收藏/tag 全部收进右侧列，不再占下方通栏
-                HStack(alignment: .top, spacing: 14) {
-                    RemoteImage(url: d.posterURL, fallbackIcon: "film",
-                                fallbackColors: Theme.placeholderGradient(for: .media))
-                        .imageFilled()
-                        .frame(width: 180, height: 270)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .shadow(radius: 8)
-
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(d.title).font(.title3.weight(.bold))
-                            .foregroundStyle(.white)
-                            .fixedSize(horizontal: false, vertical: true)
-                        if let ot = d.originalTitle, ot != d.title {
-                            Text(ot).font(.caption).foregroundStyle(.white.opacity(0.6))
-                                .lineLimit(2)
-                        }
-                        // 窄列里横排放不下，改竖排
-                        VStack(alignment: .leading, spacing: 4) {
-                            if let year = d.year, year > 0 {
-                                Label("\(year)", systemImage: "calendar").font(.caption)
-                            }
-                            if let rating = d.rating, rating > 0 {
-                                Label(String(format: "%.1f", rating), systemImage: "star.fill")
-                                    .font(.caption).foregroundStyle(.yellow)
-                            }
-                            if let rt = d.runtimeText {
-                                Label(rt, systemImage: "clock").font(.caption)
-                            }
-                        }
-                        .foregroundStyle(.white.opacity(0.85))
-
-                        // 播放（主，撑满）+ 收藏（图标胶囊，省宽度）
-                        HStack(spacing: 8) {
-                            if d.playable {
-                                Button {
-                                    startPlayback(d)
-                                } label: {
-                                    Label("播放", systemImage: "play.fill")
-                                        .font(.subheadline.weight(.semibold))
-                                        .foregroundStyle(.black)
-                                        .frame(maxWidth: .infinity)
-                                        .padding(.vertical, 9)
-                                        .background(Capsule().fill(.white))
-                                }
-                            }
-                            Button {
-                                toggleFavorite()
-                            } label: {
-                                Image(systemName: isFavorite ? "heart.fill" : "heart")
-                                    .font(.subheadline.weight(.medium))
-                                    .foregroundStyle(isFavorite ? Color.red : .primary)
-                                    .frame(width: 38, height: 38)
-                                    .appSurface(in: Capsule())
-                            }
-                            .disabled(favLoading)
-                        }
-
-                        // tag 收在右侧列底部，与海报底边齐平
-                        if !genreTags.isEmpty {
-                            FlowLayout(spacing: 6) {
-                                ForEach(genreTags, id: \.self) { g in
-                                    Text(g).font(.caption2)
-                                        // ⚠️ 标签自己内部不许断行：换行由外层 FlowLayout 负责。
-                                        // 一个长标签在胶囊里折成两行时，实际高度会和布局量到的
-                                        // 高度对不上 —— 这就是「标签压到下面内容」的来源。
-                                        .lineLimit(1)
-                                        .truncationMode(.tail)
-                                        .padding(.horizontal, 9).padding(.vertical, 3)
-                                        .appSurface(in: Capsule())
-                                }
-                            }
-                        }
-                        Spacer(minLength: 0)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(d.title).font(.title3.weight(.bold))
+                        .foregroundStyle(.white)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let ot = d.originalTitle, ot != d.title {
+                        Text(ot).font(.caption).foregroundStyle(.white.opacity(0.5))
+                            .lineLimit(2)
                     }
-                    .padding(.top, 2)
+
+                    // 元信息横排可换行（网页 flex-wrap gap-x-3，评分黄色加粗）
+                    FlowLayout(spacing: 12) {
+                        if let year = d.year, year > 0 {
+                            Label("\(year)", systemImage: "calendar").font(.caption)
+                        }
+                        if let rating = d.rating, rating > 0 {
+                            Label(String(format: "%.1f", rating), systemImage: "star.fill")
+                                .font(.caption.weight(.semibold)).foregroundStyle(.yellow)
+                        }
+                        if let rt = d.runtimeText {
+                            Label(rt, systemImage: "clock").font(.caption)
+                        }
+                    }
+                    .foregroundStyle(.white.opacity(0.75))
+
+                    Spacer(minLength: 8)
+
+                    // 类型标签：网页 bg-white/10 + border-white/10 玻璃胶囊
+                    if !genreTags.isEmpty {
+                        FlowLayout(spacing: 6) {
+                            ForEach(genreTags, id: \.self) { g in
+                                Text(g).font(.caption2)
+                                    // ⚠️ 标签自己内部不许断行：换行由外层 FlowLayout 负责。
+                                    // 一个长标签在胶囊里折成两行时，实际高度会和布局量到的
+                                    // 高度对不上 —— 这就是「标签压到下面内容」的来源。
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
+                                    .foregroundStyle(.white.opacity(0.85))
+                                    .padding(.horizontal, 10).padding(.vertical, 4)
+                                    .background(.white.opacity(0.1), in: Capsule())
+                                    .overlay(Capsule().stroke(.white.opacity(0.15), lineWidth: 1))
+                            }
+                        }
+                    }
+
+                    // 播放按钮组贴底（网页：白底圆角矩形大按钮 + 玻璃次按钮）
+                    if d.playable {
+                        Button {
+                            startPlayback(d)
+                        } label: {
+                            Label("播放", systemImage: "play.fill")
+                                .font(.subheadline.weight(.bold))
+                                .foregroundStyle(.black)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 10)
+                                .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(.white))
+                        }
+                    }
+                    Button {
+                        toggleFavorite()
+                    } label: {
+                        Label(isFavorite ? "已收藏" : "收藏",
+                              systemImage: isFavorite ? "heart.fill" : "heart")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(isFavorite ? .red : .white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                            .background(.white.opacity(0.12),
+                                        in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .stroke(.white.opacity(0.18), lineWidth: 1))
+                    }
+                    .disabled(favLoading)
                 }
-                .padding(.horizontal, 16)
-                .padding(.bottom, 16)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 20)
+            .padding(.bottom, 20)
+            .background(alignment: .top) {
+                ZStack {
+                    // 背景图三级逻辑，对齐网页端 MediaDetailPage：
+                    //   ① 有 fanart → 铺满 + 顶部对齐裁切（网页 object-cover object-top）
+                    //   ② 没有 fanart（或加载失败）→ 海报模糊放大打底（网页 blur-2xl scale-110）
+                    //   ③ 都没有 → 渐变占位
+                    HeroBackground(backdropURL: d.backdropURL, posterURL: d.posterURL, height: nil)
+
+                    // 双层遮罩（网页：底部 from-background 渐隐 + 右侧 from-background/80 压深）
+                    // ⚠️ 两层都直接铺满：ZStack 里 Color.clear 会和渐变均分空间，渐变只盖一半
+                    // 底部：30%→92% 渐隐，保证 Hero 与下方内容区平滑过渡
+                    LinearGradient(stops: [.init(color: .black.opacity(0.3), location: 0),
+                                           .init(color: .black.opacity(0.7), location: 0.55),
+                                           .init(color: .black.opacity(0.92), location: 1)],
+                                   startPoint: .top, endPoint: .bottom)
+                    // 右侧：信息列压深，保证亮 backdrop 上文字可读
+                    LinearGradient(stops: [.init(color: .clear, location: 0.3),
+                                           .init(color: .black.opacity(0.55), location: 1)],
+                                   startPoint: .leading, endPoint: .trailing)
+                }
             }
 
             VStack(alignment: .leading, spacing: 20) {
@@ -334,13 +349,18 @@ struct MediaDetailView: View {
 private struct HeroBackground: View {
     let backdropURL: URL?
     let posterURL: URL?
-    let height: CGFloat
+    /// nil = 高度自适应（铺满外层容器）；网页版 Hero 就是内容多高它多高
+    let height: CGFloat?
 
     @State private var backdrop: UIImage?
     /// fanart 加载失败：退到海报模糊档
     @State private var backdropFailed = false
 
     var body: some View {
+        base.modifier(HeroFrame(height: height))
+    }
+
+    private var base: some View {
         GeometryReader { geo in
             ZStack {
                 if let backdrop, backdrop.size.height > 0, backdrop.size.width > 0 {
@@ -354,15 +374,14 @@ private struct HeroBackground: View {
                                 fallbackColors: Theme.placeholderGradient(for: .media))
                         .imageFilled()
                         // 网页 blur-2xl=40px 是按 ~480px 高的 Hero 定的，
-                        // 这里 Hero 只有 230，按同比例折算到 24
-                        .blur(radius: 24)
+                        // 这里自适应高度典型 ~330，按同比例折算到 28
+                        .blur(radius: 28)
                         .scaleEffect(1.1)
                 } else {
                     placeholder
                 }
             }
         }
-        .frame(height: height)
         .clipped()
         .task(id: backdropURL) { await loadBackdrop() }
     }
@@ -405,6 +424,18 @@ private struct HeroBackground: View {
             backdrop = img
         } else {
             backdropFailed = true
+        }
+    }
+}
+
+/// height 有值钉死高度；nil 时铺满外层（配合 .background 由内容决定 Hero 高度）
+private struct HeroFrame: ViewModifier {
+    let height: CGFloat?
+    func body(content: Content) -> some View {
+        if let height {
+            content.frame(height: height)
+        } else {
+            content.frame(maxHeight: .infinity)
         }
     }
 }
