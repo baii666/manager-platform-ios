@@ -17,7 +17,7 @@ struct MediaDetailView: View {
     @State private var favLoading = false
 
     /// Hero 背景高度（海报 180 + 上方露出 ~50）
-    private let heroHeight: CGFloat = 230
+    private let heroHeight: CGFloat = 300
 
     private var client: APIClient? { AppSession.shared.client }
 
@@ -64,83 +64,89 @@ struct MediaDetailView: View {
                         colors: [.black.opacity(0.1), .black.opacity(0.85)],
                         startPoint: .top, endPoint: .bottom))
 
-                HStack(alignment: .bottom, spacing: 16) {
+                // 海报 + 右侧信息列：海报在合理范围内尽可能大（180×270 = 2:3 标准海报比例），
+                // 播放/收藏/tag 全部收进右侧列，不再占下方通栏
+                HStack(alignment: .top, spacing: 14) {
                     RemoteImage(url: d.posterURL, fallbackIcon: "film",
                                 fallbackColors: Theme.placeholderGradient(for: .media))
                         .imageFilled()
-                        .frame(width: 120, height: 180)
+                        .frame(width: 180, height: 270)
                         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                         .shadow(radius: 8)
 
                     VStack(alignment: .leading, spacing: 6) {
-                        Text(d.title).font(.title2.weight(.bold))
+                        Text(d.title).font(.title3.weight(.bold))
                             .foregroundStyle(.white)
                             .fixedSize(horizontal: false, vertical: true)
                         if let ot = d.originalTitle, ot != d.title {
-                            Text(ot).font(.subheadline).foregroundStyle(.white.opacity(0.6))
+                            Text(ot).font(.caption).foregroundStyle(.white.opacity(0.6))
+                                .lineLimit(2)
                         }
-                        HStack(spacing: 10) {
+                        // 窄列里横排放不下，改竖排
+                        VStack(alignment: .leading, spacing: 4) {
                             if let year = d.year, year > 0 {
-                                Label("\(year)", systemImage: "calendar").font(.footnote)
+                                Label("\(year)", systemImage: "calendar").font(.caption)
                             }
                             if let rating = d.rating, rating > 0 {
                                 Label(String(format: "%.1f", rating), systemImage: "star.fill")
-                                    .font(.footnote).foregroundStyle(.yellow)
+                                    .font(.caption).foregroundStyle(.yellow)
                             }
                             if let rt = d.runtimeText {
-                                Label(rt, systemImage: "clock").font(.footnote)
+                                Label(rt, systemImage: "clock").font(.caption)
                             }
                         }
                         .foregroundStyle(.white.opacity(0.85))
+
+                        // 播放（主，撑满）+ 收藏（图标胶囊，省宽度）
+                        HStack(spacing: 8) {
+                            if d.playable {
+                                Button {
+                                    startPlayback(d)
+                                } label: {
+                                    Label("播放", systemImage: "play.fill")
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(.black)
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 9)
+                                        .background(Capsule().fill(.white))
+                                }
+                            }
+                            Button {
+                                toggleFavorite()
+                            } label: {
+                                Image(systemName: isFavorite ? "heart.fill" : "heart")
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundStyle(isFavorite ? Color.red : .primary)
+                                    .frame(width: 38, height: 38)
+                                    .appSurface(in: Capsule())
+                            }
+                            .disabled(favLoading)
+                        }
+
+                        // tag 收在右侧列底部，与海报底边齐平
+                        if !genreTags.isEmpty {
+                            FlowLayout(spacing: 6) {
+                                ForEach(genreTags, id: \.self) { g in
+                                    Text(g).font(.caption2)
+                                        // ⚠️ 标签自己内部不许断行：换行由外层 FlowLayout 负责。
+                                        // 一个长标签在胶囊里折成两行时，实际高度会和布局量到的
+                                        // 高度对不上 —— 这就是「标签压到下面内容」的来源。
+                                        .lineLimit(1)
+                                        .truncationMode(.tail)
+                                        .padding(.horizontal, 9).padding(.vertical, 3)
+                                        .appSurface(in: Capsule())
+                                }
+                            }
+                        }
+                        Spacer(minLength: 0)
                     }
+                    .padding(.top, 2)
                 }
                 .padding(.horizontal, 16)
                 .padding(.bottom, 16)
             }
 
             VStack(alignment: .leading, spacing: 20) {
-                // 类型标签 + 播放 + 收藏
-                HStack(spacing: 10) {
-                    if d.playable {
-                        Button {
-                            startPlayback(d)
-                        } label: {
-                            Label("播放", systemImage: "play.fill")
-                                .font(.headline)
-                                .foregroundStyle(.black)
-                                .padding(.horizontal, 22).padding(.vertical, 10)
-                                .background(Capsule().fill(.white))
-                        }
-                    }
-                    Button {
-                        toggleFavorite()
-                    } label: {
-                        Label(isFavorite ? "已收藏" : "收藏", systemImage: isFavorite ? "heart.fill" : "heart")
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(isFavorite ? Color.red : .primary)
-                            .padding(.horizontal, 18).padding(.vertical, 10)
-                            .appSurface(in: Capsule())
-                    }
-                    .disabled(favLoading)
-                }
-
-                // ⚠️ 已经去重：ForEach 用 id: \.self 时，重复的类型名会让两个标签
-                // 拿到同一个 id，SwiftUI 会把它们画在同一个位置（看着就是「叠在一起」）
-                if !genreTags.isEmpty {
-                    FlowLayout(spacing: 8) {
-                        ForEach(genreTags, id: \.self) { g in
-                            Text(g).font(.footnote)
-                                // ⚠️ 标签自己内部不许断行：换行由外层 FlowLayout 负责。
-                                // 一个长标签在胶囊里折成两行时，实际高度会和布局量到的
-                                // 高度对不上 —— 这就是「标签压到下面内容」的来源。
-                                .lineLimit(1)
-                                .truncationMode(.tail)
-                                .padding(.horizontal, 12).padding(.vertical, 5)
-                                .appSurface(in: Capsule())
-                        }
-                    }
-                }
-
                 // 简介
                 if let plot = d.plot, !plot.isEmpty {
                     VStack(alignment: .leading, spacing: 6) {
