@@ -49,74 +49,47 @@ struct MediaDetailView: View {
     @ViewBuilder
     private func content(_ d: MediaDetail) -> some View {
         ScrollView {
-            // ── Hero ──
-            // 高度不再写死：背景铺满内容（网页版 Hero 就是内容多高它多高）
-            HStack(alignment: .top, spacing: 12) {
+            // ── Hero：背景 + 大海报 ──
+            // 海报底缘溢出 Hero 90pt，压进下方内容区（跨越背景与白色区域）；
+            // 标题/信息全部收到海报下方的白区里
+            ZStack(alignment: .bottom) {
+                // 背景图三级逻辑，对齐网页端 MediaDetailPage：
+                //   ① 有 fanart → 铺满 + 顶部对齐裁切（网页 object-cover object-top）
+                //   ② 没有 fanart（或加载失败）→ 海报模糊放大打底（网页 blur-2xl scale-110）
+                //   ③ 都没有 → 渐变占位
+                HeroBackground(backdropURL: d.backdropURL, posterURL: d.posterURL, height: nil)
+                    .overlay(LinearGradient(
+                        colors: [.clear, .black.opacity(0.55)],
+                        startPoint: .top, endPoint: .bottom))
+
                 RemoteImage(url: d.posterURL, fallbackIcon: "film",
                             fallbackColors: Theme.placeholderGradient(for: .media))
                     .imageFilled()
-                    .frame(width: 160, height: 240)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    // 网页：border-white/10 + ring-white/5 + shadow-2xl shadow-black/60
-                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .frame(width: 230, height: 345)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
                         .stroke(.white.opacity(0.12), lineWidth: 1))
-                    .shadow(color: .black.opacity(0.5), radius: 16, y: 8)
+                    .shadow(color: .black.opacity(0.45), radius: 16, y: 8)
+                    .offset(y: 90)
+            }
+            .frame(height: 300)
 
-                VStack(alignment: .leading, spacing: 6) {
+            // ── 信息区：海报下方（标题/meta/tag + 小按钮一行）──
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .center, spacing: 10) {
                     Text(d.title).font(.title3.weight(.bold))
-                        .foregroundStyle(.white)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if let ot = d.originalTitle, ot != d.title {
-                        Text(ot).font(.caption).foregroundStyle(.white.opacity(0.5))
-                            .lineLimit(2)
-                    }
-
-                    // 元信息横排可换行（网页 flex-wrap gap-x-3，评分黄色加粗）
-                    FlowLayout(spacing: 12) {
-                        if let year = d.year, year > 0 {
-                            Label("\(year)", systemImage: "calendar").font(.caption)
-                        }
-                        if let rating = d.rating, rating > 0 {
-                            Label(String(format: "%.1f", rating), systemImage: "star.fill")
-                                .font(.caption.weight(.semibold)).foregroundStyle(.yellow)
-                        }
-                        if let rt = d.runtimeText {
-                            Label(rt, systemImage: "clock").font(.caption)
-                        }
-                    }
-                    .foregroundStyle(.white.opacity(0.75))
-
+                        .lineLimit(1)
                     Spacer(minLength: 8)
-
-                    // 类型标签：网页 bg-white/10 + border-white/10 玻璃胶囊
-                    if !genreTags.isEmpty {
-                        FlowLayout(spacing: 6) {
-                            ForEach(genreTags, id: \.self) { g in
-                                Text(g).font(.caption2)
-                                    // ⚠️ 标签自己内部不许断行：换行由外层 FlowLayout 负责。
-                                    // 一个长标签在胶囊里折成两行时，实际高度会和布局量到的
-                                    // 高度对不上 —— 这就是「标签压到下面内容」的来源。
-                                    .lineLimit(1)
-                                    .truncationMode(.tail)
-                                    .foregroundStyle(.white.opacity(0.85))
-                                    .padding(.horizontal, 10).padding(.vertical, 4)
-                                    .background(.white.opacity(0.1), in: Capsule())
-                                    .overlay(Capsule().stroke(.white.opacity(0.15), lineWidth: 1))
-                            }
-                        }
-                    }
-
-                    // 播放按钮组贴底（网页：白底圆角矩形大按钮 + 玻璃次按钮）
+                    // 播放 + 收藏：小胶囊，同一行
                     if d.playable {
                         Button {
                             startPlayback(d)
                         } label: {
                             Label("播放", systemImage: "play.fill")
-                                .font(.subheadline.weight(.bold))
-                                .foregroundStyle(.black)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 10)
-                                .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(.white))
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 14).padding(.vertical, 7)
+                                .background(Capsule().fill(Theme.brand))
                         }
                     }
                     Button {
@@ -124,42 +97,53 @@ struct MediaDetailView: View {
                     } label: {
                         Label(isFavorite ? "已收藏" : "收藏",
                               systemImage: isFavorite ? "heart.fill" : "heart")
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(isFavorite ? .red : .white)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 10)
-                            .background(.white.opacity(0.12),
-                                        in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .stroke(.white.opacity(0.18), lineWidth: 1))
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(isFavorite ? .red : .primary)
+                            .padding(.horizontal, 14).padding(.vertical, 7)
+                            .appSurface(in: Capsule())
                     }
                     .disabled(favLoading)
                 }
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 20)
-            .padding(.bottom, 20)
-            .background(alignment: .top) {
-                ZStack {
-                    // 背景图三级逻辑，对齐网页端 MediaDetailPage：
-                    //   ① 有 fanart → 铺满 + 顶部对齐裁切（网页 object-cover object-top）
-                    //   ② 没有 fanart（或加载失败）→ 海报模糊放大打底（网页 blur-2xl scale-110）
-                    //   ③ 都没有 → 渐变占位
-                    HeroBackground(backdropURL: d.backdropURL, posterURL: d.posterURL, height: nil)
 
-                    // 双层遮罩（网页：底部 from-background 渐隐 + 右侧 from-background/80 压深）
-                    // ⚠️ 两层都直接铺满：ZStack 里 Color.clear 会和渐变均分空间，渐变只盖一半
-                    // 底部：30%→92% 渐隐，保证 Hero 与下方内容区平滑过渡
-                    LinearGradient(stops: [.init(color: .black.opacity(0.3), location: 0),
-                                           .init(color: .black.opacity(0.7), location: 0.55),
-                                           .init(color: .black.opacity(0.92), location: 1)],
-                                   startPoint: .top, endPoint: .bottom)
-                    // 右侧：信息列压深，保证亮 backdrop 上文字可读
-                    LinearGradient(stops: [.init(color: .clear, location: 0.3),
-                                           .init(color: .black.opacity(0.55), location: 1)],
-                                   startPoint: .leading, endPoint: .trailing)
+                if let ot = d.originalTitle, ot != d.title {
+                    Text(ot).font(.caption).foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                // 元信息横排：评分黄色加粗
+                HStack(spacing: 12) {
+                    if let year = d.year, year > 0 {
+                        Label("\(year)", systemImage: "calendar").font(.caption)
+                    }
+                    if let rating = d.rating, rating > 0 {
+                        Label(String(format: "%.1f", rating), systemImage: "star.fill")
+                            .font(.caption.weight(.semibold)).foregroundStyle(.yellow)
+                    }
+                    if let rt = d.runtimeText {
+                        Label(rt, systemImage: "clock").font(.caption)
+                    }
+                }
+                .foregroundStyle(.secondary)
+
+                // ⚠️ 已经去重：ForEach 用 id: \.self 时，重复的类型名会让两个标签
+                // 拿到同一个 id，SwiftUI 会把它们画在同一个位置（看着就是「叠在一起」）
+                if !genreTags.isEmpty {
+                    FlowLayout(spacing: 8) {
+                        ForEach(genreTags, id: \.self) { g in
+                            Text(g).font(.footnote)
+                                // ⚠️ 标签自己内部不许断行：换行由外层 FlowLayout 负责。
+                                // 一个长标签在胶囊里折成两行时，实际高度会和布局量到的
+                                // 高度对不上 —— 这就是「标签压到下面内容」的来源。
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                                .padding(.horizontal, 12).padding(.vertical, 5)
+                                .appSurface(in: Capsule())
+                        }
+                    }
                 }
             }
+            .padding(.horizontal, 16)
+            .padding(.top, 110)
 
             VStack(alignment: .leading, spacing: 20) {
                 // 简介
