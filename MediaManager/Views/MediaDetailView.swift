@@ -49,19 +49,11 @@ struct MediaDetailView: View {
     @ViewBuilder
     private func content(_ d: MediaDetail) -> some View {
         ScrollView {
-            // ── Hero：背景 + 大海报 ──
-            // 海报底缘溢出 Hero 90pt，压进下方内容区（跨越背景与白色区域）；
-            // 标题/信息全部收到海报下方的白区里
-            ZStack(alignment: .bottom) {
-                // 背景图三级逻辑，对齐网页端 MediaDetailPage：
-                //   ① 有 fanart → 铺满 + 顶部对齐裁切（网页 object-cover object-top）
-                //   ② 没有 fanart（或加载失败）→ 海报模糊放大打底（网页 blur-2xl scale-110）
-                //   ③ 都没有 → 渐变占位
-                HeroBackground(backdropURL: d.backdropURL, posterURL: d.posterURL, height: nil)
-                    .overlay(LinearGradient(
-                        colors: [.clear, .black.opacity(0.55)],
-                        startPoint: .top, endPoint: .bottom))
-
+            // ── Hero：背景封面 + 海报 + 信息（全部在背景区内，白字）──
+            // 复刻网页版 MediaDetailPage 手机端布局（flex-col 竖排）：
+            // 海报左上 → 标题/原名/meta/tag/按钮通栏在下，叠在背景封面上、
+            // 贴「背景封面与白区分界线」上方；白区从简介开始
+            VStack(alignment: .leading, spacing: 12) {
                 RemoteImage(url: d.posterURL, fallbackIcon: "film",
                             fallbackColors: Theme.placeholderGradient(for: .media))
                     .imageFilled()
@@ -70,47 +62,16 @@ struct MediaDetailView: View {
                     .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
                         .stroke(.white.opacity(0.12), lineWidth: 1))
                     .shadow(color: .black.opacity(0.45), radius: 16, y: 8)
-                    .offset(y: 90)
-            }
-            .frame(height: 300)
 
-            // ── 信息区：海报下方（标题/meta/tag + 小按钮一行）──
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(alignment: .center, spacing: 10) {
-                    Text(d.title).font(.title3.weight(.bold))
-                        .lineLimit(1)
-                    Spacer(minLength: 8)
-                    // 播放 + 收藏：小胶囊，同一行
-                    if d.playable {
-                        Button {
-                            startPlayback(d)
-                        } label: {
-                            Label("播放", systemImage: "play.fill")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.white)
-                                .padding(.horizontal, 14).padding(.vertical, 7)
-                                .background(Capsule().fill(Theme.brand))
-                        }
-                    }
-                    Button {
-                        toggleFavorite()
-                    } label: {
-                        Label(isFavorite ? "已收藏" : "收藏",
-                              systemImage: isFavorite ? "heart.fill" : "heart")
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(isFavorite ? .red : .primary)
-                            .padding(.horizontal, 14).padding(.vertical, 7)
-                            .appSurface(in: Capsule())
-                    }
-                    .disabled(favLoading)
-                }
-
+                Text(d.title).font(.title2.weight(.bold))
+                    .foregroundStyle(.white)
+                    .lineLimit(2)
                 if let ot = d.originalTitle, ot != d.title {
-                    Text(ot).font(.caption).foregroundStyle(.secondary)
+                    Text(ot).font(.caption).foregroundStyle(.white.opacity(0.6))
                         .lineLimit(1)
                 }
 
-                // 元信息横排：评分黄色加粗
+                // 元信息横排：评分黄色加粗（网页 flex-wrap，白字）
                 HStack(spacing: 12) {
                     if let year = d.year, year > 0 {
                         Label("\(year)", systemImage: "calendar").font(.caption)
@@ -123,27 +84,78 @@ struct MediaDetailView: View {
                         Label(rt, systemImage: "clock").font(.caption)
                     }
                 }
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.white.opacity(0.8))
 
-                // ⚠️ 已经去重：ForEach 用 id: \.self 时，重复的类型名会让两个标签
-                // 拿到同一个 id，SwiftUI 会把它们画在同一个位置（看着就是「叠在一起」）
+                // 类型标签：玻璃胶囊（网页 bg-white/10 + border-white/10）
                 if !genreTags.isEmpty {
-                    FlowLayout(spacing: 8) {
+                    FlowLayout(spacing: 6) {
                         ForEach(genreTags, id: \.self) { g in
-                            Text(g).font(.footnote)
+                            Text(g).font(.caption2)
                                 // ⚠️ 标签自己内部不许断行：换行由外层 FlowLayout 负责。
                                 // 一个长标签在胶囊里折成两行时，实际高度会和布局量到的
                                 // 高度对不上 —— 这就是「标签压到下面内容」的来源。
                                 .lineLimit(1)
                                 .truncationMode(.tail)
-                                .padding(.horizontal, 12).padding(.vertical, 5)
-                                .appSurface(in: Capsule())
+                                .foregroundStyle(.white.opacity(0.85))
+                                .padding(.horizontal, 10).padding(.vertical, 4)
+                                .background(.white.opacity(0.1), in: Capsule())
+                                .overlay(Capsule().stroke(.white.opacity(0.15), lineWidth: 1))
                         }
                     }
                 }
+
+                // 播放 + 收藏：小胶囊一行（网页按钮组）
+                HStack(spacing: 10) {
+                    if d.playable {
+                        Button {
+                            startPlayback(d)
+                        } label: {
+                            Label("播放", systemImage: "play.fill")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.black)
+                                .padding(.horizontal, 16).padding(.vertical, 8)
+                                .background(Capsule().fill(.white))
+                        }
+                    }
+                    Button {
+                        toggleFavorite()
+                    } label: {
+                        Label(isFavorite ? "已收藏" : "收藏",
+                              systemImage: isFavorite ? "heart.fill" : "heart")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(isFavorite ? .red : .white)
+                            .padding(.horizontal, 16).padding(.vertical, 8)
+                            .background(.white.opacity(0.12), in: Capsule())
+                            .overlay(Capsule().stroke(.white.opacity(0.18), lineWidth: 1))
+                    }
+                    .disabled(favLoading)
+                }
+                .padding(.top, 4)
             }
             .padding(.horizontal, 16)
-            .padding(.top, 110)
+            .padding(.top, 16)
+            .padding(.bottom, 24)
+            .background(alignment: .top) {
+                ZStack {
+                    // 背景图三级逻辑，对齐网页端 MediaDetailPage：
+                    //   ① 有 fanart → 铺满 + 顶部对齐裁切（网页 object-cover object-top）
+                    //   ② 没有 fanart（或加载失败）→ 海报模糊放大打底（网页 blur-2xl scale-110）
+                    //   ③ 都没有 → 渐变占位
+                    HeroBackground(backdropURL: d.backdropURL, posterURL: d.posterURL, height: nil)
+
+                    // 双层遮罩（网页：底部 from-background 渐隐 + 右侧 from-background/80 压深）
+                    // ⚠️ 两层都直接铺满：ZStack 里 Color.clear 会和渐变均分空间，渐变只盖一半
+                    // 底部：信息贴分界线上方，渐隐加重，保证白字可读 + 接白区
+                    LinearGradient(stops: [.init(color: .clear, location: 0),
+                                           .init(color: .black.opacity(0.35), location: 0.45),
+                                           .init(color: .black.opacity(0.85), location: 1)],
+                                   startPoint: .top, endPoint: .bottom)
+                    // 右侧：压深，保证亮 backdrop 上文字可读
+                    LinearGradient(stops: [.init(color: .clear, location: 0.3),
+                                           .init(color: .black.opacity(0.55), location: 1)],
+                                   startPoint: .leading, endPoint: .trailing)
+                }
+            }
 
             VStack(alignment: .leading, spacing: 20) {
                 // 简介
