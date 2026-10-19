@@ -456,11 +456,28 @@ struct MediaCard: View {
                         .font(.subheadline.weight(.semibold))
                         .lineLimit(1)
                         .truncationMode(.tail)
-                    if !item.subtitle.isEmpty {
-                        Text(item.subtitle)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
+                    // 番号 + 年份元信息行（对齐网页 MediaCard：番号等宽字体、
+                    // 比年份亮一档；标题已含番号时只显示年份）
+                    let code = item.code
+                    let year = item.subtitle
+                    if code != nil || !year.isEmpty {
+                        HStack(spacing: 0) {
+                            if let code {
+                                Text(code)
+                                    .font(.caption2.monospaced())
+                                    .foregroundStyle(Color.primary.opacity(0.75))
+                                if !year.isEmpty {
+                                    Text(" · ")
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            if !year.isEmpty {
+                                Text(year)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .font(.caption2)
+                        .lineLimit(1)
                     }
                 }
                 .padding(.horizontal, 10)

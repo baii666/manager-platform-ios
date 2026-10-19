@@ -552,10 +552,24 @@ struct MediaItem: Identifiable, Codable, Sendable, Hashable {
     var libraryId: Int? = nil
     /// 评分（后端 /api/media 返回，横版卡片右上角徽章用）
     var rating: Double? = nil
+    /// 目录名：番号库的番号藏在这里（中文优先后的标题常不带番号）
+    var folderName: String? = nil
 
     var subtitle: String {
         if let year, year > 0 { return String(year) }
         return ""
+    }
+
+    /// 番号（如 ABF-391）。从目录名里正则抠 —— 中文优先后的标题常常没有；
+    /// 标题已含该番号时不重复显示（旧日文标题自带前缀）。
+    /// 与网页端 MediaCard 同一套正则，两边观感对齐。
+    var code: String? {
+        guard let f = folderName, !f.isEmpty else { return nil }
+        guard let r = f.range(of: "[A-Z]{2,6}-[0-9]{2,5}",
+                              options: [.regularExpression, .caseInsensitive]) else { return nil }
+        let code = String(f[r])
+        if title.uppercased().contains(code.uppercased()) { return nil }
+        return code
     }
 
     enum CodingKeys: String, CodingKey {
@@ -564,6 +578,7 @@ struct MediaItem: Identifiable, Codable, Sendable, Hashable {
         case posterImageId = "poster_image_id"
         case fanartImageId = "fanart_image_id"
         case libraryId = "library_id"
+        case folderName = "folder_name"
     }
 
     init(from decoder: Decoder) throws {
@@ -577,12 +592,13 @@ struct MediaItem: Identifiable, Codable, Sendable, Hashable {
         fanartImageId = optInt(c, .fanartImageId)
         libraryId = optInt(c, .libraryId)
         rating = optDouble(c, .rating)
+        folderName = optString(c, .folderName)
     }
 
     /// 由搜索结果构造（不依赖成员构造器，struct 已有自定义 init(from:)）
     init(id: Int, title: String = "", year: Int? = nil, type: String = "",
          filePath: String? = nil, posterImageId: Int? = nil, fanartImageId: Int? = nil, libraryId: Int? = nil,
-         rating: Double? = nil) {
+         rating: Double? = nil, folderName: String? = nil) {
         self.id = id
         self.title = title
         self.year = year
@@ -592,6 +608,7 @@ struct MediaItem: Identifiable, Codable, Sendable, Hashable {
         self.fanartImageId = fanartImageId
         self.libraryId = libraryId
         self.rating = rating
+        self.folderName = folderName
     }
 }
 
@@ -1151,6 +1168,7 @@ extension SearchItem {
         m.posterImageId = posterImageId
         m.libraryId = libraryId
         m.rating = rating
+        m.folderName = folderName
         return m
     }
 
