@@ -16,23 +16,42 @@ struct MediaDetailView: View {
     @State private var isFavorite = false
     @State private var favLoading = false
 
-    // MARK: Hero 布局常量（对齐用户草图：海报左置跨区 + 右列信息/简介）
-    /// 封面背景区高度（海报与信息都在这个区域内；之下是白屏区）
-    private let coverHeight: CGFloat = 300
-    /// 海报宽度（白屏区左列按钮列同宽，保证按钮正在海报下方）
-    private let posterWidth: CGFloat = 200
-    /// 封面区顶部内边距（海报/信息顶缘 = 12）
-    private let posterTopPad: CGFloat = 12
+    // MARK: Hero 布局尺寸（iPhone / iPad 两套）
+    // ⚠️ 主要使用设备是 13 寸 iPad（满宽 1024pt，无侧边栏）。之前整套数字
+    // 是按 iPhone 390pt 定的：海报 200pt 在 iPad 上只占 20% 屏宽，又小又散。
+    // 现在按 horizontalSizeClass 分两套，regular = iPad。
+    private var isWide: Bool { hSizeClass == .regular }
+    /// 左右内边距
+    private var heroPad: CGFloat { isWide ? 32 : 16 }
+    /// 封面区顶部内边距（海报/信息顶缘）
+    private var posterTopPad: CGFloat { isWide ? 24 : 12 }
+    /// 海报宽：iPad 380 / iPhone 200
+    private var posterWidth: CGFloat { isWide ? 380 : 200 }
+    /// 封面背景区高度
+    private var coverHeight: CGFloat { isWide ? 440 : 300 }
     /// 海报底缘越过封面区扎进白屏的深度（穿越量）
-    private let posterCross: CGFloat = 64
-    /// 海报高度：顶缘 12 + 352 = 底缘 364 = 封面区 300 + 穿越 64。
-    /// 比封面区高 → 布局自然向下溢出（不用 offset：offset 只移绘制不移布局，
-    /// 会把信息列和海实顶缘错开；父级无 .clipped，溢出那截盖在白屏上 = 穿越）
+    private var posterCross: CGFloat { isWide ? 150 : 64 }
+    /// 海报与信息列间距 / 白屏区列距分界线的间距
+    private var heroGap: CGFloat { isWide ? 20 : 12 }
+    /// 海报高：由「封面区高 + 穿越量」反推，底缘正好越过封面区 posterCross。
+    /// iPad: 440+150-24 = 566（380 宽 → 1.49≈2:3，几乎不裁）；
+    /// iPhone: 300+64-12 = 352（信息列高，必须够高才盖得住，2:3 略裁一点）
     private var posterHeight: CGFloat { coverHeight + posterCross - posterTopPad }
-    /// 白屏区按钮列下移量：海报底缘 364 + 14 间距 = 378（相对白屏区顶 300）
-    private var buttonDip: CGFloat { posterCross + 14 }
-    /// 白屏区各列距「封面/白屏分界线」的间距
-    private let whiteGap: CGFloat = 12
+    /// 按钮列下移量：海报底缘 + heroGap，相对封面区底缘
+    private var buttonDip: CGFloat { posterCross + heroGap }
+    /// 字号：iPad 上同一档 SwiftUI 字号偏小，整体上调一级
+    private var titleFont: Font { isWide ? .title : .title3 }
+    private var metaFont: Font { isWide ? .footnote : .caption }
+    private var tagFont: Font { isWide ? .caption : .caption2 }
+    private var sectionFont: Font { isWide ? .title3 : .headline }
+    private var bodyFont: Font { isWide ? .body : .subheadline }
+    private var buttonFont: Font { isWide ? .subheadline : .caption }
+    /// 海报圆角（大海报按比例放大一点）
+    private var posterRadius: CGFloat { isWide ? 20 : 16 }
+    /// 信息列内部行距
+    private var infoSpacing: CGFloat { isWide ? 10 : 6 }
+
+    @Environment(\.horizontalSizeClass) private var hSizeClass
 
     private var client: APIClient? { AppSession.shared.client }
 
@@ -94,40 +113,40 @@ struct MediaDetailView: View {
                 }
 
                 // ② 封面区内容：海报 + 信息列（高度 = 封面区，内容顶对齐）
-                // 海报比封面区高（352 > 300）：布局自然向下溢出，底缘扎进白屏；
-                // 信息列与海报顶缘天然对齐（都在 12），无 offset 错位
-                HStack(alignment: .top, spacing: 12) {
+                // 海报比封面区高：布局自然向下溢出，底缘扎进白屏；
+                // 信息列与海报顶缘天然对齐（都在 posterTopPad），无 offset 错位
+                HStack(alignment: .top, spacing: heroGap) {
                     RemoteImage(url: d.posterURL, fallbackIcon: "film",
                                 fallbackColors: Theme.placeholderGradient(for: .media))
                         .imageFilled()
                         .frame(width: posterWidth, height: posterHeight)
-                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .clipShape(RoundedRectangle(cornerRadius: posterRadius, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: posterRadius, style: .continuous)
                             .stroke(.white.opacity(0.12), lineWidth: 1))
                         .shadow(color: .black.opacity(0.45), radius: 16, y: 8)
 
                     // 信息列（封面区，白字）
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(d.title).font(.title3.weight(.bold))
+                    VStack(alignment: .leading, spacing: infoSpacing) {
+                        Text(d.title).font(titleFont.weight(.bold))
                             .foregroundStyle(.white)
                             .fixedSize(horizontal: false, vertical: true)
                             .lineLimit(2)
                         if let ot = d.originalTitle, ot != d.title {
-                            Text(ot).font(.caption).foregroundStyle(.white.opacity(0.6))
+                            Text(ot).font(metaFont).foregroundStyle(.white.opacity(0.6))
                                 .lineLimit(2)
                         }
 
                         // 元信息横排可换行（网页 flex-wrap，评分黄色加粗）
-                        FlowLayout(spacing: 12) {
+                        FlowLayout(spacing: heroGap) {
                             if let year = d.year, year > 0 {
-                                Label("\(year)", systemImage: "calendar").font(.caption)
+                                Label("\(year)", systemImage: "calendar").font(metaFont)
                             }
                             if let rating = d.rating, rating > 0 {
                                 Label(String(format: "%.1f", rating), systemImage: "star.fill")
-                                    .font(.caption.weight(.semibold)).foregroundStyle(.yellow)
+                                    .font(metaFont.weight(.semibold)).foregroundStyle(.yellow)
                             }
                             if let rt = d.runtimeText {
-                                Label(rt, systemImage: "clock").font(.caption)
+                                Label(rt, systemImage: "clock").font(metaFont)
                             }
                         }
                         .foregroundStyle(.white.opacity(0.8))
@@ -136,14 +155,15 @@ struct MediaDetailView: View {
                         if !genreTags.isEmpty {
                             FlowLayout(spacing: 6) {
                                 ForEach(genreTags, id: \.self) { g in
-                                    Text(g).font(.caption2)
+                                    Text(g).font(tagFont)
                                         // ⚠️ 标签自己内部不许断行：换行由外层 FlowLayout 负责。
                                         // 一个长标签在胶囊里折成两行时，实际高度会和布局量到的
                                         // 高度对不上 —— 这就是「标签压到下面内容」的来源。
                                         .lineLimit(1)
                                         .truncationMode(.tail)
                                         .foregroundStyle(.white.opacity(0.85))
-                                        .padding(.horizontal, 10).padding(.vertical, 4)
+                                        .padding(.horizontal, isWide ? 14 : 10)
+                                        .padding(.vertical, isWide ? 6 : 4)
                                         .background(.white.opacity(0.1), in: Capsule())
                                         .overlay(Capsule().stroke(.white.opacity(0.15), lineWidth: 1))
                                 }
@@ -151,24 +171,25 @@ struct MediaDetailView: View {
                         }
                     }
                 }
-                .padding(.horizontal, 16)
+                .padding(.horizontal, heroPad)
                 .padding(.top, posterTopPad)
                 .frame(height: coverHeight, alignment: .top)
 
                 // ③ 白屏区：两列各自管理下移量（HStack 级不再统一下推）
-                // 左列按钮避开海报溢出部分（海报底缘 364，按钮从 378 开始）；
-                // 右列简介紧贴「封面/白屏分界线」下方（300 + 12 = 312）
-                HStack(alignment: .top, spacing: 12) {
+                // 左列按钮避开海报溢出部分（海报底缘之后 heroGap 开始）；
+                // 右列简介紧贴「封面/白屏分界线」下方（coverHeight + heroGap）
+                HStack(alignment: .top, spacing: heroGap) {
                     // 播放 + 收藏：小胶囊同一行（白屏区，浅色常规样式）
-                    HStack(spacing: 8) {
+                    HStack(spacing: isWide ? 14 : 8) {
                         if d.playable {
                             Button {
                                 startPlayback(d)
                             } label: {
                                 Label("播放", systemImage: "play.fill")
-                                    .font(.caption.weight(.semibold))
+                                    .font(buttonFont.weight(.semibold))
                                     .foregroundStyle(.white)
-                                    .padding(.horizontal, 14).padding(.vertical, 7)
+                                    .padding(.horizontal, isWide ? 22 : 14)
+                                    .padding(.vertical, isWide ? 11 : 7)
                                     .background(Capsule().fill(Theme.brand))
                             }
                         }
@@ -177,9 +198,10 @@ struct MediaDetailView: View {
                         } label: {
                             Label(isFavorite ? "已收藏" : "收藏",
                                   systemImage: isFavorite ? "heart.fill" : "heart")
-                                .font(.caption.weight(.medium))
+                                .font(buttonFont.weight(.medium))
                                 .foregroundStyle(isFavorite ? .red : .primary)
-                                .padding(.horizontal, 14).padding(.vertical, 7)
+                                .padding(.horizontal, isWide ? 22 : 14)
+                                .padding(.vertical, isWide ? 11 : 7)
                                 .appSurface(in: Capsule())
                         }
                         .disabled(favLoading)
@@ -190,24 +212,24 @@ struct MediaDetailView: View {
 
                     // 简介（白屏区，深色文字；可展开）
                     if let plot = d.plot, !plot.isEmpty {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("简介").font(.headline)
+                        VStack(alignment: .leading, spacing: isWide ? 8 : 6) {
+                            Text("简介").font(sectionFont)
                             Text(plot)
-                                .font(.subheadline)
+                                .font(bodyFont)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(overviewExpanded ? nil : 4)
                             if plot.count > 80 {
                                 Button(overviewExpanded ? "收起" : "展开全部") {
                                     overviewExpanded.toggle()
                                 }
-                                .font(.footnote.weight(.medium))
+                                .font((isWide ? Font.body : Font.footnote).weight(.medium))
                                 .foregroundStyle(Theme.brand)
                             }
                         }
-                        .padding(.top, whiteGap)
+                        .padding(.top, heroGap)
                     }
                 }
-                .padding(.horizontal, 16)
+                .padding(.horizontal, heroPad)
                 .padding(.bottom, 4)
             }
 
