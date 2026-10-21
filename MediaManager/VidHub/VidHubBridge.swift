@@ -209,6 +209,13 @@ final class VidHubLauncher: ObservableObject {
     /// VidHub 没装（canOpenURL=false）。调用方弹提示。
     @Published var vidHubMissing = false
 
+    /// 开：不传 position，VidHub 打开即播；关：传上次进度，VidHub 会停在该帧。
+    /// ⚠️ /play 官方参数里没有「定位后自动播放」这一项（url/position/filename/
+    /// sub/x-* 就这些，VidHub 设置里也没有对应开关）。只要传了 position，它就
+    /// seek 到那一帧并**暂停**等用户点。所以「续播」和「打开即播」只能二选一，
+    /// 默认选后者——真要续播用内置播放器（它有完整续播）。
+    @AppStorage("vidhub.autoplay") var autoplay: Bool = true
+
     private struct Prepared {
         let mediaId: Int
         let mediaURL: URL
@@ -285,12 +292,15 @@ final class VidHubLauncher: ObservableObject {
             error = "拼接播放地址失败"; return
         }
 
-        // ① 续播位置（本地库查询，几十毫秒；失败不拦播放）。
+        // ① 起播位置。只有「从上次位置继续」开着才查进度——不传 position 时
+        // 这一趟请求纯属浪费，省掉还能让跳转更快。
         // 贴片尾的（看完九成以上）不如从头放——不然点进去又是最后几分钟。
         var position: Double = 0
-        if let prog = try? await client.fetchMediaProgress(id: d.id) {
-            let nearEnd = prog.duration > 0 && prog.position > prog.duration - 30
-            position = nearEnd ? 0 : prog.position
+        if !autoplay {
+            if let prog = try? await client.fetchMediaProgress(id: d.id) {
+                let nearEnd = prog.duration > 0 && prog.position > prog.duration - 30
+                position = nearEnd ? 0 : prog.position
+            }
         }
         guard gen == generation else { return } // 等待期间用户走了/取消了
 
@@ -475,7 +485,8 @@ struct VidHubPreparingOverlay: View {
     private var phaseText: String {
         switch launcher.phase {
         case .probing:
-            return "正在查询续播进度与内嵌字幕…"
+            return launcher.autoplay ? "正在探测内嵌字幕…"
+                                     : "正在查询续播进度与内嵌字幕…"
         case .extracting(let subLabel, _, _):
             return "正在抽取内嵌字幕（\(subLabel)）\n首次需要把整个文件读一遍，之后永久缓存"
         case .opening:

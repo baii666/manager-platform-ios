@@ -38,6 +38,9 @@ struct MineView: View {
     @ObservedObject private var session = AppSession.shared
     /// 外观设置：这里只用来显示当前主题名（「跟随系统 / 浅色 / 深色」）
     @ObservedObject private var appearance = AppearanceSettings.shared
+    /// VidHub 外播：开 = 打开即播（不传进度），关 = 从上次位置继续（会停在该帧）。
+    /// key 与 VidHubLauncher.autoplay 共用，改这里两边一起生效。
+    @AppStorage("vidhub.autoplay") private var vidHubAutoplay = true
 
     @State private var pending: PlaybackRequest?
     @State private var playError: String?
@@ -250,6 +253,30 @@ struct MineView: View {
                     .padding(.vertical, 13)
                 }
                 .buttonStyle(.plain)
+                Divider().padding(.leading, 44)
+                // VidHub 外播方式。⚠️ /play 没有「定位后自动播放」的参数：
+                // 只要传了 position，VidHub 就 seek 到该帧并暂停，所以
+                //「打开即播」和「从上次位置继续」只能二选一。
+                HStack(spacing: 12) {
+                    Image(systemName: "play.circle")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Theme.brand)
+                        .frame(width: 20)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("VidHub 打开即播")
+                            .font(.subheadline)
+                        Text(vidHubAutoplay ? "跳转过去直接播放"
+                                            : "跳到上次位置，停在该帧等你点播放")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Toggle("", isOn: $vidHubAutoplay)
+                        .labelsHidden()
+                        .tint(Theme.brand)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 13)
             }
             .appSurface(in: RoundedRectangle(cornerRadius: 14, style: .continuous))
 
