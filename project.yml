@@ -29,5 +29,14 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         CODE_SIGN_STYLE: Automatic
+        # 真机签名团队 ID（10 位）。不写的话每次 xcodegen generate 都会把 Xcode 里
+        # 手选的 Team 冲掉 → 报 "Signing for ... requires a development team"。
+        # 查自己的 Team ID（Mac 终端）：security find-identity -v -p codesigning
+        #   输出形如  Apple Development: you@x.com (ABCDE12345)  ← 括号里那串
+        # 免费 Apple ID 也能签，在 Xcode 里显示为 "你的名字 (Personal Team)"。
+        # 填法（取消下一行注释并把 XXXXXXXXXX 换成你的）：
+        #         DEVELOPMENT_TEAM: XXXXXXXXXX
+        # ⚠️ 别写成 ${DEVELOPMENT_TEAM}：XcodeGen 在变量未定义时会把花括号原文
+        #    塞进工程，Xcode 反而认不出团队，报更怪的签名错。
         CURRENT_PROJECT_VERSION: 1
         MARKETING_VERSION: 1.0.0
