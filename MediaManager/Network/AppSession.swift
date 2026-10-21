@@ -15,6 +15,16 @@ final class AppSession: ObservableObject {
 
     var isLoggedIn: Bool { client != nil }
 
+    /// 当前 session 值（登录态在 UserDefaults 里的那份持久化 cookie）。
+    ///
+    /// 用途只有一个：拼进「外部分播放器会自己去拉」的 URL 的 ?token= 上。
+    /// 后端 AuthMiddleware 认三种身份（cookie / Authorization / query token），
+    /// 而 VidHub 拉字幕时带不上我们的 cookie，只能把 session 值放进 query。
+    var sessionToken: String? {
+        let v = UserDefaults.standard.string(forKey: Self.keySessionValue) ?? ""
+        return v.isEmpty ? nil : v
+    }
+
     private static let keyBaseURL = "serverBaseURL"
     private static let keySessionValue = "sessionCookieValue"
     private static let keySessionHost = "sessionCookieHost"

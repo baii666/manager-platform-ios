@@ -53,6 +53,20 @@
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
+	<!-- 注册自家 URL scheme：VidHub 播放结束时按 x-callback-url 契约把
+	     mediamanager://x-callback-url/success|error|cancel 打回来，
+	 App 靠 .onOpenURL 收进度。scheme 必须与代码里 VidHubBridge.scheme 一致 -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>media-hub</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>mediamanager</string>
+			</array>
+		</dict>
+	</array>
 	<!-- VidHub 外播：不声明的话 UIApplication.canOpenURL 对 open-vidhub://
 	     一律返回 false（装了也会被当成没装），跳转直接失效 -->
 	<key>LSApplicationQueriesSchemes</key>

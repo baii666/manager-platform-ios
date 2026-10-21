@@ -816,6 +816,65 @@ final class APIClient: DataProviding, @unchecked Sendable {
             json: ["type": type, "id": id, "position": position, "duration": duration]
         )
     }
+
+    /// 查询单个影视的续播进度。GET /api/actions/status?type=media&ids=<id>
+    /// → {states:[{id,favorite,rating,position,duration}]}。没有进度时返回 0。
+    func fetchMediaProgress(id: Int) async throws -> (position: Double, duration: Double) {
+        let resp: ActionStatusResponse = try await request("/api/actions/status", queryItems: [
+            URLQueryItem(name: "type", value: "media"),
+            URLQueryItem(name: "ids", value: "\(id)"),
+        ])
+        let st = resp.states.first(where: { $0.id == id })
+        return (st?.position ?? 0, st?.duration ?? 0)
+    }
+
+    // MARK: - 内嵌字幕（exp.subtitle 模块）
+
+    /// 一条内嵌字幕轨。text_based=false 的是 PGS/VOBSUB 图形轨，抽不出文字。
+    struct SubtitleStream: Decodable {
+        let index: Int
+        let lang: String?
+        let title: String?
+        let codec: String?
+        let textBased: Bool?
+        let isDefault: Bool?
+
+        enum CodingKeys: String, CodingKey {
+            case index, lang, title, codec
+            case textBased = "text_based"
+            case isDefault = "default"
+        }
+    }
+
+    /// 列内嵌字幕轨。GET /api/subtitle/streams?path=<视频>
+    func fetchSubtitleStreams(path: String) async throws -> [SubtitleStream] {
+        let resp: SubtitleStreamsResponse = try await request("/api/subtitle/streams", queryItems: [
+            URLQueryItem(name: "path", value: path)
+        ])
+        return resp.streams
+    }
+
+    /// 字幕抽取地址（给 VidHub 的 sub 参数用）。
+    ///
+    /// - URL 带 .srt/.ass 后缀：部分播放器按扩展名认字幕格式，后缀决定服务端
+    ///   抽取的目标格式（ASS 源要 .ass 才能原样拷贝保留样式）
+    /// - ⚠️ token 必须带：这个 URL 是 VidHub 自己来拉的，带不上我们的 cookie，
+    ///   后端 AuthMiddleware 认 query token（见 routes/auth_middleware.go）
+    func subtitleExtractURL(path: String, index: Int, asASS: Bool) -> URL? {
+        var items = [
+            URLQueryItem(name: "path", value: path),
+            URLQueryItem(name: "index", value: "\(index)"),
+        ]
+        if let tok = AppSession.shared.sessionToken, !tok.isEmpty {
+            items.append(URLQueryItem(name: "token", value: tok))
+        }
+        return makeURL("/api/subtitle/extract/subtitle.\(asASS ? "ass" : "srt")", queryItems: items)
+    }
+}
+
+/// GET /api/subtitle/streams 的响应
+private struct SubtitleStreamsResponse: Decodable {
+    let streams: [APIClient.SubtitleStream]
 }
 
 // MARK: - 响应 DTO
@@ -995,11 +1054,14 @@ private struct SemanticSearchResponse: Decodable {
     }
 }
 
-/// /api/actions/status 的响应：states 里每项含 id / favorite / rating / position
+/// /api/actions/status 的响应：states 里每项含 id / favorite / rating / position / duration。
+/// 字段全部可选：一个资产可能同时存在 favorite / rating / progress 多行，每行只填自己那几个。
 private struct ActionStatusResponse: Decodable {
     struct State: Decodable {
         let id: Int
         let favorite: Bool?
+        let position: Double?
+        let duration: Double?
     }
     let states: [State]
 }

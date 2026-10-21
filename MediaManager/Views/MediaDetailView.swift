@@ -15,8 +15,20 @@ struct MediaDetailView: View {
     @State private var playError: String?
     @State private var isFavorite = false
     @State private var favLoading = false
-    /// VidHub 未安装提示
-    @State private var showVidHubMissing = false
+    /// 续播信息（秒）。详情页载入时查一次：内置播放器起播点 + VidHub 的
+    /// position 参数都用它。查询失败就当作没有进度，不拦播放。
+    @State private var resume: (position: Double, duration: Double) = (0, 0)
+    /// VidHub 外播编排：查进度 → 探字幕 →（首次）抽字幕 → 跳转 → 收回调存进度
+    @StateObject private var vidHub = VidHubLauncher()
+    /// 外播回来的一句反馈（进度已存 / 已看完 / 失败原因）
+    @State private var vidHubNote: String?
+
+    /// 有效续播点：贴片尾的（看完九成以上）当成没有——点进去又是最后几分钟，
+    /// 不如从头放。nil = 没有可续播的进度。
+    private var effectiveResume: Double? {
+        let nearEnd = resume.duration > 0 && resume.position > resume.duration - 30
+        return (resume.position > 1 && !nearEnd) ? resume.position : nil
+    }
 
     // MARK: Hero 布局尺寸（iPhone / iPad 两套）
     // ⚠️ 主要使用设备是 13 寸 iPad（满宽 1024pt，无侧边栏）。之前整套数字
@@ -68,6 +80,25 @@ struct MediaDetailView: View {
         .navigationTitle(detail?.title ?? media.title)
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
+        // 页面被 pop 时放弃在途的外播准备：抽字幕要几分钟，人走了就别再把
+        // VidHub 拽出来。压栈子页面 / 全屏播放器不会触发 onDisappear。
+        .onDisappear { vidHub.cancel() }
+        // VidHub 外播结束的回调（progress/error/cancel）→ 一句反馈 + 刷本地续播值
+        .onReceive(VidHubBridge.shared.$lastEvent) { ev in
+            guard let ev else { return }
+            switch ev {
+            case .progressSaved(let title, let pos, _):
+                vidHubNote = "《\(title)》已续播至 \(PlayerTimeFormatter.string(pos))"
+                resume = (pos, resume.duration)
+            case .finished(let title):
+                vidHubNote = "《\(title)》已看完，播放进度已清除"
+                resume = (0, 0)
+            case .failed(_, let message):
+                vidHubNote = message
+            case .cancelled:
+                break // 用户主动取消，不需要打扰
+            }
+        }
         .fullScreenCover(item: $playRequest) { request in
             PlayerHostView(request: request)
         }
@@ -79,7 +110,10 @@ struct MediaDetailView: View {
         } message: {
             Text(playError ?? "")
         }
-        .alert("未安装 VidHub", isPresented: $showVidHubMissing) {
+        .alert("未安装 VidHub", isPresented: Binding(
+            get: { vidHub.vidHubMissing },
+            set: { if !$0 { vidHub.vidHubMissing = false } }
+        )) {
             Button("去 App Store 找") {
                 if let u = URL(string: "https://apps.apple.com/cn/search?term=vidhub") {
                     UIApplication.shared.open(u)
@@ -88,6 +122,28 @@ struct MediaDetailView: View {
             Button("好", role: .cancel) {}
         } message: {
             Text("装好 VidHub 后，这个按钮会直接把影片交给它播放（MKV / HEVC / DTS 等内置播放器放不了的格式它都能解）。")
+        }
+        .alert("外播出错", isPresented: Binding(
+            get: { vidHub.error != nil },
+            set: { if !$0 { vidHub.error = nil } }
+        )) {
+            Button("好", role: .cancel) { vidHub.error = nil }
+        } message: {
+            Text(vidHub.error ?? "")
+        }
+        .alert("VidHub 播放", isPresented: Binding(
+            get: { vidHubNote != nil },
+            set: { if !$0 { vidHubNote = nil } }
+        )) {
+            Button("好", role: .cancel) { vidHubNote = nil }
+        } message: {
+            Text(vidHubNote ?? "")
+        }
+        // 抽字幕是分钟级等待：准备过程全屏反馈（含「不等了直接播」出口）
+        .overlay {
+            if vidHub.phase != .idle {
+                VidHubPreparingOverlay(launcher: vidHub, title: detail?.title ?? media.title)
+            }
         }
         // 剧照看图器走全局 overlay（PhotoViewerPresenter），不再用 fullScreenCover
     }
@@ -162,6 +218,13 @@ struct MediaDetailView: View {
                             }
                         }
 
+                        // 续播提示：有进度时说明上次看到哪儿了（播放/VidHub 都接着放）
+                        if let r = effectiveResume {
+                            Text("上次看到 \(PlayerTimeFormatter.string(r))")
+                                .font(isWide ? .caption : .caption2)
+                                .foregroundStyle(.white.opacity(0.55))
+                        }
+
                         // 播放 + 收藏：小胶囊一行，紧跟标签下方、贴着分界线上方。
                         // 深色封面上用白底主按钮 + 玻璃次按钮（不再是白屏区的浅色样式）
                         FlowLayout(spacing: isWide ? 14 : 8) {
@@ -179,10 +242,11 @@ struct MediaDetailView: View {
                             }
 
                             // VidHub 外播：交给 VidHub 自己解码（内置播放器放不了的
-                            // MKV/HEVC/DTS 它都能解）。紧挨着「播放」
+                            // MKV/HEVC/DTS 它都能解）。紧挨着「播放」。
+                            // 点击后可能要抽几分钟内嵌字幕，等待反馈见 PreparingOverlay
                             if d.playable {
                                 Button {
-                                    openInVidHub(d)
+                                    vidHub.play(d)
                                 } label: {
                                     Label("VidHub", systemImage: "arrow.up.right")
                                         .font(buttonFont.weight(.medium))
@@ -192,6 +256,8 @@ struct MediaDetailView: View {
                                         .background(.white.opacity(0.12), in: Capsule())
                                         .overlay(Capsule().stroke(.white.opacity(0.18), lineWidth: 1))
                                 }
+                                .disabled(vidHub.phase != .idle)
+                                .opacity(vidHub.phase == .idle ? 1 : 0.5)
                             }
 
                             Button {
@@ -393,6 +459,11 @@ struct MediaDetailView: View {
             if let f = try? await client.fetchFavorite(type: "media", id: media.id) {
                 isFavorite = f
             }
+            // 续播进度：内置播放器与 VidHub 外播共用。查不到（没看过/接口挂过）
+            // 就保持 0，两条播放链路都按「从头放」处理。
+            if let prog = try? await client.fetchMediaProgress(id: media.id), prog.position > 0 {
+                resume = (prog.position, prog.duration)
+            }
         } catch {
             errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
@@ -422,7 +493,8 @@ struct MediaDetailView: View {
                                       title: d.title,
                                       assetType: "media",
                                       assetID: d.id,
-                                      startAt: nil,
+                                      // 有续播进度就接着放（effectiveResume 已挡掉贴片尾的情况）
+                                      startAt: effectiveResume,
                                       // ⚠️ 必须给：非直连容器走 HLS，FFmpeg 没跑完前 AVPlayer 的
                                       // duration 是 indefinite(0)，进度条换算与快进钳位都依赖它，
                                       // 缺了会表现成「进度条/快进拖了没反应」（全算成 0）。
@@ -431,46 +503,11 @@ struct MediaDetailView: View {
     }
 
     // MARK: VidHub 外播
-    // VidHub 官方集成（https://vidhub.okaapps.com/3rd-party-app-integration/）：
-    //   open-vidhub://x-callback-url/play?url=<视频地址>&position=&filename=&sub=
-    // 用 /play（新版）而不是 /open（旧版）：支持起播位置、退出回调，全平台一致。
-    // 回调（x-success/x-error/x-cancel）是可选的，本 App 没注册自己的 URL scheme，
-    // 直接不传 —— 不传也能正常起播。
-    private func openInVidHub(_ d: MediaDetail) {
-        guard let client else { playError = "未连接服务器"; return }
-        guard let path = d.videoFiles.first, !path.isEmpty else {
-            playError = "《\(d.title)》没有可播放的文件"
-            return
-        }
-        // ⚠️ 不能用 client.streamURL(path:)：那个方法只认 MP4/M4V/MOV（AVPlayer
-        // 解不了的容器直接返回 nil）。VidHub 自带解码器，MKV/HEVC/DTS 都能解，
-        // 所以这里绕开扩展名过滤，直接给原始文件流地址。
-        guard let mediaURL = client.makeURL("/stream", queryItems: [
-            URLQueryItem(name: "path", value: path)
-        ]) else {
-            playError = "拼接播放地址失败"
-            return
-        }
-
-        var comp = URLComponents()
-        comp.scheme = "open-vidhub"
-        comp.host = "x-callback-url"
-        comp.path = "/play"
-        comp.queryItems = [
-            URLQueryItem(name: "url", value: mediaURL.absoluteString),
-            URLQueryItem(name: "filename", value: d.title),
-            URLQueryItem(name: "x-source", value: "媒体库"),
-        ]
-        guard let vidHubURL = comp.url else { return }
-
-        // ⚠️ canOpenURL 必须在 Info.plist 的 LSApplicationQueriesSchemes 里
-        // 声明 open-vidhub，否则一律返回 false（装了也当成没装）。
-        if UIApplication.shared.canOpenURL(vidHubURL) {
-            UIApplication.shared.open(vidHubURL)
-        } else {
-            showVidHubMissing = true
-        }
-    }
+    // 编排逻辑全部搬到 VidHub/VidHubBridge.swift 的 VidHubLauncher：
+    // 查续播进度 → 探内嵌字幕 →（首次）异步抽取并轮询 → 带齐
+    // position/sub/x-success/x-error/x-cancel/request-id 跳转。
+    // 回调由 App 根的 .onOpenURL 送进 VidHubBridge，进度落
+    // /api/actions/progress（finished 清、stopped 存）。
 }
 
 // MARK: - Hero 背景图（对齐网页端三级展示逻辑）

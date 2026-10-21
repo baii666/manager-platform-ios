@@ -38,6 +38,11 @@ struct MediaManagerApp: App {
             }
             // ⚠️ window 默认底色是不透明的，不垫这层背景图根本透不出来
             .appBackground()
+            // VidHub 外播结束时按 x-callback-url 契约回调自家 scheme，
+            // 在这里收进度/错误/取消（详见 VidHub/VidHubBridge.swift）
+            .onOpenURL { url in
+                VidHubBridge.shared.handleOpenURL(url)
+            }
             // 跟随系统时传 nil；浅色/深色则锁死
             .preferredColorScheme(appearance.mode.colorScheme)
             .task { await AppSession.shared.restoreSession() }
