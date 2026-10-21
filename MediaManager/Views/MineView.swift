@@ -38,9 +38,9 @@ struct MineView: View {
     @ObservedObject private var session = AppSession.shared
     /// 外观设置：这里只用来显示当前主题名（「跟随系统 / 浅色 / 深色」）
     @ObservedObject private var appearance = AppearanceSettings.shared
-    /// VidHub 外播：开 = 打开即播（不传进度），关 = 从上次位置继续（会停在该帧）。
+    /// VidHub 外播：关（默认）= 有进度就续播；开 = 一律不传进度、打开即播。
     /// key 与 VidHubLauncher.autoplay 共用，改这里两边一起生效。
-    @AppStorage("vidhub.autoplay") private var vidHubAutoplay = true
+    @AppStorage("vidhub.autoplay") private var vidHubAutoplay = false
 
     @State private var pending: PlaybackRequest?
     @State private var playError: String?

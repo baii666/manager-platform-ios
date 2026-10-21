@@ -209,12 +209,13 @@ final class VidHubLauncher: ObservableObject {
     /// VidHub 没装（canOpenURL=false）。调用方弹提示。
     @Published var vidHubMissing = false
 
-    /// 开：不传 position，VidHub 打开即播；关：传上次进度，VidHub 会停在该帧。
+    /// 开 = 一律不传 position（彻底不续播）；关（默认）= 有进度才传。
     /// ⚠️ /play 官方参数里没有「定位后自动播放」这一项（url/position/filename/
     /// sub/x-* 就这些，VidHub 设置里也没有对应开关）。只要传了 position，它就
-    /// seek 到那一帧并**暂停**等用户点。所以「续播」和「打开即播」只能二选一，
-    /// 默认选后者——真要续播用内置播放器（它有完整续播）。
-    @AppStorage("vidhub.autoplay") var autoplay: Bool = true
+    /// seek 到那一帧并**暂停**等用户点 —— 这是官方限制，绕不过去。
+    /// 默认关：没看过的片 position=0，压根不传参 → 照样打开即播；只有看过的
+    /// 片才传（定位到上次位置，点一下继续）。续播比省一次点击值钱。
+    @AppStorage("vidhub.autoplay") var autoplay: Bool = false
 
     private struct Prepared {
         let mediaId: Int
