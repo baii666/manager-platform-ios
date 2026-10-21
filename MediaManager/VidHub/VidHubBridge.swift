@@ -31,11 +31,25 @@ final class VidHubBridge: ObservableObject {
     /// 外播结束事件。详情页订阅它，给用户一句「进度存了/看完了」的反馈。
     @Published var lastEvent: Event?
 
+    ///
+    /// 🔴 必须带 mediaId：lastEvent 是**全局单例广播**，导航栈里每一个活着的
+    /// 详情页都会收到。不带归属的话，播完 A 之后 B/C/D 会各自把 A 的进度
+    /// 套到自己身上 —— 表现就是「所有详情页进度都一样」。
     enum Event: Equatable {
-        case progressSaved(title: String, position: Double, duration: Double)
-        case finished(title: String)
-        case failed(title: String?, message: String)
-        case cancelled(title: String?)
+        case progressSaved(mediaId: Int, title: String, position: Double, duration: Double)
+        case finished(mediaId: Int, title: String)
+        case failed(mediaId: Int?, title: String?, message: String)
+        case cancelled(mediaId: Int?, title: String?)
+
+        /// 事件归属的影片 id。nil = 无主（没登记过的 request-id），谁都不该领。
+        var mediaId: Int? {
+            switch self {
+            case .progressSaved(let id, _, _, _): return id
+            case .finished(let id, _): return id
+            case .failed(let id, _, _): return id
+            case .cancelled(let id, _): return id
+            }
+        }
     }
 
     private struct Pending {
@@ -78,12 +92,12 @@ final class VidHubBridge: ObservableObject {
         switch action {
         case "success": onSuccess(p, q)
         case "error":
-            let event = Event.failed(title: p?.title,
+            let event = Event.failed(mediaId: p?.mediaId, title: p?.title,
                                      message: Self.errorMessage(code: Int(q["errorCode"] ?? ""),
                                                                 raw: q["errorMessage"]))
             Task { @MainActor in self.lastEvent = event }
         case "cancel":
-            let event = Event.cancelled(title: p?.title)
+            let event = Event.cancelled(mediaId: p?.mediaId, title: p?.title)
             Task { @MainActor in self.lastEvent = event }
         default: break
         }
@@ -111,8 +125,9 @@ final class VidHubBridge: ObservableObject {
             try? await client.reportProgress(type: "media", id: mediaId,
                                              position: report, duration: dur)
             let event: Event = finished
-                ? .finished(title: title)
-                : .progressSaved(title: title, position: pos, duration: dur)
+                ? .finished(mediaId: mediaId, title: title)
+                : .progressSaved(mediaId: mediaId, title: title,
+                                 position: pos, duration: dur)
             await MainActor.run { self.lastEvent = event }
         }
     }

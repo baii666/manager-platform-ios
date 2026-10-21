@@ -88,16 +88,24 @@ struct MediaDetailView: View {
         // 让「播放 / VidHub」按钮上的「继续 mm:ss」自己更新。
         .onReceive(VidHubBridge.shared.$lastEvent) { ev in
             guard let ev else { return }
+            // 🔴 lastEvent 是 App 级单例广播：导航栈里每个活着的详情页都会收到。
+            // 不校验归属的话，播完 A 之后 B/C/D 会各自把 A 的进度套到自己身上
+            // —— 表现就是「所有详情页显示的进度都一样」。
+            // 两个 id 都认：外播登记用的是 detail.id，页面订阅用的是 media.id
+            guard ev.mediaId == media.id || ev.mediaId == detail?.id else { return }
             switch ev {
-            case .progressSaved(_, let pos, let dur):
+            case .progressSaved(_, _, let pos, let dur):
                 resume = (pos, dur > 0 ? dur : resume.duration)
             case .finished:
                 resume = (0, 0)
-            case .failed(_, let message):
+            case .failed(_, _, let message):
                 vidHubNote = message // 出错才打扰用户
             case .cancelled:
                 break // 用户主动取消，不打扰
             }
+            // 消费掉：不清空的话，页面重建 / 重绘会重复套用同一次回调。
+            // 延后一拍，避免在 SwiftUI 更新期间改 @Published
+            DispatchQueue.main.async { VidHubBridge.shared.lastEvent = nil }
         }
         // 兜底：回调可能因为各种时机没送到（用户从多任务界面直接切回来、
         // 或在 VidHub 里播完就锁屏了）。进前台重拉一次最稳。
@@ -473,7 +481,8 @@ struct MediaDetailView: View {
     }
 
     /// 重拉续播点。从 VidHub 切回来 / 进前台时调用——回调没送到也能对上。
-    /// 查不到就保持原值（不把已有的进度冲成 0）。
+    /// 只有请求失败（try? 吞掉）才保持原值；后端对请求过的 id 必返回一条
+    /// state，所以拿到 0 就是真没进度 / 已看完，归零是对的。
     private func refreshResume() async {
         guard let client else { return }
         guard let prog = try? await client.fetchMediaProgress(id: media.id) else { return }
