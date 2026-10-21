@@ -376,7 +376,10 @@ final class VidHubLauncher: ObservableObject {
     /// 拼 open-vidhub://x-callback-url/play。
     /// position 官方区间 0...31536000 秒；回调地址必须带 scheme 且不能是
     /// open-vidhub（自家 scheme，见 Info.plist CFBundleURLTypes）。
-    static func buildVidHubURL(_ p: Prepared, subURL: URL?, requestId: String) -> URL? {
+    // ⚠️ 必须是 private：Prepared 是 private 嵌套类型，Swift 不允许 internal
+    // 方法的参数使用比它更严格的类型（否则报 "Method cannot be declared
+    // internal because its parameter uses a private type"）。
+    private static func buildVidHubURL(_ p: Prepared, subURL: URL?, requestId: String) -> URL? {
         var comp = URLComponents()
         comp.scheme = "open-vidhub"
         comp.host = "x-callback-url"
