@@ -15,6 +15,8 @@ struct MediaDetailView: View {
     @State private var playError: String?
     @State private var isFavorite = false
     @State private var favLoading = false
+    /// VidHub 未安装提示
+    @State private var showVidHubMissing = false
 
     // MARK: Hero 布局尺寸（iPhone / iPad 两套）
     // ⚠️ 主要使用设备是 13 寸 iPad（满宽 1024pt，无侧边栏）。之前整套数字
@@ -76,6 +78,16 @@ struct MediaDetailView: View {
             Button("好", role: .cancel) { playError = nil }
         } message: {
             Text(playError ?? "")
+        }
+        .alert("未安装 VidHub", isPresented: $showVidHubMissing) {
+            Button("去 App Store 找") {
+                if let u = URL(string: "https://apps.apple.com/cn/search?term=vidhub") {
+                    UIApplication.shared.open(u)
+                }
+            }
+            Button("好", role: .cancel) {}
+        } message: {
+            Text("装好 VidHub 后，这个按钮会直接把影片交给它播放（MKV / HEVC / DTS 等内置播放器放不了的格式它都能解）。")
         }
         // 剧照看图器走全局 overlay（PhotoViewerPresenter），不再用 fullScreenCover
     }
@@ -165,6 +177,23 @@ struct MediaDetailView: View {
                                         .background(Capsule().fill(.white))
                                 }
                             }
+
+                            // VidHub 外播：交给 VidHub 自己解码（内置播放器放不了的
+                            // MKV/HEVC/DTS 它都能解）。紧挨着「播放」
+                            if d.playable {
+                                Button {
+                                    openInVidHub(d)
+                                } label: {
+                                    Label("VidHub", systemImage: "arrow.up.right")
+                                        .font(buttonFont.weight(.medium))
+                                        .foregroundStyle(.white)
+                                        .padding(.horizontal, isWide ? 22 : 14)
+                                        .padding(.vertical, isWide ? 11 : 7)
+                                        .background(.white.opacity(0.12), in: Capsule())
+                                        .overlay(Capsule().stroke(.white.opacity(0.18), lineWidth: 1))
+                                }
+                            }
+
                             Button {
                                 toggleFavorite()
                             } label: {
@@ -399,6 +428,48 @@ struct MediaDetailView: View {
                                       // 缺了会表现成「进度条/快进拖了没反应」（全算成 0）。
                                       // runtime 是分钟（nfo 元数据）。
                                       knownDuration: d.runtime.map { Double($0) * 60 })
+    }
+
+    // MARK: VidHub 外播
+    // VidHub 官方集成（https://vidhub.okaapps.com/3rd-party-app-integration/）：
+    //   open-vidhub://x-callback-url/play?url=<视频地址>&position=&filename=&sub=
+    // 用 /play（新版）而不是 /open（旧版）：支持起播位置、退出回调，全平台一致。
+    // 回调（x-success/x-error/x-cancel）是可选的，本 App 没注册自己的 URL scheme，
+    // 直接不传 —— 不传也能正常起播。
+    private func openInVidHub(_ d: MediaDetail) {
+        guard let client else { playError = "未连接服务器"; return }
+        guard let path = d.videoFiles.first, !path.isEmpty else {
+            playError = "《\(d.title)》没有可播放的文件"
+            return
+        }
+        // ⚠️ 不能用 client.streamURL(path:)：那个方法只认 MP4/M4V/MOV（AVPlayer
+        // 解不了的容器直接返回 nil）。VidHub 自带解码器，MKV/HEVC/DTS 都能解，
+        // 所以这里绕开扩展名过滤，直接给原始文件流地址。
+        guard let mediaURL = client.makeURL("/stream", queryItems: [
+            URLQueryItem(name: "path", value: path)
+        ]) else {
+            playError = "拼接播放地址失败"
+            return
+        }
+
+        var comp = URLComponents()
+        comp.scheme = "open-vidhub"
+        comp.host = "x-callback-url"
+        comp.path = "/play"
+        comp.queryItems = [
+            URLQueryItem(name: "url", value: mediaURL.absoluteString),
+            URLQueryItem(name: "filename", value: d.title),
+            URLQueryItem(name: "x-source", value: "媒体库"),
+        ]
+        guard let vidHubURL = comp.url else { return }
+
+        // ⚠️ canOpenURL 必须在 Info.plist 的 LSApplicationQueriesSchemes 里
+        // 声明 open-vidhub，否则一律返回 false（装了也当成没装）。
+        if UIApplication.shared.canOpenURL(vidHubURL) {
+            UIApplication.shared.open(vidHubURL)
+        } else {
+            showVidHubMissing = true
+        }
     }
 }
 

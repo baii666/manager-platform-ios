@@ -53,5 +53,11 @@
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
+	<!-- VidHub 外播：不声明的话 UIApplication.canOpenURL 对 open-vidhub://
+	     一律返回 false（装了也会被当成没装），跳转直接失效 -->
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>open-vidhub</string>
+	</array>
 </dict>
 </plist>
