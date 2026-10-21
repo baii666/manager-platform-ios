@@ -20,7 +20,8 @@ struct MediaDetailView: View {
     @State private var resume: (position: Double, duration: Double) = (0, 0)
     /// VidHub 外播编排：查进度 → 探字幕 →（首次）抽字幕 → 跳转 → 收回调存进度
     @StateObject private var vidHub = VidHubLauncher()
-    /// 外播回来的一句反馈（进度已存 / 已看完 / 失败原因）
+    /// 外播回来的反馈。⚠️ 只有**出错**才弹窗——进度存了 / 看完了不弹，
+    /// 而是直接刷新 resume，让按钮自己显示「继续 mm:ss」，不打断用户。
     @State private var vidHubNote: String?
 
     /// 有效续播点：贴片尾的（看完九成以上）当成没有——点进去又是最后几分钟，
@@ -83,21 +84,26 @@ struct MediaDetailView: View {
         // 页面被 pop 时放弃在途的外播准备：抽字幕要几分钟，人走了就别再把
         // VidHub 拽出来。压栈子页面 / 全屏播放器不会触发 onDisappear。
         .onDisappear { vidHub.cancel() }
-        // VidHub 外播结束的回调（progress/error/cancel）→ 一句反馈 + 刷本地续播值
+        // VidHub 外播结束的回调。⚠️ 进度变了不再弹窗：直接刷 resume，
+        // 让「播放 / VidHub」按钮上的「继续 mm:ss」自己更新。
         .onReceive(VidHubBridge.shared.$lastEvent) { ev in
             guard let ev else { return }
             switch ev {
-            case .progressSaved(let title, let pos, _):
-                vidHubNote = "《\(title)》已续播至 \(PlayerTimeFormatter.string(pos))"
-                resume = (pos, resume.duration)
-            case .finished(let title):
-                vidHubNote = "《\(title)》已看完，播放进度已清除"
+            case .progressSaved(_, let pos, let dur):
+                resume = (pos, dur > 0 ? dur : resume.duration)
+            case .finished:
                 resume = (0, 0)
             case .failed(_, let message):
-                vidHubNote = message
+                vidHubNote = message // 出错才打扰用户
             case .cancelled:
-                break // 用户主动取消，不需要打扰
+                break // 用户主动取消，不打扰
             }
+        }
+        // 兜底：回调可能因为各种时机没送到（用户从多任务界面直接切回来、
+        // 或在 VidHub 里播完就锁屏了）。进前台重拉一次最稳。
+        .onReceive(NotificationCenter.default.publisher(
+            for: UIApplication.willEnterForegroundNotification)) { _ in
+            Task { await refreshResume() }
         }
         .fullScreenCover(item: $playRequest) { request in
             PlayerHostView(request: request)
@@ -218,13 +224,6 @@ struct MediaDetailView: View {
                             }
                         }
 
-                        // 续播提示：有进度时说明上次看到哪儿了（播放/VidHub 都接着放）
-                        if let r = effectiveResume {
-                            Text("上次看到 \(PlayerTimeFormatter.string(r))")
-                                .font(isWide ? .caption : .caption2)
-                                .foregroundStyle(.white.opacity(0.55))
-                        }
-
                         // 播放 + 收藏：小胶囊一行，紧跟标签下方、贴着分界线上方。
                         // 深色封面上用白底主按钮 + 玻璃次按钮（不再是白屏区的浅色样式）
                         FlowLayout(spacing: isWide ? 14 : 8) {
@@ -232,7 +231,9 @@ struct MediaDetailView: View {
                                 Button {
                                     startPlayback(d)
                                 } label: {
-                                    Label("播放", systemImage: "play.fill")
+                                    // 有进度就把位置写在按钮上，不另弹提示
+                                    Label(effectiveResume.map { "继续 \(PlayerTimeFormatter.string($0))" } ?? "播放",
+                                          systemImage: "play.fill")
                                         .font(buttonFont.weight(.semibold))
                                         .foregroundStyle(.black)
                                         .padding(.horizontal, isWide ? 22 : 14)
@@ -248,7 +249,8 @@ struct MediaDetailView: View {
                                 Button {
                                     vidHub.play(d)
                                 } label: {
-                                    Label("VidHub", systemImage: "arrow.up.right")
+                                    Label(effectiveResume.map { "VidHub \(PlayerTimeFormatter.string($0))" } ?? "VidHub",
+                                          systemImage: "arrow.up.right")
                                         .font(buttonFont.weight(.medium))
                                         .foregroundStyle(.white)
                                         .padding(.horizontal, isWide ? 22 : 14)
@@ -468,6 +470,14 @@ struct MediaDetailView: View {
             errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
         isLoading = false
+    }
+
+    /// 重拉续播点。从 VidHub 切回来 / 进前台时调用——回调没送到也能对上。
+    /// 查不到就保持原值（不把已有的进度冲成 0）。
+    private func refreshResume() async {
+        guard let client else { return }
+        guard let prog = try? await client.fetchMediaProgress(id: media.id) else { return }
+        resume = (prog.position, prog.duration)
     }
 
     private func toggleFavorite() {
