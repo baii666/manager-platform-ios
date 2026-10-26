@@ -307,7 +307,7 @@ struct MediaListView: View {
         // NavigationStack 只渲染栈顶那一层，App 根的背景透不进来
         .appBackground()
         // 下拉刷新
-        .refreshable { await viewModel.refresh() }
+        .refreshing { await viewModel.refresh() }
         // ⚠️ iOS 17 起 onChange(of:) 零参闭包
         .onChange(of: viewModel.searchText) {
             Task {

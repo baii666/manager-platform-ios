@@ -31,7 +31,7 @@ struct PersonsView: View {
         .navigationBarTitleDisplayMode(.inline)
         // ⚠️ 每个 push 进来的页面都要自己垫一层背景：NavigationStack 只渲染栈顶那一层
         .appBackground()
-        .refreshable { await viewModel.reload() }
+        .refreshing { await viewModel.reload() }
         .overlay {
             if viewModel.items.isEmpty && !viewModel.isLoading {
                 ContentUnavailableView(

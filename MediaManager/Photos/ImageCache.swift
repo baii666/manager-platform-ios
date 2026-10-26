@@ -19,6 +19,16 @@ final class ImageCache: @unchecked Sendable {
         try? fileManager.createDirectory(at: diskDir, withIntermediateDirectories: true)
     }
 
+    /// 清空内存 + 磁盘缓存（设置里的「清除图片缓存」）。
+    /// 换过海报/封面但 App 一直显示旧图时的手动兜底 —— 缓存没有过期机制，
+    /// 而封面 URL 又是稳定的，不主动清就永远命中第一版。
+    func clearAll() {
+        memory.removeAllObjects()
+        guard let files = try? fileManager.contentsOfDirectory(at: diskDir,
+                                                               includingPropertiesForKeys: nil) else { return }
+        for f in files { try? fileManager.removeItem(at: f) }
+    }
+
     /// 同步查内存 + 磁盘缓存
     func image(for url: URL) -> UIImage? {
         // ⚠️ 局部变量不能叫 key：会遮蔽成员方法 key(for:)，后面的 key(for:) 调用
@@ -43,10 +53,15 @@ final class ImageCache: @unchecked Sendable {
     /// 下载 + 缓存 + 返回；命中缓存则直接返回
     /// - Parameter cacheToDisk: 原图体积大且后端就是源文件，没必要再往磁盘写一份（会占满缓存目录），
     ///   传 false 只进内存缓存
-    func load(from url: URL, cacheToDisk: Bool = true) async -> UIImage? {
-        if let img = image(for: url) { return img }
+    /// - Parameter forceReload: 强制回源。跳过本地两层缓存，并且让 URLSession 也别用
+    ///   NSURLCache 的条目（封面接口回的是 immutable，不显式忽略它连请求都不发）。
+    ///   下载成功后仍按**原 URL** 写回缓存 —— 覆盖旧文件，不会越积越多。
+    func load(from url: URL, cacheToDisk: Bool = true, forceReload: Bool = false) async -> UIImage? {
+        if !forceReload, let img = image(for: url) { return img }
         do {
-            let (data, _) = try await URLSession.shared.data(from: url)
+            var request = URLRequest(url: url)
+            if forceReload { request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData }
+            let (data, _) = try await URLSession.shared.data(for: request)
             // 惰性解码坑：UIImage(data:) 只标记数据，真正的位图解码发生在
             // 「首次上屏渲染」那一刻（主线程同步解码，几十 ms → 掉帧）。
             // 这里主动重画一遍强制解码，把开销留在后台线程。

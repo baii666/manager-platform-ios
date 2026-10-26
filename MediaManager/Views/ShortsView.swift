@@ -163,7 +163,7 @@ struct ShortsView: View {
         // 「全部」VM 拉第一页：随机刷流的数据源（首页卡不等页面加载完就要能开）
         .task { await viewModel.loadInitial() }
         .task { await loadPools() }
-        .refreshable { await loadPools() }
+        .refreshing { await loadPools() }
         // 首页「短视频连播」卡 → 随机起始的沉浸刷流
         // ⚠️ iOS 17 起 `onChange(of:) { newValue in }`（单参数，含 `{ _ in }`）已废弃，
         // 统一用零参数闭包，闭包内直接读属性即为新值

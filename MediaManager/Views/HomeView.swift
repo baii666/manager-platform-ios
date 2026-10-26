@@ -50,7 +50,7 @@ struct HomeView: View {
         .navigationTitle("首页")
         .navigationBarTitleDisplayMode(.inline)
         // 下拉刷新（不显示 loading 遮罩，避免触发 refreshable 取消）
-        .refreshable { await viewModel.load(showSpinner: false) }
+        .refreshing { await viewModel.load(showSpinner: false) }
         .task {
             // 与「我的」tab 共用同一份 viewModel，闸在 HomeViewModel 里，不会重复拉
             await viewModel.loadIfNeeded()

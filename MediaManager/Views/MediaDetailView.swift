@@ -175,8 +175,11 @@ struct MediaDetailView: View {
                 // ② 封面区内容：海报（左置、比封面区高 → 底缘扎进白屏）+ 信息列
                 // 信息列首部 Spacer 把整块内容压到列底：沉在分界线上方，不再贴顶
                 HStack(alignment: .top, spacing: heroGap) {
+                    // reloadOnAppear：详情页没有下拉刷新，主海报每次进来回源一次，
+                    // 换过海报/改成竖版后立刻能看到，不用等缓存失效
                     RemoteImage(url: d.posterURL, fallbackIcon: "film",
-                                fallbackColors: Theme.placeholderGradient(for: .media))
+                                fallbackColors: Theme.placeholderGradient(for: .media),
+                                reloadOnAppear: true)
                         .imageFilled()
                         .frame(width: posterWidth, height: posterHeight)
                         .clipShape(RoundedRectangle(cornerRadius: posterRadius, style: .continuous))
@@ -610,7 +613,9 @@ private struct HeroBackground: View {
         }
         backdrop = nil
         backdropFailed = false
-        if let img = await ImageCache.shared.load(from: backdropURL) {
+        // forceReload：fanart 和主海报一样，详情页没有下拉刷新，
+        // 每次进来回源一次才看得到换过的图（一张 600px 缩略图，代价可接受）
+        if let img = await ImageCache.shared.load(from: backdropURL, forceReload: true) {
             backdrop = img
         } else {
             backdropFailed = true

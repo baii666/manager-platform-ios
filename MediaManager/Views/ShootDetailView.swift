@@ -89,7 +89,7 @@ struct ShootDetailView: View {
                 // 底部净空：滑到底时最后的内容不被底栏盖住
                 Spacer().frame(height: BottomTabBar.height)
             }
-            .refreshable { await viewModel.refresh() }
+            .refreshing { await viewModel.refresh() }
         }
         .navigationBarTitleDisplayMode(.inline)
         // 信息全部收进导航栏：第一行标题，第二行数量/体积/时长。

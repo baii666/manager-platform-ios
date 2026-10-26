@@ -46,6 +46,8 @@ struct MineView: View {
     @State private var playError: String?
     @State private var showingPhotos = false
     @State private var confirmingLogout = false
+    /// 「清除图片缓存」点过之后的提示态
+    @State private var cacheCleared = false
 
     var body: some View {
         ScrollView {
@@ -72,7 +74,7 @@ struct MineView: View {
         .appBackground()
         .navigationTitle("我的")
         .navigationBarTitleDisplayMode(.inline)
-        .refreshable { await viewModel.load(showSpinner: false) }
+        .refreshing { await viewModel.load(showSpinner: false) }
         // 与首页共用一份 viewModel：谁先挂载谁触发加载（HomeViewModel 里有闸）
         .task { await viewModel.loadIfNeeded() }
         .navigationDestination(for: MineListRoute.self) { route in
@@ -277,6 +279,38 @@ struct MineView: View {
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 13)
+                Divider().padding(.leading, 44)
+                // 清除图片缓存：封面 URL 是稳定的（/media-image?id=...），服务端换海报
+                // 只是原地覆盖文件，URL 一字不差 → 本地缓存永远命中旧图。
+                // 下拉刷新会自动回源一次，这里给一个手动全清的兜底。
+                Button {
+                    ImageCache.shared.clearAll()
+                    ImageRefreshCenter.shared.bump()
+                    cacheCleared = true
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "photo.stack")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(Theme.brand)
+                            .frame(width: 20)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("清除图片缓存")
+                                .font(.subheadline)
+                                .foregroundStyle(.primary)
+                            Text(cacheCleared ? "已清除，回到列表会重新加载"
+                                              : "换过封面但一直显示旧图时用")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 13)
+                }
+                .buttonStyle(.plain)
             }
             .appSurface(in: RoundedRectangle(cornerRadius: 14, style: .continuous))
 
@@ -406,7 +440,7 @@ struct ActionAssetListView: View {
         .navigationTitle(route.title)
         .navigationBarTitleDisplayMode(.inline)
         .task { await viewModel.loadIfNeeded() }
-        .refreshable { await viewModel.reload() }
+        .refreshing { await viewModel.reload() }
         .sheet(isPresented: $showingPhotos) {
             // sheet 里的照片页必须用本地 fullScreenCover 看图器：
             // 全局 overlay 在 RootView 层，会被这个 sheet 盖住看不见

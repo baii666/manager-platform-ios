@@ -36,7 +36,7 @@ struct ActorsView: View {
         .navigationBarTitleDisplayMode(.inline)
         .appBackground()
         .searchable(text: $viewModel.searchText, prompt: "搜索演员…")
-        .refreshable { await viewModel.reload() }
+        .refreshing { await viewModel.reload() }
         .toolbar {
             // 排序字段（与电影/相册/拍摄集/短视频列表同一套 ToolMenuChip 胶囊样式）
             ToolbarItem(placement: .topBarTrailing) {
