@@ -275,8 +275,18 @@ final class VidHubLauncher: ObservableObject {
     func play(url: URL, title: String) {
         Task { @MainActor in
             guard self.phase == .idle else { return } // 防连点
+            self.generation += 1
+            let gen = self.generation
             self.error = nil
             self.vidHubMissing = false
+            // 置 .opening 让上面的守卫真正挡住第二次点击（此前 phase 一直停在
+            // .idle，连点会穿营；与 run() 跳转前同步）。open 是即发即忘，
+            // 回来就把相位还回去，别影响用户播下一部。
+            self.phase = .opening
+            defer { if self.phase == .opening { self.phase = .idle } }
+            // 页面 pop 时 onDisappear → cancel() 会递增 generation。代数对上
+            // 才跳——点完立刻返回页面的，别再把用户拽进 VidHub（run() 同款守卫）。
+            guard gen == self.generation else { return }
             self.openVidHub(Prepared(mediaId: nil, mediaURL: url,
                                      title: title, position: 0), subURL: nil)
         }
