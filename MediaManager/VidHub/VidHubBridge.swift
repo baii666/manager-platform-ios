@@ -233,7 +233,9 @@ final class VidHubLauncher: ObservableObject {
     @AppStorage("vidhub.autoplay") var autoplay: Bool = false
 
     private struct Prepared {
-        let mediaId: Int
+        /// nil = 无进度归属（拍摄集视频：后端 asset_type=shoot 不支持 progress，
+        /// ShootFile 也不返回文件路径、抽不了字幕）→ 不查进度、不带回调。
+        let mediaId: Int?
         let mediaURL: URL
         let title: String
         let position: Double
@@ -264,6 +266,19 @@ final class VidHubLauncher: ObservableObject {
             self.skipRequested = false
             self.phase = .probing
             await self.run(d, gen: gen)
+        }
+    }
+
+    /// 「没有进度归属」的内容（拍摄集视频）走这里：拼好地址直接跳，
+    /// 不查进度也不探字幕 —— 这两样对拍摄集视频都拿不到（见 Prepared.mediaId）。
+    /// 跳转本身仍然防连点、仍然走 canOpenURL 兜底。
+    func play(url: URL, title: String) {
+        Task { @MainActor in
+            guard self.phase == .idle else { return } // 防连点
+            self.error = nil
+            self.vidHubMissing = false
+            self.openVidHub(Prepared(mediaId: nil, mediaURL: url,
+                                     title: title, position: 0), subURL: nil)
         }
     }
 
@@ -385,7 +400,9 @@ final class VidHubLauncher: ObservableObject {
 
     @MainActor
     private func openVidHub(_ p: Prepared, subURL: URL?) {
-        let requestId = VidHubBridge.shared.register(mediaId: p.mediaId, title: p.title)
+        // 没归属就不登记：回调要靠 request-id 认回具体影片，无人认领的回调
+        // 没必要让 VidHub 多带三个参数
+        let requestId = p.mediaId.map { VidHubBridge.shared.register(mediaId: $0, title: p.title) }
         guard let url = Self.buildVidHubURL(p, subURL: subURL, requestId: requestId) else {
             error = "拼接 VidHub 地址失败"
             return
@@ -405,7 +422,7 @@ final class VidHubLauncher: ObservableObject {
     // ⚠️ 必须是 private：Prepared 是 private 嵌套类型，Swift 不允许 internal
     // 方法的参数使用比它更严格的类型（否则报 "Method cannot be declared
     // internal because its parameter uses a private type"）。
-    private static func buildVidHubURL(_ p: Prepared, subURL: URL?, requestId: String) -> URL? {
+    private static func buildVidHubURL(_ p: Prepared, subURL: URL?, requestId: String?) -> URL? {
         var comp = URLComponents()
         comp.scheme = "open-vidhub"
         comp.host = "x-callback-url"
@@ -419,11 +436,15 @@ final class VidHubLauncher: ObservableObject {
             URLQueryItem(name: "url", value: p.mediaURL.absoluteString),
             URLQueryItem(name: "filename", value: p.title),
             URLQueryItem(name: "x-source", value: "媒体库"),
-            URLQueryItem(name: "request-id", value: requestId),
-            URLQueryItem(name: "x-success", value: "\(VidHubBridge.scheme)://x-callback-url/success"),
-            URLQueryItem(name: "x-error", value: "\(VidHubBridge.scheme)://x-callback-url/error"),
-            URLQueryItem(name: "x-cancel", value: "\(VidHubBridge.scheme)://x-callback-url/cancel"),
         ]
+        if let requestId {
+            items.append(contentsOf: [
+                URLQueryItem(name: "request-id", value: requestId),
+                URLQueryItem(name: "x-success", value: "\(VidHubBridge.scheme)://x-callback-url/success"),
+                URLQueryItem(name: "x-error", value: "\(VidHubBridge.scheme)://x-callback-url/error"),
+                URLQueryItem(name: "x-cancel", value: "\(VidHubBridge.scheme)://x-callback-url/cancel"),
+            ])
+        }
         if pos >= 1 {
             // 秒数取整：VidHub 只认「valid number」，整数最稳
             items.append(URLQueryItem(name: "position", value: String(Int(pos.rounded()))))

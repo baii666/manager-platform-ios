@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // MARK: - 拍摄集详情页
 // 视频横滑轨(播放) + 照片瀑布流(看图器) + 无限滚动；信息全部收进导航栏。
@@ -17,6 +18,9 @@ struct ShootDetailView: View {
     @State private var playTarget: PlayerTarget?
     /// 照片瀑布流列数：双指捏合缩放，按「拍摄集照片」记忆
     @State private var photoColumns = PhotoGridPrefs.load("shootPhotos", fallback: 3)
+    /// VidHub 外播编排。拍摄集视频格式杂（AVI / WMV / MKV…），内置播放器解不动的
+    /// 交给 VidHub。这里没有进度 / 字幕那两道工序（见 VidHubLauncher.play(url:)）
+    @StateObject private var vidHub = VidHubLauncher()
 
     private var client: APIClient? { AppSession.shared.client }
 
@@ -114,6 +118,28 @@ struct ShootDetailView: View {
             }
         }
         // 看图器走全局 overlay（PhotoViewerPresenter），不再用 fullScreenCover
+        .onDisappear { vidHub.cancel() }
+        .alert("未安装 VidHub", isPresented: Binding(
+            get: { vidHub.vidHubMissing },
+            set: { if !$0 { vidHub.vidHubMissing = false } }
+        )) {
+            Button("去 App Store 找") {
+                if let u = URL(string: "https://apps.apple.com/cn/search?term=vidhub") {
+                    UIApplication.shared.open(u)
+                }
+            }
+            Button("好", role: .cancel) {}
+        } message: {
+            Text("装好 VidHub 后，视频卡片右上角的按钮会把文件交给它播放（AVI / WMV / MKV 等内置播放器放不了的格式它都能解）。")
+        }
+        .alert("外播失败", isPresented: Binding(
+            get: { vidHub.error != nil },
+            set: { if !$0 { vidHub.error = nil } }
+        )) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text(vidHub.error ?? "")
+        }
     }
 
     // MARK: 导航栏信息行
@@ -155,13 +181,16 @@ struct ShootDetailView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 10) {
                     ForEach(viewModel.videos) { file in
-                        ShootVideoCard(file: file) {
+                        ShootVideoCard(file: file, onPlay: {
                             if let url = client?.shootFileURL(file.id) {
                                 playTarget = PlayerTarget(
                                     url: url,
-                                    title: file.filename.strippingSitePrefix.deletingPathExtension)
+                                    title: file.displayName)
                             }
-                        }
+                        }, onVidHub: {
+                            guard let url = client?.shootFileExternalURL(file.id) else { return }
+                            vidHub.play(url: url, title: file.displayName)
+                        })
                     }
                 }
                 .padding(.horizontal, 16)
@@ -266,41 +295,57 @@ private struct ShootVideoCard: View {
     /// 卡宽。约屏宽 60%：一屏露出一个半，暗示可以横滑
     var width: CGFloat = 232
     var onPlay: () -> Void
+    /// 交给 VidHub 播放（内置播放器解不动的格式）
+    var onVidHub: () -> Void
 
     var body: some View {
-        Button(action: onPlay) {
-            VStack(alignment: .leading, spacing: 6) {
-                ZStack {
-                    // 后端没有视频抽帧端点（shoot_files.has_thumb 也未生成），
-                    // 用品牌渐变 + 播放键占位，16:9 比例先摆正
-                    LinearGradient(colors: Theme.placeholderGradient(for: .shoot),
-                                   startPoint: .top, endPoint: .bottom)
-                    Image(systemName: "play.fill")
-                        .font(.system(size: 20, weight: .semibold))
-                        .foregroundStyle(.white)
-                }
-                .frame(width: width, height: width * 9 / 16)
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                .overlay(alignment: .bottomTrailing) {
-                    // 时长徽标：黑底白字，亮暗封面都可读
-                    if let d = file.durationText {
-                        Text(d)
-                            .font(.caption2.weight(.medium)).monospacedDigit()
+        VStack(alignment: .leading, spacing: 6) {
+            // ⚠️ 两个按钮必须并列在 ZStack 里，不能嵌套 Button：
+            // 嵌套时点击一律被外层吞掉，内层的 VidHub 永远点不到
+            ZStack(alignment: .topTrailing) {
+                Button(action: onPlay) {
+                    ZStack {
+                        // 后端没有视频抽帧端点（shoot_files.has_thumb 也未生成），
+                        // 用品牌渐变 + 播放键占位，16:9 比例先摆正
+                        LinearGradient(colors: Theme.placeholderGradient(for: .shoot),
+                                       startPoint: .top, endPoint: .bottom)
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 20, weight: .semibold))
                             .foregroundStyle(.white)
-                            .padding(.horizontal, 6).padding(.vertical, 3)
-                            .background(.black.opacity(0.55), in: Capsule())
-                            .padding(6)
+                    }
+                    .frame(width: width, height: width * 9 / 16)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .overlay(alignment: .bottomTrailing) {
+                        // 时长徽标：黑底白字，亮暗封面都可读
+                        if let d = file.durationText {
+                            Text(d)
+                                .font(.caption2.weight(.medium)).monospacedDigit()
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 6).padding(.vertical, 3)
+                                .background(.black.opacity(0.55), in: Capsule())
+                                .padding(6)
+                        }
                     }
                 }
+                .buttonStyle(.plain)
 
-                Text(file.filename.strippingSitePrefix.deletingPathExtension)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1).truncationMode(.tail)
-                    .frame(width: width, alignment: .leading)
+                Button(action: onVidHub) {
+                    Label("VidHub", systemImage: "arrow.up.right")
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background(.black.opacity(0.5), in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .padding(6)
             }
+
+            Text(file.displayName)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1).truncationMode(.tail)
+                .frame(width: width, alignment: .leading)
         }
-        .buttonStyle(.plain)
     }
 }
 

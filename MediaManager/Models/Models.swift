@@ -960,6 +960,12 @@ struct ShootFile: Identifiable, Codable, Sendable, Hashable {
         guard let w = width, let h = height, w > 0, h > 0 else { return nil }
         return "\(w)×\(h)"
     }
+    /// 卡片标题 / 播放器标题：剥掉站点目录名前缀、去掉扩展名。
+    /// 原来这串逻辑内联在 ShootDetailView 里；加了 VidHub 外播后有两处要用
+    /// （内置播放 + 外播的 filename），提到模型上免得两处走偏。
+    var displayName: String {
+        filename.strippingSitePrefix.deletingPathExtension
+    }
 
     enum CodingKeys: String, CodingKey {
         case id

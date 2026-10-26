@@ -481,6 +481,17 @@ final class APIClient: DataProviding, @unchecked Sendable {
     func shootFileURL(_ fileId: Int) -> URL? {
         makeURL("/api/shoot-file/\(fileId)")
     }
+    /// VidHub 外播用的拍摄集文件地址。
+    /// ⚠️ 必须带 ?token=：/api/shoot-file 不在 AuthMiddleware 的白名单里，
+    /// 而 VidHub 是自己来拉的，带不上我们的 cookie —— 不带 token 它会拿到 401。
+    /// 内置播放器用上面那个（走 URLSession，cookie 在，不需要 token）。
+    func shootFileExternalURL(_ fileId: Int) -> URL? {
+        var items: [URLQueryItem] = []
+        if let tok = AppSession.shared.sessionToken, !tok.isEmpty {
+            items.append(URLQueryItem(name: "token", value: tok))
+        }
+        return makeURL("/api/shoot-file/\(fileId)", queryItems: items)
+    }
     /// 拍摄集内照片走统一的 /photo?id= 接口（与网页端一致）
     func shootPhotoURL(_ id: Int, size: Int? = nil) -> URL? {
         var qi: [URLQueryItem] = [URLQueryItem(name: "id", value: "\(id)")]
