@@ -73,13 +73,18 @@ struct RemoteImage: View {
             failed = false
             lastURL = url
         }
-        // 刚下拉刷新过 → 让这张图回源一次（绕开 immutable + 本地两层缓存）
-        let force = reloadOnAppear || refresh.shouldReloadFromSource
+        // 刚下拉刷新过（本代这张图还没回源过）→ 真的回源一次，
+        // 绕开 NSURLCache + ImageCache 两层缓存。
+        // 领了资格但没加载成功要还回去，否则本代再也不会重试、一直停在旧图。
+        let claimed = refresh.claimReload(for: url)
+        let force = reloadOnAppear || claimed
         if let img = await ImageCache.shared.load(from: url, forceReload: force) {
             image = img
             failed = false
-        } else if image == nil {
-            failed = true
+        } else {
+            if claimed { refresh.releaseReload(for: url) }
+            // 加载不出来且手上没有旧图才降级到占位；有旧图就继续顶着，不开天窗
+            if image == nil { failed = true }
         }
     }
 
