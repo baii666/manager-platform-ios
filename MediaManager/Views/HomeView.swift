@@ -34,6 +34,8 @@ struct HomeView: View {
             VStack(alignment: .leading, spacing: 28) {
                 hero
                 if !viewModel.failures.isEmpty { errorBanner }
+                // 带封面的库入口：数据来自统计请求，最近入库为空时也能把首页撑住
+                if !viewModel.stats.libraries.isEmpty { librarySection }
                 if !viewModel.recent.isEmpty { recentSection }
                 discoverSection
             }
@@ -215,6 +217,13 @@ struct HomeView: View {
                 DiscoverCard(icon: "person.2.fill", title: "人物", subtitle: "人脸聚类结果", tint: .cyan) {
                     path.append(HomeRoute.persons)
                 }
+                DiscoverCard(icon: "wand.and.stars", title: "语义搜索", subtitle: "用一句话找照片", tint: .purple) {
+                    // 空词进搜索页不会自动搜，但会把语义开关打开，用户直接输入即可
+                    path.append(HomeRoute.search(initialQuery: "", semantic: true))
+                }
+                DiscoverCard(icon: "heart.fill", title: "我的收藏", subtitle: "收藏的内容都在这", tint: .pink) {
+                    tab = .mine
+                }
                 DiscoverCard(icon: "play.rectangle.fill", title: "短视频连播", subtitle: "刷起来停不下", tint: .orange) {
                     // 请求随机起始的沉浸刷流，经 ShortsRandomRequest 单例广播；
                     // items 没加载完 ShortsView 会等到了再开。
@@ -236,6 +245,29 @@ struct HomeView: View {
             LazyHStack(spacing: 16, content: content)
                 .padding(.horizontal, 2)
                 .padding(.vertical, 2)
+        }
+    }
+
+    // MARK: 我的媒体库（横滑封面卡）
+    // 首页定位是「找内容」，私人数据（继续观看 / 观看记录 / 收藏）仍在「我的」tab。
+    // 这一行给的是直达各媒体库的带图入口：数据来自 fetchStats 已经拉过的
+    // /api/libraries，零新增请求；点击切 tab 并落准二级分类。
+    private var librarySection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            SectionHeader(icon: "square.grid.2x2.fill", title: "我的媒体库",
+                          moreLabel: "全部", onMore: { tab = .library })
+            horizontalRow {
+                ForEach(viewModel.stats.libraries) { lib in
+                    LibraryShortcutCard(library: lib) {
+                        switch lib.type {
+                        case "photo": libraryCategory = .photo
+                        case "shoot": libraryCategory = .shoot
+                        default: libraryCategory = .movie
+                        }
+                        tab = .library
+                    }
+                }
+            }
         }
     }
 
@@ -275,4 +307,67 @@ private struct StatEntry: Identifiable {
     let value: Int
     let tint: Color
     var action: (() -> Void)? = nil
+}
+
+// MARK: - 媒体库封面快捷卡（首页「我的媒体库」横滑行）
+// 与媒体库 tab 的 LibraryCard 同语言：实体底板感的暗色压字 + 圆角描边 + 投影，
+// 复用 PressableCardStyle 的按压缩放。固定 220×136，横滑行不会高低不齐。
+private struct LibraryShortcutCard: View {
+    let library: Library
+    var onTap: () -> Void = {}
+
+    private var coverURL: URL? {
+        AppSession.shared.client?.resolve(library.thumbURL)
+    }
+
+    private var kind: AssetType {
+        switch library.type {
+        case "photo": return .photo
+        case "shoot": return .shoot
+        default: return .media
+        }
+    }
+
+    private var countText: String {
+        switch library.type {
+        case "photo": return "\(library.itemCount) 张照片"
+        case "shoot": return "\(library.itemCount) 个拍摄集"
+        default: return "\(library.itemCount) 部"
+        }
+    }
+
+    var body: some View {
+        Button(action: onTap) {
+            ZStack(alignment: .bottomLeading) {
+                RemoteImage(url: coverURL, fallbackIcon: "folder.fill",
+                            fallbackColors: Theme.placeholderGradient(for: kind))
+                    .imageFilled()
+                LinearGradient(colors: [.clear, Color.black.opacity(0.82)],
+                               startPoint: .center, endPoint: .bottom)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(library.displayType)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Theme.tint(for: kind).opacity(0.9), in: Capsule())
+                    Text(library.name)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Text(countText)
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.75))
+                }
+                .padding(12)
+            }
+            .frame(width: 220, height: 136)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(.white.opacity(0.16), lineWidth: 0.6))
+            .shadow(color: .black.opacity(0.18), radius: 10, y: 5)
+        }
+        .buttonStyle(PressableCardStyle())
+    }
 }
