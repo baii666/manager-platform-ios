@@ -254,7 +254,6 @@ final class APIClient: DataProviding, @unchecked Sendable {
 
         var stats = HomeStats()
         stats.libraryCount = libs.count
-        stats.libraries = libs
         for lib in libs {
             // ⚠️ 后端 media.type 是 "tv" 不是 "series"（只有搜索接口兼容 "series" 别名）
             switch lib.type {

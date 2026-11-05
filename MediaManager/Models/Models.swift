@@ -297,9 +297,6 @@ struct HomeStats: Sendable {
     var photoCount: Int = 0
     var shootCount: Int = 0
     var shortCount: Int = 0
-    /// fetchStats 里本来就会拉 /api/libraries 来算数量，顺手带出来给首页做
-    /// 「我的媒体库」封面横滑，不用再发一次请求
-    var libraries: [Library] = []
 
     var totalContent: Int { movieCount + seriesCount + photoCount + shootCount }
 }

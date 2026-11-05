@@ -17,13 +17,9 @@ enum HomeRoute: Hashable {
 struct HomeView: View {
     @ObservedObject var viewModel: HomeViewModel
     @Binding var path: NavigationPath
-    /// 底 bar tab：当前没有卡片写入它（短视频连播改走根层 overlay，不再切 tab），
-    /// binding 保留，将来要从首页跨 tab 落位时不用再改 RootView 的传参
+    /// 底 bar tab：发现区「我的收藏」切到「我的」tab。
+    /// 短视频连播不切 tab（刷流挂在根层 overlay，退出即回首页）。
     @Binding var tab: RootTab
-    /// 媒体库 tab 内的二级分类：预留给「首页卡切 tab 同时落准分类」用。
-    /// 2026-10-13：发现区「拍摄集」卡已移除，当前无卡片写入它，
-    /// binding 保留以免将来新增同类入口时再改 RootView 的传参。
-    @Binding var libraryCategory: LibraryHomeView.Category
     @Environment(\.horizontalSizeClass) private var hSizeClass
 
     @State private var showingAlbums = false
@@ -34,8 +30,6 @@ struct HomeView: View {
             VStack(alignment: .leading, spacing: 28) {
                 hero
                 if !viewModel.failures.isEmpty { errorBanner }
-                // 带封面的库入口：数据来自统计请求，最近入库为空时也能把首页撑住
-                if !viewModel.stats.libraries.isEmpty { librarySection }
                 if !viewModel.recent.isEmpty { recentSection }
                 discoverSection
             }
@@ -248,28 +242,9 @@ struct HomeView: View {
         }
     }
 
-    // MARK: 我的媒体库（横滑封面卡）
-    // 首页定位是「找内容」，私人数据（继续观看 / 观看记录 / 收藏）仍在「我的」tab。
-    // 这一行给的是直达各媒体库的带图入口：数据来自 fetchStats 已经拉过的
-    // /api/libraries，零新增请求；点击切 tab 并落准二级分类。
-    private var librarySection: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            SectionHeader(icon: "square.grid.2x2.fill", title: "我的媒体库",
-                          moreLabel: "全部", onMore: { tab = .library })
-            horizontalRow {
-                ForEach(viewModel.stats.libraries) { lib in
-                    LibraryShortcutCard(library: lib) {
-                        switch lib.type {
-                        case "photo": libraryCategory = .photo
-                        case "shoot": libraryCategory = .shoot
-                        default: libraryCategory = .movie
-                        }
-                        tab = .library
-                    }
-                }
-            }
-        }
-    }
+    // 「我的媒体库」横滑行已移除：媒体库有独立 tab，首页再放一排同目的地
+    // 的封面卡属于重复入口。若要补首页内容，优先给「找内容」加新东西
+    //（如继续观看预览、随机照片墙），不要再搬媒体库列表。
 
     // MARK: 统计配置
 
@@ -307,88 +282,4 @@ private struct StatEntry: Identifiable {
     let value: Int
     let tint: Color
     var action: (() -> Void)? = nil
-}
-
-// MARK: - 媒体库封面快捷卡（首页「我的媒体库」横滑行）
-// 沉浸式封面 + 圆角描边 + 投影，复用 PressableCardStyle 的按压缩放。
-// 信息刻意压到最小：右上角一个类型图标，左下角两行（库名 + 数量），
-// 底部压暗只覆盖 58pt —— 让封面本身占满卡片，别再把半张卡做成文字区。
-// 固定 220×136，横滑行不会高低不齐。
-private struct LibraryShortcutCard: View {
-    let library: Library
-    var onTap: () -> Void = {}
-
-    private var coverURL: URL? {
-        AppSession.shared.client?.resolve(library.thumbURL)
-    }
-
-    private var kind: AssetType {
-        switch library.type {
-        case "photo": return .photo
-        case "shoot": return .shoot
-        default: return .media
-        }
-    }
-
-    /// 类型只用一个小图标表示，放在右上角，不再占左下角一整行胶囊。
-    private var kindIcon: String {
-        switch library.type {
-        case "photo": return "photo.fill"
-        case "shoot": return "photo.on.rectangle.angled"
-        default: return "film.fill"
-        }
-    }
-
-    /// 数量缩到最短量词，和库名挤在两行内即可。
-    private var countText: String {
-        switch library.type {
-        case "photo": return "\(library.itemCount) 张"
-        case "shoot": return "\(library.itemCount) 个"
-        default: return "\(library.itemCount) 部"
-        }
-    }
-
-    var body: some View {
-        Button(action: onTap) {
-            ZStack(alignment: .bottomLeading) {
-                RemoteImage(url: coverURL, fallbackIcon: "folder.fill",
-                            fallbackColors: Theme.placeholderGradient(for: kind))
-                    .imageFilled()
-                // ⚠️ 只在底部 58pt 压暗。旧版从 .center 一路 0.82 黑到底，
-                // 加上三行文字，整块下半张都变成「信息区」，封面几乎看不见。
-                LinearGradient(colors: [.clear, Color.black.opacity(0.62)],
-                               startPoint: .top, endPoint: .bottom)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 58)
-                    .allowsHitTesting(false)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(library.name)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                    Text(countText)
-                        .font(.caption2)
-                        .foregroundStyle(.white.opacity(0.78))
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 12)
-                .padding(.bottom, 10)
-            }
-            .frame(width: 220, height: 136)
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(alignment: .topTrailing) {
-                Image(systemName: kindIcon)
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 26, height: 26)
-                    .background(Theme.tint(for: kind).opacity(0.92), in: Circle())
-                    .padding(10)
-            }
-            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(.white.opacity(0.16), lineWidth: 0.6))
-            .shadow(color: .black.opacity(0.18), radius: 10, y: 5)
-        }
-        .buttonStyle(PressableCardStyle())
-    }
 }
