@@ -30,30 +30,25 @@ struct StatCard: View {
                 Text(valueText)
                     .font(.title3.weight(.bold))
                     .monospacedDigit()
-                    // 照片库动辄几百万，全量展开会把卡片撑成两行
+                    // 完整数字可能 7~9 位（照片库几百万），按卡宽自动缩字号，
+                    // 保持单行且不被截断。不能再用 fixedSize(horizontal: true)：
+                    // 那会强制理想宽度，把 label 挤出卡片、minimumScaleFactor 也失效。
                     .lineLimit(1)
-                    .minimumScaleFactor(0.6)
-                    .fixedSize(horizontal: true, vertical: false)
+                    .minimumScaleFactor(0.55)
                 Text(label)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
-            Spacer(minLength: 0)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(12)
         .appSurface(in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
-    /// 3,126,174 → "312.6万"，13,707 → "1.4万"，2315 保持原样
+    /// 一律显示完整原数字（带千分位分组），不再缩写为「万 / 亿」。
+    /// 3,126,174 / 13,707 / 2315 都用同一种写法，与原先小数值的样式一致。
     private var valueText: String {
-        if value >= 100_000_000 {
-            return String(format: "%.2f亿", Double(value) / 100_000_000)
-        }
-        if value >= 10_000 {
-            let w = Double(value) / 10_000
-            return w >= 100 ? String(format: "%.0f万", w) : String(format: "%.1f万", w)
-        }
-        return value.formatted()
+        value.formatted()
     }
 }
