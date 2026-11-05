@@ -310,8 +310,10 @@ private struct StatEntry: Identifiable {
 }
 
 // MARK: - 媒体库封面快捷卡（首页「我的媒体库」横滑行）
-// 与媒体库 tab 的 LibraryCard 同语言：实体底板感的暗色压字 + 圆角描边 + 投影，
-// 复用 PressableCardStyle 的按压缩放。固定 220×136，横滑行不会高低不齐。
+// 沉浸式封面 + 圆角描边 + 投影，复用 PressableCardStyle 的按压缩放。
+// 信息刻意压到最小：右上角一个类型图标，左下角两行（库名 + 数量），
+// 底部压暗只覆盖 58pt —— 让封面本身占满卡片，别再把半张卡做成文字区。
+// 固定 220×136，横滑行不会高低不齐。
 private struct LibraryShortcutCard: View {
     let library: Library
     var onTap: () -> Void = {}
@@ -328,10 +330,20 @@ private struct LibraryShortcutCard: View {
         }
     }
 
+    /// 类型只用一个小图标表示，放在右上角，不再占左下角一整行胶囊。
+    private var kindIcon: String {
+        switch library.type {
+        case "photo": return "photo.fill"
+        case "shoot": return "photo.on.rectangle.angled"
+        default: return "film.fill"
+        }
+    }
+
+    /// 数量缩到最短量词，和库名挤在两行内即可。
     private var countText: String {
         switch library.type {
-        case "photo": return "\(library.itemCount) 张照片"
-        case "shoot": return "\(library.itemCount) 个拍摄集"
+        case "photo": return "\(library.itemCount) 张"
+        case "shoot": return "\(library.itemCount) 个"
         default: return "\(library.itemCount) 部"
         }
     }
@@ -342,15 +354,14 @@ private struct LibraryShortcutCard: View {
                 RemoteImage(url: coverURL, fallbackIcon: "folder.fill",
                             fallbackColors: Theme.placeholderGradient(for: kind))
                     .imageFilled()
-                LinearGradient(colors: [.clear, Color.black.opacity(0.82)],
-                               startPoint: .center, endPoint: .bottom)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(library.displayType)
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(Theme.tint(for: kind).opacity(0.9), in: Capsule())
+                // ⚠️ 只在底部 58pt 压暗。旧版从 .center 一路 0.82 黑到底，
+                // 加上三行文字，整块下半张都变成「信息区」，封面几乎看不见。
+                LinearGradient(colors: [.clear, Color.black.opacity(0.62)],
+                               startPoint: .top, endPoint: .bottom)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 58)
+                    .allowsHitTesting(false)
+                VStack(alignment: .leading, spacing: 2) {
                     Text(library.name)
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.white)
@@ -358,12 +369,22 @@ private struct LibraryShortcutCard: View {
                         .truncationMode(.tail)
                     Text(countText)
                         .font(.caption2)
-                        .foregroundStyle(.white.opacity(0.75))
+                        .foregroundStyle(.white.opacity(0.78))
                 }
-                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 12)
+                .padding(.bottom, 10)
             }
             .frame(width: 220, height: 136)
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(alignment: .topTrailing) {
+                Image(systemName: kindIcon)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 26, height: 26)
+                    .background(Theme.tint(for: kind).opacity(0.92), in: Circle())
+                    .padding(10)
+            }
             .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(.white.opacity(0.16), lineWidth: 0.6))
             .shadow(color: .black.opacity(0.18), radius: 10, y: 5)
