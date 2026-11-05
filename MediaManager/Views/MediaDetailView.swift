@@ -348,94 +348,7 @@ struct MediaDetailView: View {
                 }
             }
 
-            VStack(alignment: .leading, spacing: 20) {
-                // 简介已移到 Hero 白屏区右列（海报右下，与封面区分界线衔接）
-
-                // 演员（有 id 的跳演员详情页；后端 2026-10-13 起在 actors 里输出 id，
-                // 老数据 / JSON 兜底没有 id → 保持不可点，不会坏）
-                if !d.actors.isEmpty {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("演员").font(.headline)
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            LazyHStack(spacing: 14) {
-                                ForEach(d.actors) { actor in
-                                    if let actorId = actor.actorId {
-                                        NavigationLink(value: ActorRoute(id: actorId)) {
-                                            ActorChip(actor: actor)
-                                        }
-                                        .buttonStyle(.plain)
-                                    } else {
-                                        ActorChip(actor: actor)
-                                    }
-                                }
-                            }
-                            .padding(.horizontal, 2)
-                        }
-                    }
-                }
-
-                // 详情网格
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("详情").font(.headline)
-                    VStack(alignment: .leading, spacing: 8) {
-                        if let director = d.director, !director.isEmpty {
-                            InfoRow(label: "导演", value: director)
-                        }
-                        if let studio = d.studio, !studio.isEmpty {
-                            InfoRow(label: "制片厂", value: studio)
-                        }
-                        if let country = d.country, !country.isEmpty {
-                            InfoRow(label: "国家", value: country)
-                        }
-                        if let releaseDate = d.releaseDate, !releaseDate.isEmpty {
-                            InfoRow(label: "上映", value: releaseDate.prefix(10).description)
-                        }
-                        if let year = d.year, year > 0 {
-                            InfoRow(label: "年份", value: "\(year)")
-                        }
-                        if let rt = d.runtimeText {
-                            InfoRow(label: "时长", value: rt)
-                        }
-                        if let rating = d.rating, rating > 0 {
-                            InfoRow(label: "评分", value: String(format: "%.1f", rating))
-                        }
-                    }
-                }
-
-                // 文件路径
-                if let fp = d.folderPath, !fp.isEmpty {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("文件").font(.headline)
-                        Text(fp).font(.caption).foregroundStyle(.secondary)
-                            .textSelection(.enabled)
-                    }
-                }
-
-                // 剧照画廊
-                if !stillsPhotos.isEmpty {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("剧照").font(.headline)
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 110), spacing: 8)], spacing: 8) {
-                            ForEach(stillsPhotos.indices, id: \.self) { i in
-                                Button {
-                                    PhotoViewerPresenter.shared.show(stillsPhotos, index: i)
-                                } label: {
-                                    RemoteImage(url: stillsPhotos[i].thumbURL, fallbackIcon: "photo",
-                                                fallbackColors: Theme.placeholderGradient(for: .media))
-                                        .imageFilled()
-                                        .frame(height: 90)
-                                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                    }
-                }
-
-                Spacer(minLength: 20)
-            }
-            .padding(16)
-            .bottomBarClearance()
+            lowerContent(d)
         }
         .appBackground()
         // 演员头像 → 演员详情页（ActorRoute 包一层，避免与栈里其它 Int value 撞车）
@@ -460,6 +373,159 @@ struct MediaDetailView: View {
             p.thumbURL = url
             p.fullURL = url
             return p
+        }
+    }
+
+    // MARK: 下半部分（Hero / 简介保持原样）
+    // 旧版是「演员 → 详情 → 文件 → 剧照」单列竖排：InfoRow 只贴左边一小块，
+    // iPad 上右侧整片留白；四块叠起来又把剧照顶到屏幕外，要滚很久才看得到。
+    // 现在：
+    //   iPad  → 演员 / 详情 并排各占一半（右边被详情卡填满），剧照全宽紧跟其后
+    //   iPhone → 单列，但剧照提到详情前面，一屏内就能看到
+    // 区块统一卡片底板（appSurface + 描边 + 轻投影），空缺处也不再像散落文字。
+    @ViewBuilder
+    private func lowerContent(_ d: MediaDetail) -> some View {
+        VStack(alignment: .leading, spacing: isWide ? 16 : 14) {
+            if isWide {
+                HStack(alignment: .top, spacing: 16) {
+                    castSection(d)
+                    infoSection(d)
+                }
+                stillsSection
+            } else {
+                castSection(d)
+                stillsSection
+                infoSection(d)
+            }
+            Spacer(minLength: 8)
+        }
+        // 左右与 Hero 用同一条起始线（iPad heroPad=32 / iPhone 16），
+        // 否则卡片边缘比上面的封面区缩进 16pt，看着像两块没对齐的版面
+        .padding(.horizontal, heroPad)
+        .padding(.vertical, 16)
+        .bottomBarClearance()
+    }
+
+    /// 统一面板：实体底板 + 细描边 + 轻投影，宽度吃满（HStack 里各占一半）
+    private func panel<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        content()
+            .padding(isWide ? 16 : 14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .appSurface(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.primary.opacity(0.08), lineWidth: 0.5))
+            .shadow(color: .black.opacity(0.08), radius: 8, y: 3)
+    }
+
+    private func sectionTitle(_ title: String, icon: String, suffix: String? = nil) -> some View {
+        HStack(spacing: 7) {
+            Image(systemName: icon)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Theme.brand)
+            Text(title).font(isWide ? .headline : .subheadline.weight(.semibold))
+            if let suffix {
+                Text(suffix).font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    @ViewBuilder
+    private func castSection(_ d: MediaDetail) -> some View {
+        if !d.actors.isEmpty {
+            panel {
+                VStack(alignment: .leading, spacing: 12) {
+                    sectionTitle("演员", icon: "person.2.fill", suffix: "\(d.actors.count) 人")
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        LazyHStack(spacing: 14) {
+                            ForEach(d.actors) { actor in
+                                if let actorId = actor.actorId {
+                                    NavigationLink(value: ActorRoute(id: actorId)) {
+                                        ActorChip(actor: actor)
+                                    }
+                                    .buttonStyle(.plain)
+                                } else {
+                                    ActorChip(actor: actor)
+                                }
+                            }
+                        }
+                        .padding(.horizontal, 2)
+                    }
+                }
+            }
+        }
+    }
+
+    /// 详情改成自适应网格的「标签在上、值在下」小格子，不再是一列贴左的长条。
+    /// 文件路径并进同一张卡，少占一个整行区块，剧照能再往上提一段。
+    @ViewBuilder
+    private func infoSection(_ d: MediaDetail) -> some View {
+        panel {
+            VStack(alignment: .leading, spacing: 12) {
+                sectionTitle("详情", icon: "info.circle.fill")
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: isWide ? 118 : 104), spacing: 10)],
+                          spacing: 12) {
+                    if let director = d.director, !director.isEmpty {
+                        InfoTile(label: "导演", value: director)
+                    }
+                    if let studio = d.studio, !studio.isEmpty {
+                        InfoTile(label: "制片厂", value: studio)
+                    }
+                    if let country = d.country, !country.isEmpty {
+                        InfoTile(label: "国家", value: country)
+                    }
+                    if let releaseDate = d.releaseDate, !releaseDate.isEmpty {
+                        InfoTile(label: "上映", value: releaseDate.prefix(10).description)
+                    }
+                    if let year = d.year, year > 0 {
+                        InfoTile(label: "年份", value: "\(year)")
+                    }
+                    if let rt = d.runtimeText {
+                        InfoTile(label: "时长", value: rt)
+                    }
+                    if let rating = d.rating, rating > 0 {
+                        InfoTile(label: "评分", value: String(format: "%.1f", rating))
+                    }
+                }
+                if let fp = d.folderPath, !fp.isEmpty {
+                    Divider().opacity(0.5)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("文件路径").font(.caption2).foregroundStyle(.secondary)
+                        Text(fp).font(.caption).foregroundStyle(.secondary)
+                            .lineLimit(2)
+                            .truncationMode(.middle)
+                            .textSelection(.enabled)
+                    }
+                }
+            }
+        }
+    }
+
+    /// 剧照全宽网格：列数随屏宽自适应，iPad 上 20 张只要 3~4 行。
+    @ViewBuilder
+    private var stillsSection: some View {
+        if !stillsPhotos.isEmpty {
+            panel {
+                VStack(alignment: .leading, spacing: 12) {
+                    sectionTitle("剧照", icon: "photo.on.rectangle",
+                                 suffix: "\(stillsPhotos.count) 张")
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: isWide ? 150 : 100), spacing: 8)],
+                              spacing: 8) {
+                        ForEach(stillsPhotos.indices, id: \.self) { i in
+                            Button {
+                                PhotoViewerPresenter.shared.show(stillsPhotos, index: i)
+                            } label: {
+                                RemoteImage(url: stillsPhotos[i].thumbURL, fallbackIcon: "photo",
+                                            fallbackColors: Theme.placeholderGradient(for: .media))
+                                    .imageFilled()
+                                    .frame(height: isWide ? 110 : 90)
+                                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -653,15 +719,18 @@ private struct ActorChip: View {
     }
 }
 
-// MARK: - 详情行
-private struct InfoRow: View {
+// MARK: - 详情格子（网格自适应列数，label 在上 / value 在下）
+private struct InfoTile: View {
     let label: String
     let value: String
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Text(label).font(.subheadline).foregroundStyle(.secondary).frame(width: 48, alignment: .leading)
-            Text(value).font(.subheadline).foregroundStyle(.primary)
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label).font(.caption2).foregroundStyle(.secondary)
+            Text(value).font(.subheadline.weight(.medium))
+                .lineLimit(2)
+                .truncationMode(.tail)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
