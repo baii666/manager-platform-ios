@@ -256,6 +256,14 @@ struct LibraryHomeView: View {
         }
 
         var type: String { rawValue }
+
+        var icon: String {
+            switch self {
+            case .movie: return "film.fill"
+            case .photo: return "photo.fill"
+            case .shoot: return "camera.fill"
+            }
+        }
     }
 
     /// 当前二级分类：由根视图持有（binding），首页「拍摄集」卡跨 tab 落准分类用
@@ -264,29 +272,37 @@ struct LibraryHomeView: View {
     var body: some View {
         VStack(spacing: 0) {
             // 顶 bar：电影 / 相册 / 拍摄集（居中）
-            HStack(spacing: 6) {
+            // ⚠️ 旧样式是「灰色实心底板 + 品牌色实心选中」，三颗大胶囊压在顶栏很笨重。
+            //    改成和「人物」页 / 搜索页分类同一套语言：品牌色 15% 淡底 + 图标，
+            //    未选中透明底；字重恒定，切分类时整排不会左右晃。
+            HStack(spacing: 8) {
                 ForEach(Category.allCases) { c in
                     Button {
                         category = c
                     } label: {
-                        Text(c.title)
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(category == c ? Color.white : Color.primary)
-                            .padding(.horizontal, 18)
-                            .padding(.vertical, 8)
-                            .background(
-                                category == c
-                                    ? Theme.brand
-                                    : Color(uiColor: .secondarySystemBackground),
-                                in: Capsule()
-                            )
+                        HStack(spacing: 6) {
+                            Image(systemName: c.icon)
+                                .font(.system(size: 13, weight: .semibold))
+                            Text(c.title)
+                        }
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(category == c ? Theme.brand : Color.secondary)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(
+                            category == c ? Theme.brand.opacity(0.15) : Color.clear,
+                            in: Capsule()
+                        )
                     }
                     .buttonStyle(.plain)
                 }
             }
             .frame(maxWidth: .infinity)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
+            .padding(.horizontal, 24)
+            .padding(.top, 12)
+            .padding(.bottom, 8)
+            // 只给胶囊上色加动画；不包 category 赋值，避免和 TabView(.page) 的翻页动画打架
+            .animation(.easeInOut(duration: 0.18), value: category)
 
             // 三个分类可左右滑动切换（顶 bar 点击与滑动双向同步）
             TabView(selection: $category) {
