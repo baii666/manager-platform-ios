@@ -94,7 +94,8 @@ struct ShortsView: View {
     @Environment(\.horizontalSizeClass) private var hSizeClass
 
     private let gridSpacing: CGFloat = 16
-    private let edgePadding: CGFloat = 20
+    /// 与首页 / 我的 / 媒体库网格统一左右留白（都是 24）
+    private let edgePadding: CGFloat = 24
 
     private var columns: [GridItem] {
         // 形状跟着列宽走：池封面实测 6 张里 5 张是 9:16 竖版，塞进近似 1:1 的
@@ -139,17 +140,19 @@ struct ShortsView: View {
                 }
             }
             .padding(.horizontal, edgePadding)
-            .padding(.top, 10)
+            // 与首页 HomeView 的 .padding(.vertical, 24) 对齐：tab 之间内容起始线一致
+            .padding(.top, 24)
             .bottomBarClearance()
         }
         .navigationDestination(item: $route) { r in
             PoolVideosView(poolId: r.poolId, poolName: r.name)
         }
-        // ⚠️ 顶栏故意不放任何东西：这里以前塞的是列表页那套 ListSearchBarItem
-        //（死宽 170pt 小灰框 + 灰色「短视频」页名），和下面的沉浸式 Hero 是两套
-        // 语言，页名还跟 Hero 里的「全部短视频」重复。现在 Hero 独占页面头部，
-        // 池名搜索移到内容区的「视频池」标题行，点放大镜才展开。
-        // 不隐藏 navigationBar：隐藏后 push 到池内页时右滑返回会失效（踩过）。
+        // 顶栏与首页 / 我的同构：只放 inline 的 tab 名。之前塞的是列表页那套
+        // ListSearchBarItem（死宽小灰框 + 灰色页名），和沉浸式 Hero 是两套语言；
+        // 池名搜索已移到内容区「视频池」标题行，点放大镜才展开。
+        // ⚠️ 别隐藏 navigationBar：隐藏后 push 到池内页时右滑返回会失效（踩过）。
+        .navigationTitle("短视频")
+        .navigationBarTitleDisplayMode(.inline)
         .tint(Theme.brand)
         // ⚠️ 每个 tab 都要自己垫背景：NavigationStack 只渲染栈顶那一层
         .appBackground()
