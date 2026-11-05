@@ -89,16 +89,23 @@ final class VidHubBridge: ObservableObject {
 
         lock.lock(); let p = pending[requestId]; lock.unlock()
 
+        // 拍摄集视频没有 request-id → p 为 nil。打开回调 URL 这个动作本身
+        // 已经把用户送回本 App，目的就达到了；无归属的事件不要广播到
+        // lastEvent（详情页按 mediaId 领事件，无主事件只会一直挂着没人收）。
         switch action {
         case "success": onSuccess(p, q)
         case "error":
-            let event = Event.failed(mediaId: p?.mediaId, title: p?.title,
-                                     message: Self.errorMessage(code: Int(q["errorCode"] ?? ""),
-                                                                raw: q["errorMessage"]))
-            Task { @MainActor in self.lastEvent = event }
+            if let p {
+                let event = Event.failed(mediaId: p.mediaId, title: p.title,
+                                         message: Self.errorMessage(code: Int(q["errorCode"] ?? ""),
+                                                                    raw: q["errorMessage"]))
+                Task { @MainActor in self.lastEvent = event }
+            }
         case "cancel":
-            let event = Event.cancelled(mediaId: p?.mediaId, title: p?.title)
-            Task { @MainActor in self.lastEvent = event }
+            if let p {
+                let event = Event.cancelled(mediaId: p.mediaId, title: p.title)
+                Task { @MainActor in self.lastEvent = event }
+            }
         default: break
         }
 
@@ -234,7 +241,8 @@ final class VidHubLauncher: ObservableObject {
 
     private struct Prepared {
         /// nil = 无进度归属（拍摄集视频：后端 asset_type=shoot 不支持 progress，
-        /// ShootFile 也不返回文件路径、抽不了字幕）→ 不查进度、不带回调。
+        /// ShootFile 也不返回文件路径、抽不了字幕）→ 不查进度、不写进度。
+        /// ⚠️ 但仍要带 x-success 等回调地址，否则跳进 VidHub 后回不来。
         let mediaId: Int?
         let mediaURL: URL
         let title: String
@@ -271,6 +279,8 @@ final class VidHubLauncher: ObservableObject {
 
     /// 「没有进度归属」的内容（拍摄集视频）走这里：拼好地址直接跳，
     /// 不查进度也不探字幕 —— 这两样对拍摄集视频都拿不到（见 Prepared.mediaId）。
+    /// 回调地址照带（buildVidHubURL 无条件拼），VidHub 退出播放器时会把人送回本 App；
+    /// 只是没有 request-id，回来的回调无法归属进度，会被静默丢弃。
     /// 跳转本身仍然防连点、仍然走 canOpenURL 兜底。
     func play(url: URL, title: String) {
         Task { @MainActor in
@@ -412,8 +422,9 @@ final class VidHubLauncher: ObservableObject {
 
     @MainActor
     private func openVidHub(_ p: Prepared, subURL: URL?) {
-        // 没归属就不登记：回调要靠 request-id 认回具体影片，无人认领的回调
-        // 没必要让 VidHub 多带三个参数
+        // 没归属就不登记 request-id（登记表只为把进度认回具体影片）。
+        // 但 x-success 等回调地址在 buildVidHubURL 里是无条件带的，
+        // 否则拍摄集视频跳进 VidHub 后退出回不到本 App。
         let requestId = p.mediaId.map { VidHubBridge.shared.register(mediaId: $0, title: p.title) }
         guard let url = Self.buildVidHubURL(p, subURL: subURL, requestId: requestId) else {
             error = "拼接 VidHub 地址失败"
@@ -448,14 +459,17 @@ final class VidHubLauncher: ObservableObject {
             URLQueryItem(name: "url", value: p.mediaURL.absoluteString),
             URLQueryItem(name: "filename", value: p.title),
             URLQueryItem(name: "x-source", value: "媒体库"),
+            // 🔴 回调地址必须无条件带：VidHub 退出播放器时靠打开 x-success
+            // 把用户送回本 App。request-id 只负责把进度认回具体影片，两者无关。
+            // 早先只在有 requestId 时才拼这三个参数 → 拍摄集视频（无进度归属）
+            // 跳过去之后就回不来，只能自己手动切回 App。
+            URLQueryItem(name: "x-success", value: "\(VidHubBridge.scheme)://x-callback-url/success"),
+            URLQueryItem(name: "x-error", value: "\(VidHubBridge.scheme)://x-callback-url/error"),
+            URLQueryItem(name: "x-cancel", value: "\(VidHubBridge.scheme)://x-callback-url/cancel"),
         ]
         if let requestId {
-            items.append(contentsOf: [
-                URLQueryItem(name: "request-id", value: requestId),
-                URLQueryItem(name: "x-success", value: "\(VidHubBridge.scheme)://x-callback-url/success"),
-                URLQueryItem(name: "x-error", value: "\(VidHubBridge.scheme)://x-callback-url/error"),
-                URLQueryItem(name: "x-cancel", value: "\(VidHubBridge.scheme)://x-callback-url/cancel"),
-            ])
+            // 只有媒体详情这种能写进度的才登记；拍摄集不带，回调照样能回 App。
+            items.append(URLQueryItem(name: "request-id", value: requestId))
         }
         if pos >= 1 {
             // 秒数取整：VidHub 只认「valid number」，整数最稳
