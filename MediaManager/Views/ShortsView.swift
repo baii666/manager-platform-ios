@@ -90,91 +90,69 @@ struct ShortsView: View {
     /// 与电影/相册/拍摄集列表同一判据，保证各 tab 顶栏行为一致
     @Environment(\.horizontalSizeClass) private var hSizeClass
 
-    private let gridSpacing: CGFloat = 12
-    private let edgePadding: CGFloat = 16
+    private let gridSpacing: CGFloat = 14
+    private let edgePadding: CGFloat = 20
 
     private var columns: [GridItem] {
-        [GridItem(.adaptive(minimum: 160, maximum: 220), spacing: gridSpacing)]
+        [GridItem(.adaptive(minimum: 170, maximum: 240), spacing: gridSpacing)]
     }
 
     var body: some View {
         ScrollView {
-            LazyVGrid(columns: columns, spacing: gridSpacing) {
-                // 「全部」固定第一张，搜索时也在：它是回得来的「家」
-                PoolCard(title: "全部", count: totalVideoCount, coverURL: nil) {
-                    route = .all
-                }
-                ForEach(filteredPools) { pool in
-                    PoolCard(title: pool.name, count: pool.itemCount,
-                             coverURL: poolCoverURL(pool)) {
-                        route = .pool(id: pool.id, name: pool.name)
+            VStack(alignment: .leading, spacing: 22) {
+                // 顶部主入口：把「全部」从一张和普通池一样大的方格里拎出来，
+                // 做成整页唯一的横幅；随机连播也不再挤在工具栏里
+                heroCard
+
+                if poolsLoaded && pools.isEmpty {
+                    ContentUnavailableView(poolsError ?? "还没有池",
+                                           systemImage: poolsError == nil ? "square.stack.3d.up.slash" : "exclamationmark.triangle")
+                        .frame(maxWidth: .infinity, minHeight: 260)
+                } else {
+                    poolsHeader
+                    if !poolSearchText.isEmpty && filteredPools.isEmpty {
+                        ContentUnavailableView("没有匹配的池", systemImage: "magnifyingglass")
+                            .frame(maxWidth: .infinity, minHeight: 200)
+                    } else {
+                        LazyVGrid(columns: columns, spacing: gridSpacing) {
+                            ForEach(filteredPools) { pool in
+                                Button {
+                                    route = .pool(id: pool.id, name: pool.name)
+                                } label: {
+                                    PoolCoverCard(title: pool.name, count: pool.itemCount,
+                                                  coverURL: poolCoverURL(pool))
+                                }
+                                .buttonStyle(PressableCardStyle())
+                            }
+                        }
                     }
                 }
             }
-            .padding(edgePadding)
-
-            if poolsLoaded && pools.isEmpty {
-                ContentUnavailableView(poolsError ?? "还没有池",
-                                       systemImage: poolsError == nil ? "square.stack.3d.up.slash" : "exclamationmark.triangle")
-                    .frame(maxWidth: .infinity, minHeight: 400)
-            } else if !poolSearchText.isEmpty && filteredPools.isEmpty {
-                ContentUnavailableView("没有匹配的池", systemImage: "magnifyingglass")
-                    .frame(maxWidth: .infinity, minHeight: 200)
-            }
+            .padding(.horizontal, edgePadding)
+            .padding(.top, 18)
+            .bottomBarClearance()
         }
         .navigationDestination(item: $route) { r in
             PoolVideosView(poolId: r.poolId, poolName: r.name)
         }
-        // ⚠️ 顶部栏与电影/相册/拍摄集/演员四个列表页完全同构（ ListTopBar.swift 那套）：
-        // ListSearchBarItem（靠左死宽搜索框 + 页名）+ TrailingToolsItem
-        // （随机 / 计数，间距由 ToolbarMetrics 统一）。
-        // 这里搜的是池名（本地过滤），不是视频 —— 视频搜索在池内页
+        // 顶栏只留搜索（与其它列表页同构）；随机连播与全库计数都在 Hero 上有自己的位置
         .toolbar {
             ListSearchBarItem(text: $poolSearchText,
                               placeholder: "搜索池名…",
                               title: "短视频",
                               narrow: hSizeClass == .compact)
-            TrailingToolsItem {
-                // 随机刷流：从「全部」范围随机起播 —— 首页「连播」卡同款能力，
-                // 现在 tab 内也能直接发起（池内随机在 PoolVideosView 里）
-                ToolChip(label: "随机", icon: "shuffle", iconOnly: true) {
-                    startRandomFeed()
-                }
-                if hSizeClass == .regular {
-                    Text("\(pools.count) 池 · \(totalVideoCount) 支")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                        // ⚠️ 不加 fixedSize：工具栏空间紧张时 Text 会被压缩换行，
-                        // 变成上下两行，把导航栏撑高
-                        .fixedSize(horizontal: true, vertical: false)
-                        .lineLimit(1)
-                        // ⚠️ 给计数留固定槽位：整排锚定屏幕右缘，数字位数一变
-                        // 整排按钮就被推着左右挪
-                        .frame(minWidth: ToolbarMetrics.countMinWidth, alignment: .trailing)
-                        // 与前面按钮的间隔独立于按钮间距（见 ToolbarMetrics.countGap）
-                        .padding(.leading, ToolbarMetrics.countGap)
-                }
-            }
         }
         .tint(Theme.brand)
-        // ⚠️ 每个 tab / 每个 push 进来的页面都要自己垫一层背景：
-        // NavigationStack 只渲染栈顶那一层，App 根的背景透不进来
+        // ⚠️ 每个 tab 都要自己垫背景：NavigationStack 只渲染栈顶那一层
         .appBackground()
-        // 「全部」VM 拉第一页：随机刷流的数据源（首页卡不等页面加载完就要能开）
         .task { await viewModel.loadInitial() }
         .task { await loadPools() }
         .refreshing { await loadPools() }
         // 首页「短视频连播」卡 → 随机起始的沉浸刷流
-        // ⚠️ iOS 17 起 `onChange(of:) { newValue in }`（单参数，含 `{ _ in }`）已废弃，
-        // 统一用零参数闭包，闭包内直接读属性即为新值
         .onChange(of: randomRequest.generation) {
-            // 已在刷流中：忽略（连点只第一次生效）
             guard !feedPresenter.isActive else { return }
             if viewModel.items.isEmpty {
-                // 首帧 loading 未回：置位，items 到达后由下面的 onChange 补开
                 pendingRandomOpen = true
-                // ⚠️ 从首页卡进来时本页可能一次都没进过（items 还是空的），
-                // 光置位会一直等不到 —— 主动拉一次
                 Task { await viewModel.loadInitial() }
             } else {
                 startRandomFeed()
@@ -185,6 +163,94 @@ struct ShortsView: View {
                 pendingRandomOpen = false
                 startRandomFeed()
             }
+        }
+    }
+
+    // MARK: Hero
+
+    private var heroHeight: CGFloat { hSizeClass == .compact ? 200 : 224 }
+
+    /// 氛围底图取「视频数最多的那个有封面的池」；一个封面都没有就走品牌渐变
+    private var featuredCoverURL: URL? {
+        let withCover = pools.filter { !(($0.coverUrl ?? "").isEmpty) }
+        return withCover.max { $0.itemCount < $1.itemCount }.flatMap { poolCoverURL($0) }
+    }
+
+    /// 全库横幅。两个按钮**并列**放，绝不嵌套 Button（嵌套时内层点击会被外层吞掉）
+    private var heroCard: some View {
+        ZStack(alignment: .bottomLeading) {
+            heroBackdrop
+            LinearGradient(colors: [.clear, Color.black.opacity(0.25), Color.black.opacity(0.80)],
+                           startPoint: .top, endPoint: .bottom)
+            VStack(alignment: .leading, spacing: 8) {
+                Label("短视频库", systemImage: "play.rectangle.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.85))
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 4)
+                    .background(.white.opacity(0.16), in: Capsule())
+                Text("全部短视频")
+                    .font(.system(size: hSizeClass == .compact ? 24 : 28, weight: .bold))
+                    .foregroundStyle(.white)
+                Text("\(totalVideoCount) 支视频 · \(pools.count) 个池")
+                    .font(.subheadline)
+                    .foregroundStyle(.white.opacity(0.82))
+                HStack(spacing: 10) {
+                    Button { startRandomFeed() } label: {
+                        Label("随机连播", systemImage: "shuffle")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Color.black.opacity(0.82))
+                            .padding(.horizontal, 15)
+                            .padding(.vertical, 9)
+                            .background(.white, in: Capsule())
+                    }
+                    Button { route = .all } label: {
+                        Label("全部视频", systemImage: "square.grid.2x2")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 13)
+                            .padding(.vertical, 9)
+                            .background(.white.opacity(0.18), in: Capsule())
+                            .overlay(Capsule().stroke(.white.opacity(0.28), lineWidth: 0.5))
+                    }
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 4)
+            }
+            .padding(20)
+        }
+        .frame(maxWidth: .infinity, minHeight: heroHeight, maxHeight: heroHeight)
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
+            .stroke(Color.primary.opacity(0.08), lineWidth: 0.5))
+        .shadow(color: .black.opacity(0.16), radius: 16, y: 6)
+    }
+
+    @ViewBuilder
+    private var heroBackdrop: some View {
+        if let url = featuredCoverURL {
+            RemoteImage(url: url,
+                        fallbackIcon: "play.rectangle.on.rectangle",
+                        fallbackColors: Theme.placeholderGradient(for: .short))
+                .imageFilled()
+                .frame(maxWidth: .infinity, minHeight: heroHeight, maxHeight: heroHeight)
+                .overlay(Color.black.opacity(0.20))
+        } else {
+            LinearGradient(colors: [Theme.tint(for: .short).opacity(0.9),
+                                    Color(red: 0.22, green: 0.10, blue: 0.28)],
+                           startPoint: .topLeading, endPoint: .bottomTrailing)
+        }
+    }
+
+    private var poolsHeader: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Label("视频池", systemImage: "square.stack.3d.up.fill")
+                .font(.headline)
+                .foregroundStyle(.primary)
+            Spacer()
+            Text("\(filteredPools.count) 个 · 按数量排序")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -265,65 +331,49 @@ enum PoolRoute: Identifiable, Hashable {
     }
 }
 
-// MARK: - 池卡（对齐相册卡：封面 + 右下角计数 + 标题区）
-/// 只做入口：没有管理动作（扫描 / 抽帧 / 删除在网页端管理侧）
-private struct PoolCard: View {
+// MARK: - 池卡（整张封面即卡片）
+// 旧版是「灰底封面 + 白色文字区 + 右下角再放一次计数」的文件管理器观感。
+// 现在封面铺满整卡，池名与数量压在底部暗色渐变上，卡片边界靠圆角/描边/投影。
+private struct PoolCoverCard: View {
     let title: String
     let count: Int
-    var coverURL: URL? = nil
+    let coverURL: URL?
 
-    /// 封面高度写死：视频海报混了横屏 / 竖屏 / 4K，行高随内容变
-    /// LazyVGrid 就不重排已布局的行 → 卡片互相压（同 ShortCard 的理由）
-    private let coverHeight: CGFloat = 150
-    /// 标题区高度（名字一行 + 计数一行）
-    private let infoHeight: CGFloat = 46
+    /// 固定高度：封面横竖混杂，行高随内容变会让 LazyVGrid 重排（同 ShortCard 的理由）
+    private let cardHeight: CGFloat = 196
 
     var body: some View {
-        Button(action: onTap) {
-            VStack(alignment: .leading, spacing: 0) {
-                ZStack(alignment: .bottomTrailing) {
-                    RemoteImage(url: coverURL,
-                                fallbackIcon: "play.rectangle.on.rectangle",
-                                fallbackColors: Theme.placeholderGradient(for: .short))
-                        .imageFilled()
-                        .frame(height: coverHeight)
-                        .frame(maxWidth: .infinity)
-                        .clipped()
-                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    // 右下角计数角标（同 AlbumCard）
-                    Text("\(count)")
-                        .font(.caption2.weight(.semibold))
-                        .monospacedDigit()
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
-                        .background(.black.opacity(0.55), in: Capsule())
-                        .padding(7)
-                }
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(title)
-                        .font(.subheadline.weight(.semibold))
-                        .lineLimit(1)
-                        .truncationMode(.tail)
+        ZStack(alignment: .bottomLeading) {
+            RemoteImage(url: coverURL,
+                        fallbackIcon: "play.rectangle.on.rectangle",
+                        fallbackColors: Theme.placeholderGradient(for: .short))
+                .imageFilled()
+                .frame(height: cardHeight)
+                .frame(maxWidth: .infinity)
+            LinearGradient(colors: [.clear, Color.black.opacity(0.08), Color.black.opacity(0.80)],
+                           startPoint: .top, endPoint: .bottom)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                HStack(spacing: 4) {
+                    Image(systemName: "play.fill")
+                        .font(.system(size: 9))
                     Text("\(count) 支")
                         .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 9)
-                .frame(height: infoHeight, alignment: .leading)
+                .foregroundStyle(.white.opacity(0.85))
             }
-            // 整卡高度也钉死，理由同 ShortCard
-            .frame(height: coverHeight + infoHeight, alignment: .top)
-            .clipped()
-            .appSurface(in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(.separator))
+            .padding(12)
         }
-        .buttonStyle(.plain)
+        .frame(height: cardHeight)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
+            .stroke(Color.white.opacity(0.14), lineWidth: 0.5))
+        .shadow(color: .black.opacity(0.12), radius: 10, y: 4)
     }
-
-    var onTap: () -> Void
 }
 
 // MARK: - 短视频 VM

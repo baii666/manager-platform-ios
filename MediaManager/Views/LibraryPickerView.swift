@@ -168,9 +168,9 @@ private struct LibraryCard: View {
     }
 }
 
-// MARK: - 卡片按压反馈
+// 卡片按压反馈（媒体库库卡 + 短视频池卡共用）
 // .plain 样式点了没任何反应，卡片感的一半是「按得下去」。轻缩放 + 变暗。
-private struct PressableCardStyle: ButtonStyle {
+struct PressableCardStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .scaleEffect(configuration.isPressed ? 0.97 : 1)
