@@ -90,16 +90,16 @@ struct ShortsView: View {
     /// 与电影/相册/拍摄集列表同一判据，保证各 tab 顶栏行为一致
     @Environment(\.horizontalSizeClass) private var hSizeClass
 
-    private let gridSpacing: CGFloat = 14
+    private let gridSpacing: CGFloat = 16
     private let edgePadding: CGFloat = 20
 
     private var columns: [GridItem] {
-        [GridItem(.adaptive(minimum: 170, maximum: 240), spacing: gridSpacing)]
+        [GridItem(.adaptive(minimum: 176, maximum: 250), spacing: gridSpacing)]
     }
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
+            VStack(alignment: .leading, spacing: 24) {
                 // 顶部主入口：把「全部」从一张和普通池一样大的方格里拎出来，
                 // 做成整页唯一的横幅；随机连播也不再挤在工具栏里
                 heroCard
@@ -168,7 +168,7 @@ struct ShortsView: View {
 
     // MARK: Hero
 
-    private var heroHeight: CGFloat { hSizeClass == .compact ? 200 : 224 }
+    private var heroHeight: CGFloat { hSizeClass == .compact ? 214 : 244 }
 
     /// 氛围底图取「视频数最多的那个有封面的池」；一个封面都没有就走品牌渐变
     private var featuredCoverURL: URL? {
@@ -180,50 +180,61 @@ struct ShortsView: View {
     private var heroCard: some View {
         ZStack(alignment: .bottomLeading) {
             heroBackdrop
-            LinearGradient(colors: [.clear, Color.black.opacity(0.25), Color.black.opacity(0.80)],
+            // 左侧压暗 + 底部压暗：两层渐变把文字从照片里"托"出来
+            LinearGradient(colors: [Color.black.opacity(0.55), .clear, .clear],
+                           startPoint: .leading, endPoint: .trailing)
+            LinearGradient(colors: [.clear, Color.black.opacity(0.18), Color.black.opacity(0.86)],
                            startPoint: .top, endPoint: .bottom)
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 9) {
                 Label("短视频库", systemImage: "play.rectangle.fill")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.85))
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 4)
-                    .background(.white.opacity(0.16), in: Capsule())
-                Text("全部短视频")
-                    .font(.system(size: hSizeClass == .compact ? 24 : 28, weight: .bold))
+                    .font(.caption.weight(.bold))
                     .foregroundStyle(.white)
-                Text("\(totalVideoCount) 支视频 · \(pools.count) 个池")
-                    .font(.subheadline)
-                    .foregroundStyle(.white.opacity(0.82))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Theme.tint(for: .short).opacity(0.92), in: Capsule())
+                Text("全部短视频")
+                    .font(.system(size: hSizeClass == .compact ? 27 : 32, weight: .heavy))
+                    .foregroundStyle(.white)
+                    .shadow(color: .black.opacity(0.45), radius: 10, y: 2)
+                HStack(spacing: 7) {
+                    Image(systemName: "square.stack.3d.up.fill")
+                        .font(.caption2)
+                    Text("\(totalVideoCount) 支视频")
+                    Text("·")
+                    Text("\(pools.count) 个池")
+                }
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.white.opacity(0.88))
                 HStack(spacing: 10) {
                     Button { startRandomFeed() } label: {
                         Label("随机连播", systemImage: "shuffle")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(Color.black.opacity(0.82))
-                            .padding(.horizontal, 15)
-                            .padding(.vertical, 9)
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(Color.black.opacity(0.85))
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
                             .background(.white, in: Capsule())
                     }
+                    .shadow(color: .black.opacity(0.25), radius: 8, y: 3)
                     Button { route = .all } label: {
                         Label("全部视频", systemImage: "square.grid.2x2")
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.white)
-                            .padding(.horizontal, 13)
-                            .padding(.vertical, 9)
-                            .background(.white.opacity(0.18), in: Capsule())
-                            .overlay(Capsule().stroke(.white.opacity(0.28), lineWidth: 0.5))
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                            .background(.ultraThinMaterial, in: Capsule())
+                            .overlay(Capsule().stroke(.white.opacity(0.35), lineWidth: 0.6))
                     }
                 }
                 .buttonStyle(.plain)
-                .padding(.top, 4)
+                .padding(.top, 6)
             }
-            .padding(20)
+            .padding(22)
         }
         .frame(maxWidth: .infinity, minHeight: heroHeight, maxHeight: heroHeight)
-        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
-            .stroke(Color.primary.opacity(0.08), lineWidth: 0.5))
-        .shadow(color: .black.opacity(0.16), radius: 16, y: 6)
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous)
+            .stroke(.white.opacity(0.18), lineWidth: 0.8))
+        .shadow(color: .black.opacity(0.30), radius: 22, y: 10)
     }
 
     @ViewBuilder
@@ -234,23 +245,37 @@ struct ShortsView: View {
                         fallbackColors: Theme.placeholderGradient(for: .short))
                 .imageFilled()
                 .frame(maxWidth: .infinity, minHeight: heroHeight, maxHeight: heroHeight)
-                .overlay(Color.black.opacity(0.20))
+                .overlay(Color.black.opacity(0.22))
         } else {
-            LinearGradient(colors: [Theme.tint(for: .short).opacity(0.9),
-                                    Color(red: 0.22, green: 0.10, blue: 0.28)],
-                           startPoint: .topLeading, endPoint: .bottomTrailing)
+            ZStack {
+                LinearGradient(colors: [Theme.tint(for: .short).opacity(0.95),
+                                        Color(red: 0.22, green: 0.10, blue: 0.28)],
+                               startPoint: .topLeading, endPoint: .bottomTrailing)
+                // 无封面时给一点光斑，别是一块死渐变
+                RadialGradient(colors: [Color.white.opacity(0.18), .clear],
+                               center: .topTrailing, startRadius: 0, endRadius: 260)
+            }
         }
     }
 
     private var poolsHeader: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Label("视频池", systemImage: "square.stack.3d.up.fill")
-                .font(.headline)
-                .foregroundStyle(.primary)
+        HStack(alignment: .center, spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("视频池")
+                    .font(.title3.weight(.bold))
+                    .foregroundStyle(.primary)
+                Text("按视频数排序 · 点开即可浏览")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             Spacer()
-            Text("\(filteredPools.count) 个 · 按数量排序")
-                .font(.caption)
+            Text("\(filteredPools.count) 个池")
+                .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
+                .padding(.horizontal, 11)
+                .padding(.vertical, 6)
+                .appSurface(in: Capsule())
+                .overlay(Capsule().stroke(Color.primary.opacity(0.10), lineWidth: 0.5))
         }
     }
 
@@ -331,48 +356,81 @@ enum PoolRoute: Identifiable, Hashable {
     }
 }
 
-// MARK: - 池卡（整张封面即卡片）
-// 旧版是「灰底封面 + 白色文字区 + 右下角再放一次计数」的文件管理器观感。
-// 现在封面铺满整卡，池名与数量压在底部暗色渐变上，卡片边界靠圆角/描边/投影。
+// MARK: - 池卡（实体相框卡）
+// 上一版是「整张封面即卡片」：照片直接贴到网格里，边界只剩一条 0.5pt 白线，
+// 在深色背景图上几乎看不出卡片轮廓（用户反馈「卡片效果不明显」）。
+// 现在做成有底板的相框卡：封面缩在板内、四周留白形成实体边，数量浮在图上、
+// 池名落在板内信息区，底板 / 描边 / 投影三层一起把卡片从背景里抬起来。
+// 高度仍全常量（封面定高 + 信息区单行），LazyVGrid 不会重排。
 private struct PoolCoverCard: View {
     let title: String
     let count: Int
     let coverURL: URL?
 
-    /// 固定高度：封面横竖混杂，行高随内容变会让 LazyVGrid 重排（同 ShortCard 的理由）
-    private let cardHeight: CGFloat = 196
+    private let imageHeight: CGFloat = 150
+    private let inset: CGFloat = 9
+    private let radius: CGFloat = 20
 
     var body: some View {
-        ZStack(alignment: .bottomLeading) {
-            RemoteImage(url: coverURL,
-                        fallbackIcon: "play.rectangle.on.rectangle",
-                        fallbackColors: Theme.placeholderGradient(for: .short))
-                .imageFilled()
-                .frame(height: cardHeight)
-                .frame(maxWidth: .infinity)
-            LinearGradient(colors: [.clear, Color.black.opacity(0.08), Color.black.opacity(0.80)],
-                           startPoint: .top, endPoint: .bottom)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
-                HStack(spacing: 4) {
-                    Image(systemName: "play.fill")
-                        .font(.system(size: 9))
-                    Text("\(count) 支")
-                        .font(.caption2)
-                }
-                .foregroundStyle(.white.opacity(0.85))
+        VStack(alignment: .leading, spacing: 0) {
+            ZStack(alignment: .topTrailing) {
+                RemoteImage(url: coverURL,
+                            fallbackIcon: "play.rectangle.on.rectangle",
+                            fallbackColors: Theme.placeholderGradient(for: .short))
+                    .imageFilled()
+                    .frame(height: imageHeight)
+                    .frame(maxWidth: .infinity)
+                // 上下压一层暗角：角标读得清，照片高光也不会吃掉卡片边缘
+                LinearGradient(colors: [Color.black.opacity(0.26), .clear, .clear,
+                                        Color.black.opacity(0.34)],
+                               startPoint: .top, endPoint: .bottom)
+                countBadge
+                    .padding(9)
             }
-            .padding(12)
+            .clipShape(RoundedRectangle(cornerRadius: radius - inset + 1, style: .continuous))
+
+            infoRow
+                .padding(.horizontal, 12)
+                .padding(.top, 10)
+                .padding(.bottom, 11)
         }
-        .frame(height: cardHeight)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
-            .stroke(Color.white.opacity(0.14), lineWidth: 0.5))
-        .shadow(color: .black.opacity(0.12), radius: 10, y: 4)
+        .padding(inset)
+        .appSurface(in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous)
+            .stroke(Color.primary.opacity(0.13), lineWidth: 0.6))
+        .shadow(color: .black.opacity(0.20), radius: 14, y: 7)
+    }
+
+    /// 数量只在这里出现一次（旧版右下角又数一遍，被嫌弃过）
+    private var countBadge: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "play.fill")
+                .font(.system(size: 8, weight: .bold))
+            Text("\(count) 支")
+                .font(.caption2.weight(.semibold))
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 5)
+        .background(.black.opacity(0.45), in: Capsule())
+        .overlay(Capsule().stroke(.white.opacity(0.24), lineWidth: 0.5))
+    }
+
+    private var infoRow: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "square.stack.3d.up.fill")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(Theme.tint(for: .short))
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 3)
+            Image(systemName: "chevron.right")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(Color.secondary.opacity(0.55))
+        }
     }
 }
 
