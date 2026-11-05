@@ -65,7 +65,8 @@ struct HomeView: View {
             case .photoBrowser:
                 PhotoBrowserView()
             case .persons:
-                PersonsView()
+                // 「以人找内容」统一入口：照片人脸聚类 + 影视演员分段切换
+                PeopleHubView()
             case .search(let q):
                 SearchView(initialQuery: q)
             }
@@ -208,7 +209,7 @@ struct HomeView: View {
                 DiscoverCard(icon: "shuffle", title: "随机照片", subtitle: "从图库里随便逛", tint: .green) {
                     path.append(HomeRoute.photoBrowser)
                 }
-                DiscoverCard(icon: "person.2.fill", title: "人物", subtitle: "人脸聚类结果", tint: .cyan) {
+                DiscoverCard(icon: "person.2.fill", title: "人物", subtitle: "照片人物与影视演员", tint: .cyan) {
                     path.append(HomeRoute.persons)
                 }
                 DiscoverCard(icon: "heart.fill", title: "我的收藏", subtitle: "收藏的内容都在这", tint: .pink) {

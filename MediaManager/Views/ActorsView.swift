@@ -11,6 +11,9 @@ struct ActorRoute: Hashable {
 // 对齐网页端 ActorsPage：演员网格（头像 + 姓名 + 作品数）+ 搜索。
 // 入口：电影/剧集列表页工具栏「演员」chip；演员详情里也可继续跳关联演员。
 struct ActorsView: View {
+    /// 嵌进「人物」聚合页（PeopleHubView）时由外层统一提供标题与背景。
+    /// 独立从电影列表「演员」chip 进来时仍是完整的演员页。
+    var embedded: Bool = false
     @StateObject private var viewModel = ActorsViewModel()
 
     var body: some View {
@@ -32,9 +35,10 @@ struct ActorsView: View {
                 ProgressView().frame(maxWidth: .infinity).padding()
             }
         }
-        .navigationTitle("演员")
+        .navigationTitle(embedded ? "人物" : "演员")
         .navigationBarTitleDisplayMode(.inline)
-        .appBackground()
+        // 嵌进「人物」聚合页时由外层统一铺背景，避免背景图模式下压暗两次
+        .background { if !embedded { AppBackgroundView() } }
         .searchable(text: $viewModel.searchText, prompt: "搜索演员…")
         .refreshing { await viewModel.reload() }
         .toolbar {

@@ -6,6 +6,8 @@ import SwiftUI
 // ⚠️ 人物是跨媒体库的全局聚类（face_cluster_persons_* 分表），不属于任何一个库，
 // 所以本页自己拉数据，不挂任何库/排序状态。
 struct PersonsView: View {
+    /// 嵌进「人物」聚合页（PeopleHubView）时由外层统一铺背景与标题。
+    var embedded: Bool = false
     @StateObject private var viewModel = PersonsViewModel()
 
     var body: some View {
@@ -29,8 +31,9 @@ struct PersonsView: View {
         }
         .navigationTitle("人物")
         .navigationBarTitleDisplayMode(.inline)
-        // ⚠️ 每个 push 进来的页面都要自己垫一层背景：NavigationStack 只渲染栈顶那一层
-        .appBackground()
+        // ⚠️ 每个 push 进来的页面都要自己垫一层背景：NavigationStack 只渲染栈顶那一层。
+        // 嵌进「人物」聚合页时由外层统一铺，否则背景图模式会压暗两次。
+        .background { if !embedded { AppBackgroundView() } }
         .refreshing { await viewModel.reload() }
         .overlay {
             if viewModel.items.isEmpty && !viewModel.isLoading {
