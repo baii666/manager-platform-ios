@@ -94,13 +94,19 @@ struct ShortsView: View {
     private let edgePadding: CGFloat = 20
 
     private var columns: [GridItem] {
-        [GridItem(.adaptive(minimum: 176, maximum: 250), spacing: gridSpacing)]
+        // 形状跟着列宽走：池封面实测 6 张里 5 张是 9:16 竖版，塞进近似 1:1 的
+        // 方块会被裁掉约 60%。iPhone 单列走「横向合集宽条」，iPad 多列走
+        // 2:3 竖版海报墙，两种形态都不再是方块。
+        if hSizeClass == .compact {
+            return [GridItem(.flexible(), spacing: gridSpacing)]
+        }
+        return [GridItem(.adaptive(minimum: 176, maximum: 220), spacing: gridSpacing)]
     }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                // 顶部主入口：把「全部」从一张和普通池一样大的方格里拎出来，
+                // 顶部主入口：把「全部」从一张和普通池一样大的卡片里拎出来，
                 // 做成整页唯一的横幅；随机连播也不再挤在工具栏里
                 heroCard
 
@@ -120,7 +126,8 @@ struct ShortsView: View {
                                     route = .pool(id: pool.id, name: pool.name)
                                 } label: {
                                     PoolCoverCard(title: pool.name, count: pool.itemCount,
-                                                  coverURL: poolCoverURL(pool))
+                                                  coverURL: poolCoverURL(pool),
+                                                  wide: hSizeClass == .compact)
                                 }
                                 .buttonStyle(PressableCardStyle())
                             }
@@ -356,30 +363,97 @@ enum PoolRoute: Identifiable, Hashable {
     }
 }
 
-// MARK: - 池卡（实体相框卡）
-// 上一版是「整张封面即卡片」：照片直接贴到网格里，边界只剩一条 0.5pt 白线，
-// 在深色背景图上几乎看不出卡片轮廓（用户反馈「卡片效果不明显」）。
-// 现在做成有底板的相框卡：封面缩在板内、四周留白形成实体边，数量浮在图上、
-// 池名落在板内信息区，底板 / 描边 / 投影三层一起把卡片从背景里抬起来。
-// 高度仍全常量（封面定高 + 信息区单行），LazyVGrid 不会重排。
+// MARK: - 池卡（随屏幕变形：iPhone 横向合集宽条 / iPad 2:3 竖版海报）
+// 封面数据实测：6 个池里 5 张是 9:16 竖版（0.55~0.76），只有 1 张横版。
+// 旧版把封面塞进近似 1:1 的方块里居中裁切，竖版海报被削掉约 60%、
+// 只剩中间一条，所以「方块」既不好看也丢信息。
+// - iPhone 单列：横向合集行，左侧 2:3 竖版小海报，右侧分类 / 池名 / 数量 / 箭头
+// - iPad 多列：2:3 竖版海报墙，封面比例顺着内容，池名落在板内独立信息区
+// 两种形态都保留实体底板 + 留白相框 + 描边 + 投影 + 按压反馈；
+// 高度都由常量钉死（宽条 156 / 海报 240 + 信息区），LazyVGrid 不会重排。
 private struct PoolCoverCard: View {
     let title: String
     let count: Int
     let coverURL: URL?
+    let wide: Bool
 
-    private let imageHeight: CGFloat = 150
     private let inset: CGFloat = 9
     private let radius: CGFloat = 20
+    private var innerRadius: CGFloat { radius - inset + 1 }
 
     var body: some View {
+        Group {
+            if wide { wideLayout } else { posterLayout }
+        }
+        .appSurface(in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous)
+            .stroke(Color.primary.opacity(0.13), lineWidth: 0.6))
+        .shadow(color: .black.opacity(0.20), radius: 14, y: 7)
+    }
+
+    private var coverImage: some View {
+        RemoteImage(url: coverURL,
+                    fallbackIcon: "play.rectangle.on.rectangle",
+                    fallbackColors: Theme.placeholderGradient(for: .short))
+            .imageFilled()
+    }
+
+    /// imageFilled() 是 GeometryReader 版 scaledToFill，尺寸必须在外面给死
+    @ViewBuilder
+    private func cover(width: CGFloat?, height: CGFloat) -> some View {
+        if let w = width {
+            coverImage.frame(width: w, height: height, alignment: .center)
+        } else {
+            // 顺序沿用旧版：先定高、再撑满列宽，GeometryReader 才拿得到确定尺寸
+            coverImage
+                .frame(height: height)
+                .frame(maxWidth: .infinity)
+        }
+    }
+
+    // MARK: iPhone：横向合集行（92×138 ≈ 2:3，竖版封面几乎不裁）
+    private var wideLayout: some View {
+        HStack(alignment: .center, spacing: 13) {
+            cover(width: 92, height: 138)
+                .clipShape(RoundedRectangle(cornerRadius: innerRadius, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 5) {
+                    Image(systemName: "square.stack.3d.up.fill")
+                        .font(.caption2.weight(.semibold))
+                    Text("视频池")
+                        .font(.caption2.weight(.semibold))
+                }
+                .foregroundStyle(Theme.tint(for: .short))
+
+                Text(title)
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+                    .truncationMode(.tail)
+
+                HStack(spacing: 6) {
+                    Text("\(count) 支视频")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 4)
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Color.secondary.opacity(0.55))
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(inset)
+        .frame(height: 156, alignment: .leading)
+    }
+
+    // MARK: iPad：2:3 竖版海报卡
+    // 列宽 176~220 → 封面宽 158~202，定高 240，比例落在 0.66~0.84，恒为竖版
+    private var posterLayout: some View {
         VStack(alignment: .leading, spacing: 0) {
             ZStack(alignment: .topTrailing) {
-                RemoteImage(url: coverURL,
-                            fallbackIcon: "play.rectangle.on.rectangle",
-                            fallbackColors: Theme.placeholderGradient(for: .short))
-                    .imageFilled()
-                    .frame(height: imageHeight)
-                    .frame(maxWidth: .infinity)
+                cover(width: nil, height: 240)
                 // 上下压一层暗角：角标读得清，照片高光也不会吃掉卡片边缘
                 LinearGradient(colors: [Color.black.opacity(0.26), .clear, .clear,
                                         Color.black.opacity(0.34)],
@@ -387,7 +461,7 @@ private struct PoolCoverCard: View {
                 countBadge
                     .padding(9)
             }
-            .clipShape(RoundedRectangle(cornerRadius: radius - inset + 1, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: innerRadius, style: .continuous))
 
             infoRow
                 .padding(.horizontal, 12)
@@ -395,10 +469,6 @@ private struct PoolCoverCard: View {
                 .padding(.bottom, 11)
         }
         .padding(inset)
-        .appSurface(in: RoundedRectangle(cornerRadius: radius, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous)
-            .stroke(Color.primary.opacity(0.13), lineWidth: 0.6))
-        .shadow(color: .black.opacity(0.20), radius: 14, y: 7)
     }
 
     /// 数量只在这里出现一次（旧版右下角又数一遍，被嫌弃过）
