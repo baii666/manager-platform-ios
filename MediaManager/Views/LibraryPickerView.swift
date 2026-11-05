@@ -27,7 +27,7 @@ struct LibraryPickerView: View {
                         NavigationLink(value: lib) {
                             LibraryCard(library: lib)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(PressableCardStyle())
                     }
                 }
                 .padding(24)
@@ -98,7 +98,9 @@ struct LibraryPickerView: View {
 }
 
 // MARK: - 媒体库卡片
-// 封面（库缩略图）+ 名称 + 条目数。卡片高度保持常量，避免网格重排。
+// 有「卡片」的实感：surface 底板（背景图模式下是毛玻璃）+ 描边 + 投影 +
+// 内边距把封面和文字包进同一块板，类型图标点出分类身份。
+// ⚠️ 卡片总高度保持常量（封面定高 + 文字单行截断），避免网格重排。
 private struct LibraryCard: View {
     let library: Library
 
@@ -111,6 +113,14 @@ private struct LibraryCard: View {
         case "photo": return Theme.placeholderGradient(for: .photo)
         case "shoot": return Theme.placeholderGradient(for: .shoot)
         default: return Theme.placeholderGradient(for: .media)
+        }
+    }
+
+    private var typeIcon: String {
+        switch library.type {
+        case "photo": return "camera"
+        case "shoot": return "photo.on.rectangle.angled"
+        default: return "film"
         }
     }
 
@@ -130,19 +140,42 @@ private struct LibraryCard: View {
                 .frame(height: 130)
                 .frame(maxWidth: .infinity)
                 .clipped()
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             VStack(alignment: .leading, spacing: 4) {
-                Text(library.name)
-                    .font(.subheadline.weight(.medium))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+                HStack(spacing: 6) {
+                    Image(systemName: typeIcon)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(Theme.brand)
+                    Text(library.name)
+                        .font(.subheadline.weight(.medium))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
                 Text(countText)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
-            .padding(.horizontal, 2)
-            .padding(.top, 8)
-            .padding(.bottom, 4)
+            .padding(.horizontal, 12)
+            .padding(.top, 10)
+            .padding(.bottom, 10)
         }
+        // 底板：设了背景图 → 毛玻璃透出背景；纯色主题 → secondarySystemBackground（原观感）
+        .appSurface(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        // 细描边把卡片边界在浅色底上勾出来（primary 自适应深浅色）
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
+            .stroke(Color.primary.opacity(0.08), lineWidth: 0.5))
+        .shadow(color: .black.opacity(0.10), radius: 8, y: 3)
+    }
+}
+
+// MARK: - 卡片按压反馈
+// .plain 样式点了没任何反应，卡片感的一半是「按得下去」。轻缩放 + 变暗。
+private struct PressableCardStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.97 : 1)
+            .opacity(configuration.isPressed ? 0.85 : 1)
+            .animation(.spring(response: 0.25, dampingFraction: 0.8),
+                       value: configuration.isPressed)
     }
 }
