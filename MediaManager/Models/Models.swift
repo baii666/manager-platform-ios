@@ -1044,7 +1044,12 @@ struct ShortPool: Identifiable, Codable, Sendable, Hashable {
         case id, name
         case itemCount = "item_count"
         case enabled
-        case coverUrl = "cover_url"
+        // ⚠️ 后端 /api/shorts/pools 的 listPools 是直接往 map 里塞
+        // pools[i]["coverUrl"]（camelCase），不是 snake_case 的 cover_url。
+        // 写成 cover_url 时 decodeIfPresent 永远拿不到值 → 所有池卡都只剩
+        // 渐变占位（数据其实 6 个池全都有封面）。别和上面 Library 的
+        // coverURL = "cover_url" 混为一谈，那是另一条接口。
+        case coverUrl
     }
 }
 
