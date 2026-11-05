@@ -377,52 +377,61 @@ struct MediaDetailView: View {
     }
 
     // MARK: 下半部分（Hero / 简介保持原样）
-    // 旧版是「演员 → 详情 → 文件 → 剧照」单列竖排：InfoRow 只贴左边一小块，
-    // iPad 上右侧整片留白；四块叠起来又把剧照顶到屏幕外，要滚很久才看得到。
-    // 现在：
-    //   iPad  → 演员 / 详情 并排各占一半（右边被详情卡填满），剧照全宽紧跟其后
-    //   iPhone → 单列，但剧照提到详情前面，一屏内就能看到
-    // 区块统一卡片底板（appSurface + 描边 + 轻投影），空缺处也不再像散落文字。
+    // ⚠️ 这里刻意**不用实体卡片底板**。上半是沉浸式 Hero：fanart 大图 + 双层黑色
+    // 渐变 + 白字 + 玻璃胶囊，主海报只有「圆角 + 白细描边 + 深阴影」浮在画面上。
+    // 上一版给下半套了 appSurface 白板 + 深色描边 + 浅投影，等于把「图片即内容」
+    // 和「白板框住内容」两套语言叠在同一页，看着就不搭。现在整页统一：
+    //   · 图片自己浮起来（cinemaFrame：与 Hero 主海报同一套圆角/描边/阴影）
+    //   · 文字直接落在背景上（分区标题与「简介」同款 sectionFont，无底板无分隔线）
+    //   iPad  → 演员海报 / 详情 双栏，正好呼应 Hero「左图右文」；剧照全宽画廊紧跟
+    //   iPhone → 单列：演员 → 剧照 → 详情，剧照一进来就能看到
     @ViewBuilder
     private func lowerContent(_ d: MediaDetail) -> some View {
-        VStack(alignment: .leading, spacing: isWide ? 16 : 14) {
+        VStack(alignment: .leading, spacing: isWide ? 28 : 24) {
             if isWide {
-                HStack(alignment: .top, spacing: 16) {
+                HStack(alignment: .top, spacing: 24) {
                     castSection(d)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     infoSection(d)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                .padding(.horizontal, heroPad)
                 stillsSection
             } else {
-                castSection(d)
+                castSection(d).padding(.horizontal, heroPad)
                 stillsSection
-                infoSection(d)
+                infoSection(d).padding(.horizontal, heroPad)
             }
             Spacer(minLength: 8)
         }
-        // 左右与 Hero 用同一条起始线（iPad heroPad=32 / iPhone 16），
-        // 否则卡片边缘比上面的封面区缩进 16pt，看着像两块没对齐的版面
-        .padding(.horizontal, heroPad)
-        .padding(.vertical, 16)
+        .padding(.top, isWide ? 26 : 22)
         .bottomBarClearance()
     }
 
-    /// 统一面板：实体底板 + 细描边 + 轻投影，宽度吃满（HStack 里各占一半）
-    private func panel<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+    private var castWidth: CGFloat { isWide ? 112 : 96 }
+    private var castHeight: CGFloat { isWide ? 168 : 144 }
+    private var stillWidth: CGFloat { isWide ? 340 : 250 }
+    private var stillHeight: CGFloat { isWide ? 200 : 150 }
+
+    /// 图片统一处理：与 Hero 主海报同一套圆角 / 白细描边 / 深阴影，
+    /// 靠图片自己从背景里浮起来，不用 appSurface 白板把图片框住。
+    private func cinemaFrame<Content: View>(radius: CGFloat,
+                                            @ViewBuilder content: () -> Content) -> some View {
         content()
-            .padding(isWide ? 16 : 14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .appSurface(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.primary.opacity(0.08), lineWidth: 0.5))
-            .shadow(color: .black.opacity(0.08), radius: 8, y: 3)
+            .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous)
+                .stroke(.white.opacity(0.12), lineWidth: 1))
+            .shadow(color: .black.opacity(0.35), radius: 14, y: 7)
     }
 
+    /// 分区标题：与简介区的「简介」同一套字号，只多一个品牌色小图标和轻量计数。
+    /// 不套底板、不加分隔线 —— Hero 的文字也都是直接压在画面/背景上的。
     private func sectionTitle(_ title: String, icon: String, suffix: String? = nil) -> some View {
-        HStack(spacing: 7) {
+        HStack(spacing: 8) {
             Image(systemName: icon)
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(Theme.brand)
-            Text(title).font(isWide ? .headline : .subheadline.weight(.semibold))
+            Text(title).font(sectionFont)
             if let suffix {
                 Text(suffix).font(.caption).foregroundStyle(.secondary)
             }
@@ -430,100 +439,102 @@ struct MediaDetailView: View {
         }
     }
 
+    /// 演员不再是 64pt 圆形小头像 + 两行文字，而是 2:3 竖版小海报横滑：
+    /// 竖版比例顺着演员照，名字压在**底部**渐变上（Hero 同款压字），文字≤2 行。
     @ViewBuilder
     private func castSection(_ d: MediaDetail) -> some View {
         if !d.actors.isEmpty {
-            panel {
-                VStack(alignment: .leading, spacing: 12) {
-                    sectionTitle("演员", icon: "person.2.fill", suffix: "\(d.actors.count) 人")
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        LazyHStack(spacing: 14) {
-                            ForEach(d.actors) { actor in
-                                if let actorId = actor.actorId {
-                                    NavigationLink(value: ActorRoute(id: actorId)) {
-                                        ActorChip(actor: actor)
-                                    }
-                                    .buttonStyle(.plain)
-                                } else {
-                                    ActorChip(actor: actor)
+            VStack(alignment: .leading, spacing: 12) {
+                sectionTitle("演员", icon: "person.2.fill", suffix: "\(d.actors.count) 人")
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(spacing: 12) {
+                        ForEach(d.actors) { actor in
+                            if let actorId = actor.actorId {
+                                NavigationLink(value: ActorRoute(id: actorId)) {
+                                    ActorPosterCard(actor: actor, width: castWidth, height: castHeight)
                                 }
+                                .buttonStyle(.plain)
+                            } else {
+                                ActorPosterCard(actor: actor, width: castWidth, height: castHeight)
                             }
                         }
-                        .padding(.horizontal, 2)
                     }
+                    .padding(.trailing, 8)
                 }
+                .frame(maxWidth: .infinity)
             }
         }
     }
 
-    /// 详情改成自适应网格的「标签在上、值在下」小格子，不再是一列贴左的长条。
-    /// 文件路径并进同一张卡，少占一个整行区块，剧照能再往上提一段。
+    /// 详情与简介同构：纯文字直接落在背景上，字段走自适应网格（标签在上 / 值在下）。
+    /// 没有底板也就没有「卡片里一大片空」的问题；文件路径并进同一块，少占一个整行区块。
     @ViewBuilder
     private func infoSection(_ d: MediaDetail) -> some View {
-        panel {
-            VStack(alignment: .leading, spacing: 12) {
-                sectionTitle("详情", icon: "info.circle.fill")
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: isWide ? 118 : 104), spacing: 10)],
-                          spacing: 12) {
-                    if let director = d.director, !director.isEmpty {
-                        InfoTile(label: "导演", value: director)
-                    }
-                    if let studio = d.studio, !studio.isEmpty {
-                        InfoTile(label: "制片厂", value: studio)
-                    }
-                    if let country = d.country, !country.isEmpty {
-                        InfoTile(label: "国家", value: country)
-                    }
-                    if let releaseDate = d.releaseDate, !releaseDate.isEmpty {
-                        InfoTile(label: "上映", value: releaseDate.prefix(10).description)
-                    }
-                    if let year = d.year, year > 0 {
-                        InfoTile(label: "年份", value: "\(year)")
-                    }
-                    if let rt = d.runtimeText {
-                        InfoTile(label: "时长", value: rt)
-                    }
-                    if let rating = d.rating, rating > 0 {
-                        InfoTile(label: "评分", value: String(format: "%.1f", rating))
-                    }
+        VStack(alignment: .leading, spacing: 14) {
+            sectionTitle("详情", icon: "info.circle.fill")
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: isWide ? 112 : 100), spacing: 12)],
+                      spacing: 14) {
+                if let director = d.director, !director.isEmpty {
+                    InfoTile(label: "导演", value: director)
                 }
-                if let fp = d.folderPath, !fp.isEmpty {
-                    Divider().opacity(0.5)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("文件路径").font(.caption2).foregroundStyle(.secondary)
-                        Text(fp).font(.caption).foregroundStyle(.secondary)
-                            .lineLimit(2)
-                            .truncationMode(.middle)
-                            .textSelection(.enabled)
-                    }
+                if let studio = d.studio, !studio.isEmpty {
+                    InfoTile(label: "制片厂", value: studio)
+                }
+                if let country = d.country, !country.isEmpty {
+                    InfoTile(label: "国家", value: country)
+                }
+                if let releaseDate = d.releaseDate, !releaseDate.isEmpty {
+                    InfoTile(label: "上映", value: releaseDate.prefix(10).description)
+                }
+                if let year = d.year, year > 0 {
+                    InfoTile(label: "年份", value: "\(year)")
+                }
+                if let rt = d.runtimeText {
+                    InfoTile(label: "时长", value: rt)
+                }
+                if let rating = d.rating, rating > 0 {
+                    InfoTile(label: "评分", value: String(format: "%.1f", rating))
+                }
+            }
+            if let fp = d.folderPath, !fp.isEmpty {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("文件路径").font(.caption2).foregroundStyle(.secondary)
+                    Text(fp).font(.caption).foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .truncationMode(.middle)
+                        .textSelection(.enabled)
                 }
             }
         }
     }
 
-    /// 剧照全宽网格：列数随屏宽自适应，iPad 上 20 张只要 3~4 行。
+    /// 剧照从「白板里的一排小方格」改成全宽横滑画廊：大图、右边缘出血，
+    /// 与 Hero 那张 fanart 一样让画面撑到屏幕边缘，而不是缩在卡片内。
     @ViewBuilder
     private var stillsSection: some View {
         if !stillsPhotos.isEmpty {
-            panel {
-                VStack(alignment: .leading, spacing: 12) {
-                    sectionTitle("剧照", icon: "photo.on.rectangle",
-                                 suffix: "\(stillsPhotos.count) 张")
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: isWide ? 150 : 100), spacing: 8)],
-                              spacing: 8) {
+            VStack(alignment: .leading, spacing: 12) {
+                sectionTitle("剧照", icon: "photo.on.rectangle",
+                             suffix: "\(stillsPhotos.count) 张")
+                    .padding(.horizontal, heroPad)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(spacing: 12) {
                         ForEach(stillsPhotos.indices, id: \.self) { i in
                             Button {
                                 PhotoViewerPresenter.shared.show(stillsPhotos, index: i)
                             } label: {
-                                RemoteImage(url: stillsPhotos[i].thumbURL, fallbackIcon: "photo",
-                                            fallbackColors: Theme.placeholderGradient(for: .media))
-                                    .imageFilled()
-                                    .frame(height: isWide ? 110 : 90)
-                                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                cinemaFrame(radius: posterRadius) {
+                                    RemoteImage(url: stillsPhotos[i].thumbURL, fallbackIcon: "photo",
+                                                fallbackColors: Theme.placeholderGradient(for: .media))
+                                        .imageFilled()
+                                        .frame(width: stillWidth, height: stillHeight)
+                                }
                             }
                             .buttonStyle(.plain)
                         }
                     }
+                    // 首尾留 heroPad 对齐页面文字，滚动时图片从屏幕右边缘滑出（出血）
+                    .padding(.horizontal, heroPad)
                 }
             }
         }
@@ -701,21 +712,49 @@ private struct HeroFrame: ViewModifier {
     }
 }
 
-// MARK: - 演员头像
-private struct ActorChip: View {
+// MARK: - 演员竖版海报卡
+// 与 Hero 主海报同一套「图片自己浮起来」的处理，名字只压在底部渐变上，
+// 不在图上堆字（文字最多两行）。尺寸由外部传入以适配 sizeClass。
+private struct ActorPosterCard: View {
     let actor: Actor
+    let width: CGFloat
+    let height: CGFloat
+
     var body: some View {
-        VStack(spacing: 6) {
+        ZStack(alignment: .bottom) {
             RemoteImage(url: actor.thumbURL, fallbackIcon: "person.fill",
                         fallbackColors: [Color.gray.opacity(0.3), Color.gray.opacity(0.1)])
                 .imageFilled()
-                .frame(width: 64, height: 64)
-                .clipShape(Circle())
-            Text(actor.name).font(.caption2).lineLimit(1).frame(width: 64)
-            if let role = actor.role, !role.isEmpty {
-                Text(role).font(.caption2).foregroundStyle(.secondary).lineLimit(1).frame(width: 64)
+                .frame(width: width, height: height)
+
+            // 渐变只盖底部，不把整张海报压暗
+            LinearGradient(colors: [.clear, .black.opacity(0.82)],
+                           startPoint: .top, endPoint: .bottom)
+                .frame(height: 58)
+                .allowsHitTesting(false)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(actor.name)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                if let role = actor.role, !role.isEmpty {
+                    Text(role)
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.75))
+                        .lineLimit(1)
+                }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 8)
+            .padding(.bottom, 8)
+            .allowsHitTesting(false)
         }
+        .frame(width: width, height: height)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .stroke(.white.opacity(0.12), lineWidth: 1))
+        .shadow(color: .black.opacity(0.35), radius: 14, y: 7)
     }
 }
 
@@ -725,8 +764,8 @@ private struct InfoTile: View {
     let value: String
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text(label).font(.caption2).foregroundStyle(.secondary)
-            Text(value).font(.subheadline.weight(.medium))
+            Text(label).font(.caption2.weight(.medium)).foregroundStyle(.secondary)
+            Text(value).font(.subheadline.weight(.medium)).foregroundStyle(.primary)
                 .lineLimit(2)
                 .truncationMode(.tail)
         }
