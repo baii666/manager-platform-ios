@@ -84,6 +84,9 @@ struct ShortsView: View {
     @State private var poolsError: String?
     /// 池名搜索（本地过滤：池列表稳定，不需要持久化）
     @State private var poolSearchText = ""
+    /// 搜索条是否展开。池只有几个，搜索不常驻顶栏占位置
+    @State private var poolSearchVisible = false
+    @FocusState private var poolSearchFocused: Bool
     /// 导航目标：全部 / 某个池
     @State private var route: PoolRoute?
     /// 窄屏（iPhone）：搜索框缩短、计数隐藏，避免导航栏一行塞不下。
@@ -136,19 +139,17 @@ struct ShortsView: View {
                 }
             }
             .padding(.horizontal, edgePadding)
-            .padding(.top, 18)
+            .padding(.top, 10)
             .bottomBarClearance()
         }
         .navigationDestination(item: $route) { r in
             PoolVideosView(poolId: r.poolId, poolName: r.name)
         }
-        // 顶栏只留搜索（与其它列表页同构）；随机连播与全库计数都在 Hero 上有自己的位置
-        .toolbar {
-            ListSearchBarItem(text: $poolSearchText,
-                              placeholder: "搜索池名…",
-                              title: "短视频",
-                              narrow: hSizeClass == .compact)
-        }
+        // ⚠️ 顶栏故意不放任何东西：这里以前塞的是列表页那套 ListSearchBarItem
+        //（死宽 170pt 小灰框 + 灰色「短视频」页名），和下面的沉浸式 Hero 是两套
+        // 语言，页名还跟 Hero 里的「全部短视频」重复。现在 Hero 独占页面头部，
+        // 池名搜索移到内容区的「视频池」标题行，点放大镜才展开。
+        // 不隐藏 navigationBar：隐藏后 push 到池内页时右滑返回会失效（踩过）。
         .tint(Theme.brand)
         // ⚠️ 每个 tab 都要自己垫背景：NavigationStack 只渲染栈顶那一层
         .appBackground()
@@ -266,23 +267,55 @@ struct ShortsView: View {
     }
 
     private var poolsHeader: some View {
-        HStack(alignment: .center, spacing: 10) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("视频池")
-                    .font(.title3.weight(.bold))
-                    .foregroundStyle(.primary)
-                Text("按视频数排序 · 点开即可浏览")
-                    .font(.caption)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center, spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("视频池")
+                        .font(.title3.weight(.bold))
+                        .foregroundStyle(.primary)
+                    Text("按视频数排序 · 点开即可浏览")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text("\(filteredPools.count) 个池")
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 6)
+                    .appSurface(in: Capsule())
+                    .overlay(Capsule().stroke(Color.primary.opacity(0.10), lineWidth: 0.5))
+
+                // 与计数胶囊同语言的圆形按钮：不常驻、点了才展开搜索条
+                Button {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.86)) {
+                        poolSearchVisible.toggle()
+                        // 收起时清掉关键词：否则列表还被过滤着，却看不见搜索条件
+                        if !poolSearchVisible { poolSearchText = "" }
+                    }
+                } label: {
+                    Image(systemName: poolSearchVisible ? "xmark" : "magnifyingglass")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(poolSearchVisible ? Theme.tint(for: .short) : Color.secondary)
+                        .frame(width: 30, height: 30)
+                        .appSurface(in: Circle())
+                        .overlay(Circle().stroke(Color.primary.opacity(0.10), lineWidth: 0.5))
+                }
+                .buttonStyle(.plain)
             }
-            Spacer()
-            Text("\(filteredPools.count) 个池")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 11)
-                .padding(.vertical, 6)
-                .appSurface(in: Capsule())
-                .overlay(Capsule().stroke(Color.primary.opacity(0.10), lineWidth: 0.5))
+
+            if poolSearchVisible {
+                // 内容区里用非 compact：padding 更饱满，appSurface 底板与池卡同款材质
+                ListSearchBar(text: $poolSearchText, placeholder: "搜索池名…",
+                              focus: $poolSearchFocused)
+                    .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous)
+                        .stroke(Color.primary.opacity(0.10), lineWidth: 0.5))
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .onChange(of: poolSearchVisible) {
+            // 展开即聚焦，省掉「点图标 → 再点一次输入框」
+            poolSearchFocused = poolSearchVisible
         }
     }
 
