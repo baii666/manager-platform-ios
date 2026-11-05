@@ -381,7 +381,9 @@ final class VidHubLauncher: ObservableObject {
         while !Task.isCancelled {
             try? await Task.sleep(nanoseconds: 2_500_000_000)
             if Task.isCancelled { return false }
-            guard let (d2, r2) = try? await URLSession.shared.data(from: url),
+            // 轮询只关心状态码，字节用不上 —— 解包成 d2 会吃一个
+            // "immutable value 'd2' was never used" 警告。
+            guard let (_, r2) = try? await URLSession.shared.data(from: url),
                   let http2 = r2 as? HTTPURLResponse else { continue } // 抖动：接着等
             if http2.statusCode == 200 { return true }
             if http2.statusCode != 202 { return false } // 502：抽失败，不带字幕播

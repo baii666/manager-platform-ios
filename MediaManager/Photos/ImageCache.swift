@@ -206,10 +206,20 @@ final class ImageCache: @unchecked Sendable {
         Task.detached(priority: .utility) { [weak self] in
             guard let self else { return }
             await self.revalidate(url, cacheToDisk: cacheToDisk)
-            self.lock.lock()
-            self.validating.remove(k)
-            self.lock.unlock()
+            // ⚠️ 别把 lock()/unlock() 直接写在这个 async 闭包里：NSLocking 的
+            // lock/unlock 带 noasync 标记，Xcode 会在两行各报一次
+            // "'lock()' is unavailable from asynchronous contexts; use withLock instead"
+            // （Swift 6 语言模式下直接是 error）。挪进同步方法，语义不变。
+            self.finishValidation(k)
         }
+    }
+
+    /// 同步方法：把校验完的 URL 移出集合。
+    /// NSLock 的 lock()/unlock() 不能在 async 上下文调用，包一层即可。
+    private func finishValidation(_ k: String) {
+        lock.lock()
+        validating.remove(k)
+        lock.unlock()
     }
 
     private func revalidate(_ url: URL, cacheToDisk: Bool) async {
