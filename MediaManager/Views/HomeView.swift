@@ -8,7 +8,7 @@ import UIKit
 enum HomeRoute: Hashable {
     case photoBrowser
     case persons
-    case search(initialQuery: String, semantic: Bool)
+    case search(initialQuery: String)
 }
 
 // MARK: - 首页
@@ -66,8 +66,8 @@ struct HomeView: View {
                 PhotoBrowserView()
             case .persons:
                 PersonsView()
-            case .search(let q, let semantic):
-                SearchView(initialQuery: q, semantic: semantic)
+            case .search(let q):
+                SearchView(initialQuery: q)
             }
         }
         .sheet(isPresented: $showingAlbums) {
@@ -157,7 +157,7 @@ struct HomeView: View {
                     // SearchView 进去会用 initialQuery 自己再搜一次。
                     guard !viewModel.searchText
                         .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-                    path.append(HomeRoute.search(initialQuery: viewModel.searchText, semantic: viewModel.semanticSearch))
+                    path.append(HomeRoute.search(initialQuery: viewModel.searchText))
                 }
             )
             .frame(maxWidth: 640)
@@ -210,10 +210,6 @@ struct HomeView: View {
                 }
                 DiscoverCard(icon: "person.2.fill", title: "人物", subtitle: "人脸聚类结果", tint: .cyan) {
                     path.append(HomeRoute.persons)
-                }
-                DiscoverCard(icon: "wand.and.stars", title: "语义搜索", subtitle: "用一句话找照片", tint: .purple) {
-                    // 空词进搜索页不会自动搜，但会把语义开关打开，用户直接输入即可
-                    path.append(HomeRoute.search(initialQuery: "", semantic: true))
                 }
                 DiscoverCard(icon: "heart.fill", title: "我的收藏", subtitle: "收藏的内容都在这", tint: .pink) {
                     tab = .mine

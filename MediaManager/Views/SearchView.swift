@@ -29,8 +29,6 @@ final class SearchHistoryStore {
 struct SearchView: View {
     /// 首页搜索框提交后带进来的关键词；为空则进入后自动聚焦键盘等用户输入
     var initialQuery: String = ""
-    /// 首页的「语义搜索」开关状态（sparkles 按钮）带进来
-    var semantic: Bool = false
 
     @State private var query = ""
     /// **当前是否在「语义」这个视图**（它就是第 6 个分类，点顶栏那个 sparkles 按钮切过来）。
@@ -736,9 +734,8 @@ struct SearchView: View {
     private func applyInitial() {
         guard !didApplyInitial else { return }
         didApplyInitial = true
-        // 首页开着语义开关进来 → 直接落在「语义」这个 tab 上（它就是首页那个开关的意思）。
-        // 首页没开就停在「全部」：关键词搜索照样会自动附带语义组，排在最后
-        if semantic { isSemantic = true }
+        // 一律从「全部」进来：语义是搜索页顶栏的一个分类，不再从首页直接跳进来。
+        // 关键词搜索照样会自动附带语义组，排在最后
         let q = initialQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else {
             // ⚠️ 键盘要「晚一拍」再弹：搜索框挂在 toolbar 里，视图第一帧导航栏

@@ -15,7 +15,6 @@ final class HomeViewModel: ObservableObject {
 
     // 搜索
     @Published var searchText = ""
-    @Published var semanticSearch = false
     @Published var searchResults: [UnifiedAsset] = []
     @Published var isSearching = false
 
