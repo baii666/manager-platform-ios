@@ -85,6 +85,11 @@ struct MediaDetailView: View {
         .navigationDestination(for: ActorRoute.self) { route in
             ActorDetailView(actorId: route.id)
         }
+        // 无数字 id 的演员（老数据 / media.actors JSON fallback）退到演员库按名字搜，
+        // 卡片不再是「点了没反应」的静态图。同样挂 body 根，别放进条件分支里。
+        .navigationDestination(for: ActorSearchRoute.self) { route in
+            ActorsView(initialSearch: route.name)
+        }
         .navigationTitle(detail?.title ?? media.title)
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
@@ -454,6 +459,13 @@ struct MediaDetailView: View {
                         ForEach(d.actors) { actor in
                             if let actorId = actor.actorId {
                                 NavigationLink(value: ActorRoute(id: actorId)) {
+                                    ActorPosterCard(actor: actor, width: castWidth, height: castHeight)
+                                }
+                                .buttonStyle(.plain)
+                            } else if !actor.name.isEmpty {
+                                // 后端没回 id：跳演员库并把名字带进搜索框，
+                                // 用户至少能找到本人，而不是一张点不动的图
+                                NavigationLink(value: ActorSearchRoute(name: actor.name)) {
                                     ActorPosterCard(actor: actor, width: castWidth, height: castHeight)
                                 }
                                 .buttonStyle(.plain)

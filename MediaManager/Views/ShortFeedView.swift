@@ -437,6 +437,15 @@ struct ShortFeedView: View {
         let nextID = viewModel.items[idx + 1].id
         if let proxy = scrollProxy {
             withAnimation(.easeInOut(duration: 0.3)) { proxy.scrollTo(nextID, anchor: .top) }
+            // 兜底：paging + containerRelativeFrame 下 scrollTo 偶尔第一次不落地。
+            // 0.35s 后若仍停在刚播完那条（说明既没切成功、用户也没自己滑走），
+            // 再滚一次；切页成功时 currentID 已变成 nextID，这里直接跳过，
+            // 用户中途手动滑走时 currentID 变成别的值，同样跳过，不抢他的位置。
+            let originID = id
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                guard self.currentID == originID else { return }
+                withAnimation(.easeInOut(duration: 0.25)) { proxy.scrollTo(nextID, anchor: .top) }
+            }
         } else {
             withAnimation(.easeInOut(duration: 0.3)) { currentID = nextID }
         }

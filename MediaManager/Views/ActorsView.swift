@@ -7,6 +7,15 @@ struct ActorRoute: Hashable {
     let id: Int
 }
 
+/// 「按名字搜演员」路由。影视详情里的演员卡片如果后端没给数字 id（走
+/// `media.actors` JSON fallback 的老数据），就没法拼 /api/actors/:id，
+/// 卡片以前只能画成不可点的静态图 —— 表现为「点了没反应」。
+/// 退一步跳进演员库、把名字预填进搜索框，用户照样能找到本人；
+/// 用独立类型避免和 ActorRoute 的 Int destination 撞车。
+struct ActorSearchRoute: Hashable {
+    let name: String
+}
+
 // MARK: - 演员库
 // 对齐网页端 ActorsPage：演员网格（头像 + 姓名 + 作品数）+ 搜索。
 // 入口：电影/剧集列表页工具栏「演员」chip；演员详情里也可继续跳关联演员。
@@ -14,7 +23,15 @@ struct ActorsView: View {
     /// 嵌进「人物」聚合页（PeopleHubView）时由外层统一提供标题与背景。
     /// 独立从电影列表「演员」chip 进来时仍是完整的演员页。
     var embedded: Bool = false
-    @StateObject private var viewModel = ActorsViewModel()
+    @StateObject private var viewModel: ActorsViewModel
+
+    /// `initialSearch`：从影视详情的无 id 演员卡片进来时预填的搜索词。
+    /// ⚠️ @StateObject 只能在第一次创建时带初值，所以放到自定义 init 里传，
+    ///    不能等 onAppear 再改 viewModel.searchText（人物页里的 VM 是常驻的）。
+    init(embedded: Bool = false, initialSearch: String? = nil) {
+        self.embedded = embedded
+        _viewModel = StateObject(wrappedValue: ActorsViewModel(initialSearch: initialSearch))
+    }
 
     var body: some View {
         ScrollView {
@@ -307,11 +324,18 @@ final class ActorsViewModel: ObservableObject {
 
     private var client: APIClient? { AppSession.shared.client }
 
-    init() {
-        // 还原上次的搜索词 / 排序 / 方向（没记过就用默认值）
-        self.searchText = ListSearchPrefs.loadSearch(prefsPage)
+    init(initialSearch: String? = nil) {
+        // 还原上次的排序 / 方向（没记过就用默认值）
         self.sort = ListSearchPrefs.loadSort(prefsPage, fallback: .count)
         self.descending = ListSearchPrefs.loadDescending(prefsPage, fallback: true)
+        if let q = initialSearch, !q.isEmpty {
+            // 初始化期间给 @Published 赋值不会触发 didSet，所以显式持久化一次，
+            // 让下次独立打开演员库也保留这次的搜索词
+            self.searchText = q
+            ListSearchPrefs.saveSearch(prefsPage, q)
+        } else {
+            self.searchText = ListSearchPrefs.loadSearch(prefsPage)
+        }
     }
 
     @MainActor
