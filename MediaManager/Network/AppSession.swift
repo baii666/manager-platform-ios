@@ -78,7 +78,7 @@ final class AppSession: ObservableObject {
 
     /// 规范化服务器地址：补协议前缀、去尾部斜杠。
     /// 没写协议时的默认策略（显式写了 http:// 或 https:// 一律尊重用户输入）：
-    ///   · 带显式端口（如 :19876）→ 一定是直连后端，默认 http；
+    ///   · 带显式端口（如 :5173 / :19876）→ 一定是直连后端，默认 http；
     ///     Tailscale MagicDNS 域名 xxx.ts.net:19876 也属于这一类，
     ///     以前按「域名 → https」补成 https 会对着只有 HTTP 的 19876 握手失败(-1200)。
     ///   · IP / localhost → http（局域网 / Tailscale 100.x 直连）；
@@ -123,7 +123,7 @@ final class AppSession: ObservableObject {
             // 正常不会出现；出现就说明该配置没进到真机包里（旧包 / .xcodeproj 未重新生成，
             // 被 Xcode 合成的默认 Info.plist 覆盖），而不是要改地址成 https。
             if ns.code == -1022 {
-                return "ATS 拦截了 http 明文请求（-1022）。Info.plist 已放开 NSAllowsArbitraryLoads，正常不会出现；出现说明真机装的是旧包，或 .xcodeproj 没重新执行 xcodegen generate（Xcode 用了合成的 Info.plist 覆盖掉 ATS 设置）。请在 Mac 上重新 xcodegen generate + Clean Build Folder，删掉真机旧 App 重装。内网 / Tailscale 直接填 http://IP:19876 即可，不需要 HTTPS。"
+                return "ATS 拦截了 http 明文请求（-1022）。Info.plist 已放开 NSAllowsArbitraryLoads，正常不会出现；出现说明真机装的是旧包，或 .xcodeproj 没重新执行 xcodegen generate（Xcode 用了合成的 Info.plist 覆盖掉 ATS 设置）。请在 Mac 上重新 xcodegen generate + Clean Build Folder，删掉真机旧 App 重装。内网 / Tailscale 直接填 http://IP:端口（5173 / 19876 均可）即可，不需要 HTTPS。"
             }
             // NSURLError 的 SSL 段：-1200 握手失败，-1201~-1206 证书问题
             let tlsCodes: Set<Int> = [-1200, -1201, -1202, -1203, -1204, -1205, -1206]

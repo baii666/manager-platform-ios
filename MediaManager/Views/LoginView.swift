@@ -31,7 +31,7 @@ struct LoginView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 8) {
                         field(systemImage: "network",
-                              placeholder: "http://IP:19876 或 http://xxx.ts.net:19876",
+                              placeholder: "http://IP:端口（5173 / 19876）",
                               text: $server)
                         // 记住过的服务器：选一条回填 / 删一条 / 清空
                         serverMenu
@@ -48,7 +48,7 @@ struct LoginView: View {
                         .buttonStyle(.plain)
                         .disabled(AppSession.normalizeBaseURL(server) == nil)
                     }
-                    Text("内网 / Tailscale 穿透直接填 http://（App 已放开明文 HTTP），例如 http://100.107.56.127:19876 或 http://xxx.ts.net:19876；只有走公网才需要 https 域名 + 反向代理。")
+                    Text("内网 / Tailscale 穿透直接填 http://（App 已放开明文 HTTP），例如 http://100.107.56.127:5173 或 http://xxx.ts.net:19876。5173 是前端开发服务器（会多一层代理中转），19876 是 Go 网关，App 直连 19876 更稳；只有走公网才需要 https 域名 + 反向代理。")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
