@@ -819,7 +819,10 @@ private struct VolumeHijack: UIViewRepresentable {
 // 视觉是 3pt 细线，命中区是整条底部 34pt —— 3pt 的线根本点不到，
 // 所以把「透明热区」和「视觉线」拆开：热区铺满，线画在热区底部。
 // ⚠️ 放在本文件里的 private struct，不新增 Swift 文件（否则又要 xcodegen generate）。
-private struct BottomProgressBar: View {
+// 底部细进度条：34pt 透明热区、点哪跳哪、横向拖 scrub、纯垂直滑动放行。
+// ⚠️ internal（非 private）：短视频刷流的固定底栏也要复用一份（底栏上方的进度条），
+// 交互口径保持一致，不再每处各画一遍。
+struct BottomProgressBar: View {
     let ratio: Double
     let duration: Double
     let scrubbing: Bool

@@ -144,6 +144,9 @@ struct ShortFeedView: View {
     @State private var scrollProxy: ScrollViewProxy?
     /// 非nil 时弹「同文件夹关联视频页」（item 式 fullScreenCover，跟随当前视频换内容）
     @State private var relatedVideo: ShortVideo?
+    /// 固定进度条的手势态（拖动中 / 拖动比例），与引擎进度采样解耦
+    @State private var barScrubbing = false
+    @State private var barScrubRatio = 0.0
 
     /// 预加载窗口半径：当前页 ±2
     private let windowRadius = 2
@@ -317,77 +320,130 @@ struct ShortFeedView: View {
     private var feedBottomBar: some View {
         ZStack(alignment: .bottom) {
             // 渐变是被绘制出来的视图，会吃手势 → 明确放行，上下滑照常切视频
-            LinearGradient(colors: [.clear, .black.opacity(0.45), .black.opacity(0.9)],
+            LinearGradient(colors: [.clear, .black.opacity(0.45), .black.opacity(0.92)],
                            startPoint: .top, endPoint: .bottom)
-                .frame(height: 260)
+                .frame(height: 250)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                 .allowsHitTesting(false)
 
-            if let video = currentVideo {
-                HStack(alignment: .bottom, spacing: 10) {
-                    // 左侧：标题在上、副信息在下。标题可点 → 同文件夹关联视频页
-                    // （对齐抖音「选集」入口；后续扩展同番号/同演员只动后端接口）。
-                    // ⚠️ 整个 VStack 不能再挂 allowsHitTesting(false)（原为了让落在
-                    // 文字上的上下滑穿透），那会把 Button 一起禁掉。标题 Button 与
-                    // ScrollView 手势天然共存：按住拖动仍是切视频，轻点才进关联页；
-                    // 副信息文字仍单独放行手势。
-                    VStack(alignment: .leading, spacing: 8) {
-                        Button {
-                            relatedVideo = currentVideo
-                        } label: {
-                            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                                Text(video.titleText)
-                                    .font(.headline.weight(.semibold))
-                                    .foregroundStyle(.white)
-                                    .lineLimit(2)
-                                    .multilineTextAlignment(.leading)
-                                    .fixedSize(horizontal: false, vertical: true)
-                                    .shadow(color: .black.opacity(0.7), radius: 4, y: 1)
-                                Image(systemName: "chevron.right")
-                                    .font(.system(size: 12, weight: .bold))
-                                    .foregroundStyle(.white.opacity(0.65))
+            // 底栏内容 + 它上方的固定进度条。进度条不再画在每页内部：
+            // 否则贴在屏幕最底、和底栏挤在一起，还跟着视频一起滚。
+            // 抖音式是底栏贴底、进度条悬在底栏上方一条细线。
+            VStack(spacing: 0) {
+                feedProgressBar
+
+                if let video = currentVideo {
+                    HStack(alignment: .bottom, spacing: 10) {
+                        // 左侧：标题 → meta → 「同文件夹」胶囊（抖音「选集」式入口）。
+                        // 标题与胶囊同目标（关联页），胶囊是视觉锚点、让人一眼知道能点进去。
+                        VStack(alignment: .leading, spacing: 8) {
+                            Button {
+                                relatedVideo = currentVideo
+                            } label: {
+                                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                    Text(video.titleText)
+                                        .font(.headline.weight(.semibold))
+                                        .foregroundStyle(.white)
+                                        .lineLimit(2)
+                                        .multilineTextAlignment(.leading)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                        .shadow(color: .black.opacity(0.7), radius: 4, y: 1)
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 12, weight: .bold))
+                                        .foregroundStyle(.white.opacity(0.65))
+                                }
                             }
+                            .buttonStyle(.plain)
+
+                            if let meta = currentMeta {
+                                Text(meta)
+                                    .font(.caption)
+                                    .foregroundStyle(.white.opacity(0.72))
+                                    .lineLimit(1)
+                                    .allowsHitTesting(false)
+                            }
+
+                            Button {
+                                relatedVideo = currentVideo
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Text("同文件夹")
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 9, weight: .bold))
+                                }
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(.white.opacity(0.9))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 4)
+                                .background(Capsule().fill(Color.white.opacity(0.16)))
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
-                        if let meta = currentMeta {
-                            Text(meta)
-                                .font(.caption)
-                                .foregroundStyle(.white.opacity(0.72))
-                                .lineLimit(1)
-                                .allowsHitTesting(false)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                        // 右侧：收藏 / 连播 / 倍速。抖音式「圆形半透明底 + 下方小字」，
+                        // 不用实体白板、不用方块。
+                        HStack(spacing: 12) {
+                            barButton(icon: isCurrentFavorite ? "heart.fill" : "heart",
+                                      label: isCurrentFavorite ? "已收藏" : "收藏",
+                                      tint: isCurrentFavorite ? .red : .white,
+                                      filled: false) {
+                                Task { await controls.toggleFavorite(id: video.id, client: viewModel.client) }
+                            }
+                            .disabled(controls.favoriteBusy)
+
+                            barButton(icon: controls.autoAdvance ? "forward.fill" : "repeat.1",
+                                      label: controls.autoAdvance ? "连播开" : "连播关",
+                                      tint: .white,
+                                      filled: controls.autoAdvance) {
+                                controls.setAutoAdvance(!controls.autoAdvance)
+                            }
+
+                            rateButton
                         }
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                    // 右侧：收藏 / 连播 / 倍速。抖音式「圆形半透明底 + 下方小字」，
-                    // 不用实体白板、不用方块。
-                    HStack(spacing: 12) {
-                        barButton(icon: isCurrentFavorite ? "heart.fill" : "heart",
-                                  label: isCurrentFavorite ? "已收藏" : "收藏",
-                                  tint: isCurrentFavorite ? .red : .white,
-                                  filled: false) {
-                            Task { await controls.toggleFavorite(id: video.id, client: viewModel.client) }
-                        }
-                        .disabled(controls.favoriteBusy)
-
-                        barButton(icon: controls.autoAdvance ? "forward.fill" : "repeat.1",
-                                  label: controls.autoAdvance ? "连播开" : "连播关",
-                                  tint: .white,
-                                  filled: controls.autoAdvance) {
-                            controls.setAutoAdvance(!controls.autoAdvance)
-                        }
-
-                        rateButton
-                    }
+                    .padding(.leading, 16)
+                    .padding(.trailing, 10)
+                    .padding(.bottom, 10)
                 }
-                .padding(.leading, 16)
-                .padding(.trailing, 10)
-                // 抬到进度条 34pt 热区之上：底栏按钮不挡 seek，也不被误判成底部右滑退出
-                .padding(.bottom, 46)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+    }
+
+    /// 固定进度条：挂在当前播放引擎上（换页自动跟换），悬在底栏上方。
+    /// 复用 VideoPlayerView 的 BottomProgressBar（已改 internal），交互一致：
+    /// 34pt 透明热区、点哪跳哪、横向拖 scrub、纯垂直滑动放行给切视频。
+    /// 短视频 99% 是 MP4 直连，seek 直接走 engine.seek(to:)（精确 seek）。
+    private var feedProgressBar: some View {
+        TimelineView(.periodic(from: .now, by: 0.2)) { _ in
+            let engine = engineHandle.engine
+            let total = engine?.duration ?? 0
+            let ratio: Double = total > 0
+                ? (barScrubbing ? barScrubRatio : min(max((engine?.currentTime ?? 0) / total, 0), 1))
+                : 0
+            BottomProgressBar(
+                ratio: ratio,
+                duration: total,
+                scrubbing: barScrubbing,
+                onStart: {
+                    barScrubbing = true
+                    engineHandle.engine?.isScrubbing = true
+                },
+                onChange: { r in
+                    barScrubRatio = r
+                },
+                onEnd: { r in
+                    barScrubbing = false
+                    engineHandle.engine?.isScrubbing = false
+                    if let r, let e = engineHandle.engine, total > 0 {
+                        e.seek(to: r * total)
+                    }
+                }
+            )
+        }
+        .frame(height: 34)
     }
 
     private func barButton(icon: String, label: String, tint: Color, filled: Bool,
@@ -524,11 +580,12 @@ struct ShortFeedView: View {
             }
     }
 
-    /// ZStack 坐标可能不含安全区，用屏幕高度比例兜底：底部 20% 一律视为进度条区域。
-    /// 正常的右滑退出都从屏幕中上部起手，不受影响；底栏按钮也落在这 20% 内，
-    /// 从按钮上起手的右滑不会误触发退出。
+    /// ZStack 坐标可能不含安全区，用屏幕高度比例兜底：底部约 24% 视为
+    /// 「进度条 + 底栏」保留区（进度条现在悬在底栏上方，整块比旧版更高）。
+    /// 正常的右滑退出都从屏幕中上部起手，不受影响；从进度条/按钮上起手的
+    /// 右滑不会误触发退出（进度条横拖是 seek、按钮横拖不该把整页拖走）。
     private func startsInBottomBar(_ y: CGFloat) -> Bool {
-        y > UIScreen.main.bounds.height * 0.8
+        y > UIScreen.main.bounds.height * 0.76
     }
 
     /// 统一的退出：整页右移滑出屏幕 → 关闭。
@@ -595,9 +652,9 @@ private struct ShortFeedPage: View {
                                 // 刷流里状态栏常驻（退出时才不会「闪」）：
                                 // 播放器别再自己藏一次，控制条也会自动让开状态栏
                                 hidesStatusBar: false,
-                                // 进度条画在本页内部 → 上下滑切视频时它跟着视频一起滚
-                                // （抖音式；固定底栏和右上角图标不归它管）
-                                showsBottomProgressBar: true)
+                                // 进度条移到固定层（底栏上方），不再每页内部画一条：
+                                // 否则会贴在屏幕最底、和底栏挤在一起，还跟着视频一起滚
+                                showsBottomProgressBar: false)
             } else {
                 placeholder
             }
