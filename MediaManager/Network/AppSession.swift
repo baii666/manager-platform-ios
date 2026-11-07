@@ -122,11 +122,11 @@ final class AppSession: ObservableObject {
     static func describe(_ error: Error) -> String {
         let ns = error as NSError
         if ns.domain == NSURLErrorDomain {
-            // -1022：ATS 拦下了明文 http 请求。工程 Info.plist 已设 NSAllowsArbitraryLoads=YES，
-            // 正常不会出现；出现就说明该配置没进到真机包里（旧包 / .xcodeproj 未重新生成，
-            // 被 Xcode 合成的默认 Info.plist 覆盖），而不是要改地址成 https。
+            // -1022：ATS 拦下了明文 http 请求。工程 Info.plist 只设 NSAllowsArbitraryLoads=YES，
+            // 正常不会出现；出现说明装的是旧包（旧版 plist 同时写了 NSAllowsLocalNetworking，
+            // 会让 iOS 忽略 ArbitraryLoads），或 .xcodeproj 没重新生成导致合成 plist 覆盖了设置。
             if ns.code == -1022 {
-                return "ATS 拦截了 http 明文请求（-1022）。Info.plist 已放开 NSAllowsArbitraryLoads，正常不会出现；出现说明真机装的是旧包，或 .xcodeproj 没重新执行 xcodegen generate（Xcode 用了合成的 Info.plist 覆盖掉 ATS 设置）。请在 Mac 上重新 xcodegen generate + Clean Build Folder，删掉真机旧 App 重装。内网 / Tailscale 直接填 http://IP:端口（5173 / 19876 均可）即可，不需要 HTTPS。"
+                return "ATS 拦截了 http 明文请求（-1022）。⚠️ NSAllowsArbitraryLoads 是全局开关，但 Info.plist 里若同时存在 NSAllowsLocalNetworking / NSAllowsArbitraryLoadsInWebContent / NSAllowsArbitraryLoadsForMedia 任意一个，iOS 会忽略它（按 NO 处理），只剩局域网能连、外网域名被拦。当前工程已改为只保留 NSAllowsArbitraryLoads=YES；若仍看到本提示，说明真机还是旧包，请 git pull 后 Clean Build Folder 重新编译安装。内网 / Tailscale 填 http://IP:端口（5173 / 19876 均可）即可，不需要 HTTPS。"
             }
             // NSURLError 的 SSL 段：-1200 握手失败，-1201~-1206 证书问题
             let tlsCodes: Set<Int> = [-1200, -1201, -1202, -1203, -1204, -1205, -1206]

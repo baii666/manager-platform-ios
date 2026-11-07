@@ -46,10 +46,14 @@
 	</array>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>用于把查看中的照片保存到系统相册</string>
+	<!-- ⚠️ 只保留 NSAllowsArbitraryLoads。iOS 10+ 若 plist 里同时出现
+	     NSAllowsLocalNetworking / NSAllowsArbitraryLoadsInWebContent /
+	     NSAllowsArbitraryLoadsForMedia 任意一个，系统会忽略 NSAllowsArbitraryLoads
+	     （按默认值 NO 处理），只剩「本地网络例外」生效：局域网 IP 能连，
+	     但 Tailscale MagicDNS 域名(xxx.ts.net) 和 100.x CGNAT 地址会被 ATS 拦成 -1022。
+	     部署目标是 iOS 17，不需要为兼容 iOS 9 而同时设两个 key。 -->
 	<key>NSAppTransportSecurity</key>
 	<dict>
-		<key>NSAllowsLocalNetworking</key>
-		<true/>
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
