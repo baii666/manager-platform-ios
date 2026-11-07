@@ -326,32 +326,25 @@ struct ShortFeedView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                 .allowsHitTesting(false)
 
-            // 底栏内容 + 它上方的固定进度条。进度条不再画在每页内部：
-            // 否则贴在屏幕最底、和底栏挤在一起，还跟着视频一起滚。
-            // 抖音式是底栏贴底、进度条悬在底栏上方一条细线。
+            // 从下到上：进度条贴底 → 标题/关联内容/右侧按钮在进度条上方。
+            // 进度条不再画在每页内部（否则跟着视频一起滚）；抖音式是
+            // 进度条贴底一条细线，标题紧挨在它上面。
             VStack(spacing: 0) {
-                feedProgressBar
-
                 if let video = currentVideo {
                     HStack(alignment: .bottom, spacing: 10) {
-                        // 左侧：标题 → meta → 「同文件夹」胶囊（抖音「选集」式入口）。
-                        // 标题与胶囊同目标（关联页），胶囊是视觉锚点、让人一眼知道能点进去。
-                        VStack(alignment: .leading, spacing: 8) {
+                        // 左侧：标题 → meta → 「关联内容」入口（抖音「选集」行式小字链接）。
+                        // 标题与关联内容同目标（关联页），后者是显式入口、一眼能点。
+                        VStack(alignment: .leading, spacing: 6) {
                             Button {
                                 relatedVideo = currentVideo
                             } label: {
-                                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                                    Text(video.titleText)
-                                        .font(.headline.weight(.semibold))
-                                        .foregroundStyle(.white)
-                                        .lineLimit(2)
-                                        .multilineTextAlignment(.leading)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                        .shadow(color: .black.opacity(0.7), radius: 4, y: 1)
-                                    Image(systemName: "chevron.right")
-                                        .font(.system(size: 12, weight: .bold))
-                                        .foregroundStyle(.white.opacity(0.65))
-                                }
+                                Text(video.titleText)
+                                    .font(.headline.weight(.semibold))
+                                    .foregroundStyle(.white)
+                                    .lineLimit(2)
+                                    .multilineTextAlignment(.leading)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .shadow(color: .black.opacity(0.7), radius: 4, y: 1)
                             }
                             .buttonStyle(.plain)
 
@@ -363,19 +356,18 @@ struct ShortFeedView: View {
                                     .allowsHitTesting(false)
                             }
 
+                            // 「关联内容」：小字 + chevron，跳关联页。后续扩展同番号/
+                            // 同演员等只换跳转口径，入口文案不变。
                             Button {
                                 relatedVideo = currentVideo
                             } label: {
-                                HStack(spacing: 4) {
-                                    Text("同文件夹")
+                                HStack(spacing: 3) {
+                                    Text("关联内容")
                                     Image(systemName: "chevron.right")
-                                        .font(.system(size: 9, weight: .bold))
+                                        .font(.system(size: 10, weight: .bold))
                                 }
-                                .font(.caption.weight(.medium))
+                                .font(.subheadline.weight(.medium))
                                 .foregroundStyle(.white.opacity(0.9))
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 4)
-                                .background(Capsule().fill(Color.white.opacity(0.16)))
                             }
                             .buttonStyle(.plain)
                         }
@@ -404,17 +396,19 @@ struct ShortFeedView: View {
                     }
                     .padding(.leading, 16)
                     .padding(.trailing, 10)
-                    .padding(.bottom, 10)
+                    .padding(.bottom, 2)
                 }
+
+                feedProgressBar
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
     }
 
-    /// 固定进度条：挂在当前播放引擎上（换页自动跟换），悬在底栏上方。
-    /// 复用 VideoPlayerView 的 BottomProgressBar（已改 internal），交互一致：
-    /// 34pt 透明热区、点哪跳哪、横向拖 scrub、纯垂直滑动放行给切视频。
+    /// 固定进度条：挂在当前播放引擎上（换页自动跟换），**贴底**，标题在它上方
+    /// （顺序见 feedBottomBar 的 VStack）。复用 VideoPlayerView 的 BottomProgressBar
+    /// （已改 internal），交互一致：34pt 透明热区、点哪跳哪、横向拖 scrub、纯垂直滑动放行。
     /// 短视频 99% 是 MP4 直连，seek 直接走 engine.seek(to:)（精确 seek）。
     private var feedProgressBar: some View {
         TimelineView(.periodic(from: .now, by: 0.2)) { _ in
