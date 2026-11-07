@@ -1,5 +1,6 @@
 import SwiftUI
 import Combine
+import UIKit
 
 // MARK: - 当前页播放引擎句柄
 // 刷流的右上角图标（画中画 / 投屏）钉在屏幕上不动，但要作用在**当前**那条视频上。
@@ -157,10 +158,13 @@ struct ShortFeedView: View {
 
     /// 右滑退出：只响应严格水平的向右拖动（dx>0 且 dx>abs(dy)），页面跟手右移；
     /// 松手超阈值 → 向右滑出屏幕并退出；否则弹回。上下滑切视频完全不飘。
+    /// ⚠️ 起点落在底部进度条热区（约 34pt）内一律不参与：进度条用的是
+    ///    .simultaneousGesture，向右拖 seek 时本手势也会同时收到，不挡的话整页
+    ///    会跟着右移，超过 100pt 甚至直接退出刷流。
     private var exitDragGesture: some Gesture {
         DragGesture(minimumDistance: 20)
             .onChanged { value in
-                guard !isExiting else { return }
+                guard !isExiting, !startsInBottomBar(value.startLocation.y) else { return }
                 let dx = value.translation.width
                 let dy = value.translation.height
                 if dx > 0, dx > abs(dy) {
@@ -168,7 +172,7 @@ struct ShortFeedView: View {
                 }
             }
             .onEnded { value in
-                guard !isExiting else { return }
+                guard !isExiting, !startsInBottomBar(value.startLocation.y) else { return }
                 let dx = value.translation.width
                 let dy = value.translation.height
                 if dx > 100, dx > abs(dy) {
@@ -179,6 +183,12 @@ struct ShortFeedView: View {
                     }
                 }
             }
+    }
+
+    /// ZStack 坐标可能不含安全区，用屏幕高度比例兜底：底部 20% 一律视为进度条区域。
+    /// 正常的右滑退出都从屏幕中上部起手，不受影响。
+    private func startsInBottomBar(_ y: CGFloat) -> Bool {
+        y > UIScreen.main.bounds.height * 0.8
     }
 
     /// 统一的退出：整页右移滑出屏幕 → 关闭。
@@ -265,8 +275,8 @@ private struct ShortFeedPage: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
                     .padding(.leading, 16)
                     .padding(.trailing, 16)
-                    // 抬高一点，别压到页面底部那条进度条
-                    .padding(.bottom, 18)
+                    // 抬到进度条热区（底部 34pt）之上，手指落在标题上不会误触 seek
+                    .padding(.bottom, 38)
                     // 只为定位，不能吃掉上下滑 / 右滑退出手势
                     .allowsHitTesting(false)
             }

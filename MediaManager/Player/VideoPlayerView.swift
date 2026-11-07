@@ -86,6 +86,9 @@ struct VideoPlayerView: View {
     @State private var volumeBase: Float = 0
     @State private var pendingSeek: Double? = nil
     @State private var hud: String? = nil
+    /// 刷流底部进度条的拖动状态。视觉细线在 BottomProgressBar 里，热区另有 34pt。
+    @State private var barScrubbing = false
+    @State private var barScrubRatio: Double = 0
 
     @State private var hideWork: DispatchWorkItem?
     @State private var reportTask: Task<Void, Never>?
@@ -219,29 +222,40 @@ struct VideoPlayerView: View {
         }
     }
 
-    /// 底部细进度条：一条 3pt 细线（半透明底 + 白色已播），钉在本页最底。
-    /// 位置跟着页面走，所以刷流上下滑时它跟着视频一起滚；固定 UI（标题 / 图标）不归它管。
-    /// 不可拖拽 —— 拖动语义归手势层（快进 / 亮度 / 音量）和刷流的上下滑 / 右滑退出。
+    /// 底部进度条（刷流用）：视觉仍是一条细线，但整条底部 34pt 都是可点可拖的热区。
+    /// ⚠️ 旧版是 3pt 细线 + allowsHitTesting(false)，用户反馈「拖不动、太细点不到」——
+    ///    手指根本落不进 3pt。现在线画在热区底部（拖动时变粗 + 圆点），命中区透明铺满。
+    /// ⚠️ 位置跟着页面走，所以刷流上下滑时它跟着视频一起滚；固定 UI（标题 / 图标）不归它管。
+    /// ⚠️ 用 .simultaneousGesture（不是 .gesture）：刷流上下滑切视频归父 ScrollView，
+    ///    纯垂直滑动要能同时传给它，本视图不 seek（onEnd 传 nil 取消）。
     private var bottomProgressBar: some View {
         TimelineView(.periodic(from: .now, by: 0.2)) { _ in
             let total = displayDuration
-            if total > 0 {
-                let ratio = min(max(displayPosition / total, 0), 1)
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        Capsule().fill(Color.white.opacity(0.25))
-                        Capsule().fill(Color.white)
-                            .frame(width: geo.size.width * ratio)
-                    }
+            // 采样 0.2s + 线性补间：观感是持续滚动，而不是 0.5s 一跳。
+            // 拖动期间锁在手指位置，不被播放进度覆盖
+            let ratio: Double = total > 0
+                ? (barScrubbing ? barScrubRatio : min(max(displayPosition / total, 0), 1))
+                : 0
+            BottomProgressBar(
+                ratio: ratio,
+                duration: total,
+                scrubbing: barScrubbing,
+                onStart: {
+                    barScrubbing = true
+                    engine.isScrubbing = true
+                },
+                onChange: { r in
+                    barScrubRatio = r
+                    hud = PlayerTimeFormatter.string(r * total) + " / " + durationText(total)
+                },
+                onEnd: { r in
+                    barScrubbing = false
+                    engine.isScrubbing = false
+                    hud = nil
+                    // HLS 走重开会话、MP4 精确 seek，统一交给 seekTo
+                    if let r { seekTo(absolute: r * total) }
                 }
-                .frame(height: 3)
-                .clipShape(Capsule())
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-                .padding(.bottom, 6)
-                .allowsHitTesting(false)
-                // 采样 0.2s + 线性补间：观感是持续滚动，而不是 0.5s 一跳
-                .animation(.linear(duration: 0.2), value: ratio)
-            }
+            )
         }
     }
 
@@ -798,6 +812,89 @@ private struct VolumeHijack: UIViewRepresentable {
 
     func updateUIView(_ uiView: MPVolumeView, context: Context) {
         SystemVolume.shared.attach(uiView)
+    }
+}
+
+// MARK: - 刷流底部进度条（可点可拖）
+// 视觉是 3pt 细线，命中区是整条底部 34pt —— 3pt 的线根本点不到，
+// 所以把「透明热区」和「视觉线」拆开：热区铺满，线画在热区底部。
+// ⚠️ 放在本文件里的 private struct，不新增 Swift 文件（否则又要 xcodegen generate）。
+private struct BottomProgressBar: View {
+    let ratio: Double
+    let duration: Double
+    let scrubbing: Bool
+    var onStart: () -> Void
+    var onChange: (Double) -> Void
+    /// nil = 取消（纯垂直滑动，交给刷流切页）；非 nil = 松手后要跳到的比例
+    var onEnd: (Double?) -> Void
+
+    @State private var started = false
+
+    private let hitHeight: CGFloat = 34
+
+    var body: some View {
+        GeometryReader { geo in
+            let width = max(geo.size.width, 1)
+            let clamped = CGFloat(min(max(ratio, 0), 1))
+            ZStack(alignment: .bottomLeading) {
+                // 轨道 + 已播：平时 3pt，拖动时 6pt，视觉上「抓得住」
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.white.opacity(0.25))
+                    Capsule().fill(Color.white).frame(width: width * clamped)
+                }
+                .frame(height: scrubbing ? 6 : 3)
+                .clipShape(Capsule())
+                .frame(maxWidth: .infinity, alignment: .bottom)
+                .padding(.bottom, 8)
+                .animation(.easeOut(duration: 0.15), value: scrubbing)
+                .animation(.linear(duration: 0.2), value: ratio)
+
+                // 拖动时冒出圆点，明确告诉用户「这条能拖」
+                if scrubbing {
+                    Circle().fill(Color.white)
+                        .frame(width: 12, height: 12)
+                        .offset(x: max(0, width * clamped - 6), y: -5)
+                        .animation(.linear(duration: 0.2), value: ratio)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+            .contentShape(Rectangle())
+            // ⚠️ 总时长未知（HLS 未出 ENDLIST）时禁掉交互：ratio*duration 恒 0，
+            //    点了只会跳回开头，表现成「拖了没反应」
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { v in
+                        guard duration > 0 else { return }
+                        let dx = abs(v.translation.width)
+                        let dy = abs(v.translation.height)
+                        // 垂直为主 = 刷流上下滑切视频，不 seek；
+                        // simultaneousGesture 让 ScrollView 照样收到这次手势
+                        guard dx >= dy * 0.8 else { return }
+                        if !started {
+                            started = true
+                            onStart()
+                        }
+                        onChange(clamp(v.location.x, width: width))
+                    }
+                    .onEnded { v in
+                        guard duration > 0 else { return }
+                        let dx = abs(v.translation.width)
+                        let dy = abs(v.translation.height)
+                        let horizontal = dx >= dy * 0.8
+                        let wasStarted = started
+                        started = false
+                        // 纯垂直滑动：什么都没开始，直接放行给 ScrollView 切页
+                        guard wasStarted else { return }
+                        onEnd(horizontal ? clamp(v.location.x, width: width) : nil)
+                    }
+            )
+        }
+        .frame(height: hitHeight)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+    }
+
+    private func clamp(_ x: CGFloat, width: CGFloat) -> Double {
+        min(max(Double(x / width), 0), 1)
     }
 }
 
