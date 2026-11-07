@@ -28,7 +28,7 @@ struct ServerSwitchView: View {
 
             Section {
                 HStack(spacing: 8) {
-                    TextField("https://your.domain 或 http://IP:19876", text: $newAddress)
+                    TextField("http://IP:19876 或 https://your.domain", text: $newAddress)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .keyboardType(.URL)
@@ -47,7 +47,7 @@ struct ServerSwitchView: View {
             } header: {
                 Text("添加服务器")
             } footer: {
-                Text("外网请填 https 域名（需服务端配好证书或反向代理）；局域网可填 http://IP:19876。地址会自动记住，下次不用重输。")
+                Text("内网 / Tailscale 填 http://IP:19876 或 http://xxx.ts.net:19876 即可（App 已放开明文 HTTP，ATS 不会拦）；只有走公网才需要 https 域名 + 反向代理。地址会自动记住，下次不用重输。")
             }
 
             if !session.servers.isEmpty {

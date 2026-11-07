@@ -31,7 +31,7 @@ struct LoginView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 8) {
                         field(systemImage: "network",
-                              placeholder: "https://your.domain 或 http://192.168.1.100:19876",
+                              placeholder: "http://IP:19876 或 http://xxx.ts.net:19876",
                               text: $server)
                         // 记住过的服务器：选一条回填 / 删一条 / 清空
                         serverMenu
@@ -48,7 +48,7 @@ struct LoginView: View {
                         .buttonStyle(.plain)
                         .disabled(AppSession.normalizeBaseURL(server) == nil)
                     }
-                    Text("外网请用 https 域名（服务端需配好证书或反向代理）；局域网可直接填 IP。")
+                    Text("内网 / Tailscale 穿透直接填 http://（App 已放开明文 HTTP），例如 http://100.107.56.127:19876 或 http://xxx.ts.net:19876；只有走公网才需要 https 域名 + 反向代理。")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
