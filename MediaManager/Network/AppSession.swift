@@ -108,18 +108,45 @@ final class AppSession: ObservableObject {
     ///    看不出是「对端根本没开 TLS」还是「证书不被信任」，两者修法完全不同。
     static func describe(_ error: Error) -> String {
         let ns = error as NSError
-        guard ns.domain == NSURLErrorDomain else { return error.localizedDescription }
-        // NSURLError 的 SSL 段：-1200 握手失败，-1201~-1206 证书问题
-        let tlsCodes: Set<Int> = [-1200, -1201, -1202, -1203, -1204, -1205, -1206]
-        if tlsCodes.contains(ns.code) {
-            return "HTTPS/TLS 失败（\(ns.code)）。-1200 通常是服务端没开 TLS：Go 网关 19876 只有 HTTP，直接把地址里的 http 改成 https 会握手失败，需要在前面加一层 HTTPS 反向代理；-1201~-1206 是证书不被信任：自签/私有 CA 请把根证书装进设备并在「设置 → 通用 → 关于本机 → 证书信任设置」开启完全信任，公网证书请核对域名是否匹配、证书链是否完整。"
+        if ns.domain == NSURLErrorDomain {
+            // NSURLError 的 SSL 段：-1200 握手失败，-1201~-1206 证书问题
+            let tlsCodes: Set<Int> = [-1200, -1201, -1202, -1203, -1204, -1205, -1206]
+            if tlsCodes.contains(ns.code) {
+                return "HTTPS/TLS 失败（\(ns.code)）。-1200 通常是服务端没开 TLS：Go 网关 19876 只有 HTTP，直接把地址里的 http 改成 https 会握手失败，需要在前面加一层 HTTPS 反向代理；-1201~-1206 是证书不被信任：自签/私有 CA 请把根证书装进设备并在「设置 → 通用 → 关于本机 → 证书信任设置」开启完全信任，公网证书请核对域名是否匹配、证书链是否完整。"
+            }
+            return "\(error.localizedDescription)（错误码 \(ns.code)）"
         }
-        return "\(error.localizedDescription)（错误码 \(ns.code)）"
+        if let e = error as? DataError {
+            switch e {
+            case .http(let code) where code >= 500:
+                return "服务器返回 HTTP \(code)。多半是 HTTPS 反向代理没配好或后端 19876 没起来，先确认反代能正常转发，再重试。"
+            case .http(let code):
+                return "请求失败（HTTP \(code)），请检查登录状态。"
+            case .server(let msg):
+                return msg
+            default:
+                return error.localizedDescription
+            }
+        }
+        return error.localizedDescription
     }
 
     /// 网络层（含 TLS）失败：这时不该把当前已连上的服务器踢掉
     static func isNetworkFailure(_ error: Error) -> Bool {
         (error as NSError).domain == NSURLErrorDomain
+    }
+
+    /// 只有明确的「登录态失效」才允许回登录页。
+    /// 网络/TLS、反代 5xx、解析错误一律不算 —— 这些失败不能踢掉当前会话、不能删 cookie。
+    static func isAuthFailure(_ error: Error) -> Bool {
+        if isNetworkFailure(error) { return false }
+        guard let e = error as? DataError else { return false }
+        switch e {
+        case .http(let code): return code == 401 || code == 403
+        case .server(let msg):
+            return msg.contains("未登录") || msg.contains("登录") || msg.lowercased().contains("unauthorized")
+        default: return false
+        }
     }
 
     // MARK: - 地址列表（客户端记忆）
@@ -185,10 +212,10 @@ final class AppSession: ObservableObject {
 
     /// 切到另一台服务器，返回是否完成了切换流程（YES = 已换过去 / 已回登录页）。
     /// - 目标 host 存过有效登录态 → 直接换 client，免密、无缝；
-    /// - 没登录态（401）→ 回登录页，地址与用户名已预填，只需输密码；
-    /// - 网络 / HTTPS TLS 连不上 → **保持当前这台不动**，只给可排查的提示，返回 NO。
-    ///   ⚠️ 关键：TLS 错误绝不能被当成「登录态失效」，否则一换外网 https 地址
-    ///   就把当前能用的会话踢掉、还删掉 cookie，用户会以为 App 掉线了。
+    /// - 没登录态（401/403）→ 回登录页，地址与用户名已预填，只需输密码；
+    /// - 网络 / HTTPS TLS / 反代 5xx 异常 → **保持当前这台不动**，只给可排查的提示，返回 NO。
+    ///   ⚠️ 关键：只有明确认证失败才能踢会话；否则一换外网 https 地址（证书没配好 /
+    ///   反代没起来）就把当前能用的会话踢掉、还删掉 cookie，用户会以为 App 掉线了。
     @discardableResult
     @MainActor
     func switchServer(to input: String) async -> Bool {
@@ -223,8 +250,8 @@ final class AppSession: ObservableObject {
             sessionEpoch += 1
             return true
         } catch {
-            if Self.isNetworkFailure(error) {
-                // DNS / 连不上 / TLS 握手或证书失败：当前会话原样保留，别删 cookie
+            if !Self.isAuthFailure(error) {
+                // 网络 / TLS / 反代异常：当前会话原样保留，别删 cookie
                 errorMessage = Self.describe(error)
                 return false
             }
@@ -274,13 +301,13 @@ final class AppSession: ObservableObject {
                 persistSessionCookie()
                 return
             } catch {
-                if Self.isNetworkFailure(error) {
-                    // 网络 / TLS 问题不代表登录态失效：cookie 和地址都留着，
+                if !Self.isAuthFailure(error) {
+                    // 网络 / TLS / 反代异常不代表登录态失效：cookie 和地址都留着，
                     // 等网络恢复后冷启动还能直接免密进来；登录页会显示排查提示
                     errorMessage = Self.describe(error)
                     return
                 }
-                // 401 等：继续下一次尝试 / 最终走清理
+                // 401 / 403：继续下一次尝试 / 最终走清理
             }
         }
         // 确实失效了：清掉残留，留在登录页（地址已预填）
