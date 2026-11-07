@@ -519,6 +519,14 @@ final class APIClient: DataProviding, @unchecked Sendable {
         return (resp.items, resp.total)
     }
 
+    /// 同文件夹关联视频（刷流底栏标题入口）。
+    /// 后端按 file_path 父目录匹配（/api/shorts/videos/:id/related），
+    /// 已排除本条、过滤禁用池/无权限池，返回按文件名排序（上限 200 条）+ 文件夹路径。
+    func fetchRelatedShorts(id: Int) async throws -> ([ShortVideo], String) {
+        let resp: RelatedShortsResponse = try await request("/api/shorts/videos/\(id)/related")
+        return (resp.items, resp.folder)
+    }
+
     func fetchShortPools() async throws -> [ShortPool] {
         let resp: PoolsResponse = try await request("/api/shorts/pools")
         return resp.pools
@@ -1095,6 +1103,11 @@ struct ShootPhotosPage: Decodable, Sendable {
 private struct ShortVideosResponse: Decodable {
     let items: [ShortVideo]
     let total: Int
+}
+
+private struct RelatedShortsResponse: Decodable {
+    let items: [ShortVideo]
+    let folder: String
 }
 
 private struct PoolsResponse: Decodable {

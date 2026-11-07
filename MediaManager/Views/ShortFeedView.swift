@@ -142,6 +142,8 @@ struct ShortFeedView: View {
     @State private var isExiting = false
     /// 连播播完时用它滚到下一条。只在本视图生命周期内持有，不跨重建缓存。
     @State private var scrollProxy: ScrollViewProxy?
+    /// 非nil 时弹「同文件夹关联视频页」（item 式 fullScreenCover，跟随当前视频换内容）
+    @State private var relatedVideo: ShortVideo?
 
     /// 预加载窗口半径：当前页 ±2
     private let windowRadius = 2
@@ -262,6 +264,33 @@ struct ShortFeedView: View {
             controls.advanceRequest = nil
             advance(from: id)
         }
+        // 关联页盖上来时暂停当前视频（不然声音一直垫底）、关掉后恢复；
+        // 用户下滑手势关 cover 也会把 item 重置回 nil，统一走这里恢复播放。
+        // 恢复用 play()：它会写 player.rate = rate，倍速不会被打回 1x。
+        .onChange(of: relatedVideo) {
+            guard let engine = engineHandle.engine else { return }
+            if relatedVideo == nil { engine.play() } else { engine.pause() }
+        }
+        // 标题点击 → 同文件夹关联视频页。点列表里已在刷流队列中的视频 →
+        // 跳回刷流并定位到那条；不在队列 → 关联页自己起播放器。
+        .fullScreenCover(item: $relatedVideo) { v in
+            ShortRelatedView(video: v, client: viewModel.client) { picked in
+                guard viewModel.items.contains(where: { $0.id == picked.id }) else { return false }
+                relatedVideo = nil
+                if let proxy = scrollProxy {
+                    withAnimation(.easeInOut(duration: 0.3)) { proxy.scrollTo(picked.id, anchor: .top) }
+                    // 兜底同 advance(from:)：paging 下 scrollTo 偶发首次不落地，
+                    // 0.35s 后还没到位就直接写 scrollPosition（用户手动滑走则不抢）
+                    let target = picked.id
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                        if self.currentID != target { self.currentID = target }
+                    }
+                } else {
+                    currentID = picked.id
+                }
+                return true
+            }
+        }
     }
 
     // MARK: 固定底栏
@@ -296,24 +325,39 @@ struct ShortFeedView: View {
 
             if let video = currentVideo {
                 HStack(alignment: .bottom, spacing: 10) {
-                    // 左侧：标题在上、副信息在下。文字不吃手势，落在标题上也能上下滑。
+                    // 左侧：标题在上、副信息在下。标题可点 → 同文件夹关联视频页
+                    // （对齐抖音「选集」入口；后续扩展同番号/同演员只动后端接口）。
+                    // ⚠️ 整个 VStack 不能再挂 allowsHitTesting(false)（原为了让落在
+                    // 文字上的上下滑穿透），那会把 Button 一起禁掉。标题 Button 与
+                    // ScrollView 手势天然共存：按住拖动仍是切视频，轻点才进关联页；
+                    // 副信息文字仍单独放行手势。
                     VStack(alignment: .leading, spacing: 8) {
-                        Text(video.titleText)
-                            .font(.headline.weight(.semibold))
-                            .foregroundStyle(.white)
-                            .lineLimit(2)
-                            .multilineTextAlignment(.leading)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .shadow(color: .black.opacity(0.7), radius: 4, y: 1)
+                        Button {
+                            relatedVideo = currentVideo
+                        } label: {
+                            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                Text(video.titleText)
+                                    .font(.headline.weight(.semibold))
+                                    .foregroundStyle(.white)
+                                    .lineLimit(2)
+                                    .multilineTextAlignment(.leading)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .shadow(color: .black.opacity(0.7), radius: 4, y: 1)
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 12, weight: .bold))
+                                    .foregroundStyle(.white.opacity(0.65))
+                            }
+                        }
+                        .buttonStyle(.plain)
                         if let meta = currentMeta {
                             Text(meta)
                                 .font(.caption)
                                 .foregroundStyle(.white.opacity(0.72))
                                 .lineLimit(1)
+                                .allowsHitTesting(false)
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .allowsHitTesting(false)
 
                     // 右侧：收藏 / 连播 / 倍速。抖音式「圆形半透明底 + 下方小字」，
                     // 不用实体白板、不用方块。
@@ -627,6 +671,249 @@ private struct ShortFeedPage: View {
             }
         } catch {
             self.error = error.localizedDescription
+        }
+    }
+}
+
+// MARK: - 短视频播放地址解析（共用）
+// 刷流页 ShortFeedPage 与下方关联页 ShortRelatedPlayer 同一套口径：
+// MP4/M4V/MOV 直连零等待，其余走 HLS 会话。
+@MainActor
+func resolveShortPlayback(_ video: ShortVideo, path: String, client: APIClient) async throws -> PlaybackTarget {
+    if let url = client.streamURL(path: path) {
+        return PlaybackTarget(url: url, title: video.titleText,
+                              assetType: nil, assetID: nil,
+                              startAt: 0, timeOffset: 0,
+                              knownDuration: video.duration, sourcePath: path)
+    }
+    return try await client.resolvePlayback(
+        path: path, startAt: nil, title: video.titleText,
+        assetType: nil, assetID: nil, knownDuration: video.duration)
+}
+
+// MARK: - 同文件夹关联视频页（刷流底栏标题入口）
+// v1 口径：后端按 file_path 父目录匹配（/api/shorts/videos/:id/related）。
+// 后续扩展（同番号/同演员等）只动后端接口与本页标题文案，列表/播放逻辑不变。
+// ⚠️ 刻意放本文件而不是新建 Swift 文件：新增文件必须 xcodegen generate（还会
+// 冲掉手选 Team），本页纯加视图不触发这条红线。
+private struct ShortRelatedView: View {
+    let video: ShortVideo
+    let client: APIClient?
+    /// 点某条视频：返回 true = 刷流层已接手（已跳转并关闭本页）；false = 本页自己起播放器
+    let onPick: (ShortVideo) -> Bool
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var items: [ShortVideo] = []
+    @State private var folder = ""
+    @State private var isLoading = true
+    @State private var errorText: String?
+    @State private var playing: ShortVideo?
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            Color.black.ignoresSafeArea()
+
+            if isLoading {
+                ProgressView().controlSize(.large).tint(.white)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            } else if let errorText {
+                VStack(spacing: 14) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 26))
+                        .foregroundStyle(.orange)
+                    Text(errorText)
+                        .font(.subheadline)
+                        .foregroundStyle(.white.opacity(0.85))
+                        .multilineTextAlignment(.center)
+                    Button("重试") { Task { await load() } }
+                        .buttonStyle(.plain)
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 8)
+                        .background(Capsule().fill(Color.white.opacity(0.2)))
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(24)
+            } else if items.isEmpty {
+                Text("这个文件夹里没有其他视频")
+                    .font(.subheadline)
+                    .foregroundStyle(.white.opacity(0.6))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    // 复用短视频池页同款卡片（竖版封面 + 标题），高度常量钉死
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 108), spacing: 12)], spacing: 14) {
+                        ForEach(items) { v in
+                            ShortCard(video: v, client: client,
+                                      coverHeight: 150, titleHeight: 34,
+                                      cardHeight: 184) {
+                                pick(v)
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 6)
+                    .padding(.bottom, 24)
+                }
+            }
+
+            // 顶部固定：关闭 + 「同文件夹 · N 个视频」+ 文件夹路径。
+            // 路径用 .head 截断：保住最深的目录名，砍掉前面冗长的盘符/父级
+            HStack(spacing: 12) {
+                Button { dismiss() } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 38, height: 38)
+                        .background(Circle().fill(Color.black.opacity(0.45)))
+                }
+                .buttonStyle(.plain)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("同文件夹 · \(items.count) 个视频")
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                    if !folder.isEmpty {
+                        Text(folder)
+                            .font(.caption2)
+                            .foregroundStyle(.white.opacity(0.55))
+                            .lineLimit(1)
+                            .truncationMode(.head)
+                    }
+                }
+            }
+            .padding(.leading, 16)
+            .padding(.trailing, 16)
+        }
+        .task { await load() }
+        .fullScreenCover(item: $playing) { v in
+            ShortRelatedPlayer(video: v, client: client)
+        }
+    }
+
+    private func pick(_ v: ShortVideo) {
+        if onPick(v) { return } // 刷流层已接手（跳转 + 关闭本页）
+        playing = v
+    }
+
+    @MainActor
+    private func load() async {
+        isLoading = true
+        errorText = nil
+        guard let client else {
+            errorText = "还没连接到服务器，请重新登录"
+            isLoading = false
+            return
+        }
+        do {
+            let (list, f) = try await client.fetchRelatedShorts(id: video.id)
+            items = list
+            folder = f
+        } catch {
+            errorText = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+        isLoading = false
+    }
+}
+
+// MARK: - 关联页的独立播放器（fullScreenCover）
+// 复用 VideoPlayerView，地址解析走 resolveShortPlayback。关闭按钮自己画——
+// 不依赖 VideoPlayerView 的 showsCloseButton 关闭行为（刷流页同样自己画）。
+// ⚠️ VideoPlayerView 实参顺序必须与声明顺序一致。
+private struct ShortRelatedPlayer: View {
+    let video: ShortVideo
+    let client: APIClient?
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var target: PlaybackTarget?
+    @State private var error: String?
+    @State private var attempt = 0
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            Color.black.ignoresSafeArea()
+            if let target {
+                VideoPlayerView(url: target.url,
+                                startPosition: 0,
+                                timeOffset: 0,
+                                sourcePath: target.sourcePath,
+                                knownDuration: target.knownDuration ?? video.duration,
+                                title: video.titleText,
+                                assetType: nil,
+                                assetID: nil,
+                                autoplay: true,
+                                loop: true,
+                                isActive: true,
+                                showsCloseButton: false,
+                                dragGesturesEnabled: false,
+                                showsControlBar: true,
+                                onEngineReady: nil,
+                                hidesStatusBar: true,
+                                showsBottomProgressBar: true)
+            } else {
+                placeholder
+            }
+
+            Button { dismiss() } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 38, height: 38)
+                    .background(Circle().fill(Color.black.opacity(0.45)))
+            }
+            .padding(.top, 8)
+            .padding(.leading, 16)
+        }
+        .task(id: attempt) {
+            guard target == nil else { return }
+            await prepare()
+        }
+    }
+
+    private var placeholder: some View {
+        ZStack {
+            Color.black
+            VStack(spacing: 12) {
+                if let error {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 26))
+                        .foregroundStyle(.orange)
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.85))
+                        .multilineTextAlignment(.center)
+                    Button("重试") { attempt += 1 }
+                        .buttonStyle(.plain)
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 8)
+                        .background(Capsule().fill(Color.white.opacity(0.2)))
+                } else {
+                    ProgressView().controlSize(.large).tint(.white)
+                }
+                Text(video.titleText)
+                    .font(.subheadline)
+                    .foregroundStyle(.white)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+            }
+            .padding(24)
+        }
+    }
+
+    @MainActor
+    private func prepare() async {
+        guard let path = video.filePath, !path.isEmpty else {
+            error = "这条记录没有文件路径"
+            return
+        }
+        guard let client else {
+            error = "还没连接到服务器，请重新登录"
+            return
+        }
+        do {
+            target = try await resolveShortPlayback(video, path: path, client: client)
+        } catch let e {
+            error = (e as? LocalizedError)?.errorDescription ?? e.localizedDescription
         }
     }
 }
