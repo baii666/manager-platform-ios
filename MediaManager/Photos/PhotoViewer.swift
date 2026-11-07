@@ -719,25 +719,35 @@ struct PhotoViewerView: View {
         }
     }
 
-    /// 详情卡片（自绘层，从底部升起，可下滑关闭）
+    /// 图片详情：居中弹窗（自绘层，四周留白 + 遮罩，仍可下滑关闭）
     private func detailCard(_ photo: Photo) -> some View {
         GeometryReader { geo in
-            ZStack(alignment: .bottom) {
-                // 遮罩：点空白关闭
-                Color.black.opacity(0.35)
+            // 居中：卡片不再贴底占满整宽，四周留白，靠遮罩聚焦。
+            ZStack {
+                // 遮罩：点空白关闭（居中卡片比贴底抽屉更需要压暗背景）
+                Color.black.opacity(0.45)
                     .ignoresSafeArea()
                     .onTapGesture { closeDetailCard() }
                     .transition(.opacity)
 
                 VStack(spacing: 0) {
                     // 自绘头部（原来靠 NavigationStack 的 navigationTitle + toolbar，
-                    // 自绘层没有导航栏，标题和「完成」得自己摆）
-                    HStack {
+                    // 自绘层没有导航栏，标题和关闭按钮得自己摆）
+                    HStack(spacing: 10) {
+                        Image(systemName: "info.circle.fill")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(Theme.brand)
                         Text("图片详情")
                             .font(.headline)
                         Spacer()
-                        Button("完成") { closeDetailCard() }
-                            .font(.subheadline.weight(.semibold))
+                        Button { closeDetailCard() } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 28, height: 28)
+                                .background(Circle().fill(Color.primary.opacity(0.08)))
+                        }
+                        .buttonStyle(.plain)
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 10)
@@ -864,13 +874,24 @@ struct PhotoViewerView: View {
                 .padding(16)
             }       // ScrollView
             }       // 卡片 VStack
-            .frame(width: geo.size.width, height: geo.size.height * 0.72)
+            // 居中卡片：宽度不撑满（iPhone 左右各留 18pt、iPad 最多 480pt），
+            // 高度封顶 80% 屏高，内容超了由内部 ScrollView 滚。
+            .frame(width: min(geo.size.width - 36, 480),
+                   height: min(geo.size.height * 0.8, geo.size.height - 96))
             // 系统色背景：深色模式自动跟系统（原来是 sheet，背景由系统给）
             .background(Color(uiColor: .systemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            // 从底部升起（对齐原来 sheet 的进出场）
-            .transition(.move(edge: .bottom))
-            // 下滑关闭（对齐 sheet 的手感）
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .stroke(.separator, lineWidth: 0.5)
+            }
+            .shadow(color: .black.opacity(0.35), radius: 30, y: 12)
+            // 居中弹窗用「轻微缩放 + 淡入」，不再从底部升起
+            .transition(.asymmetric(
+                insertion: .scale(scale: 0.92, anchor: .center).combined(with: .opacity),
+                removal: .opacity
+            ))
+            // 仍保留下滑关闭（从 sheet 时代沿用）：向下拖卡片整体下移，松手超阈值关闭
             .offset(y: cardDrag)
             .gesture(
                 DragGesture()
