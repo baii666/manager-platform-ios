@@ -320,9 +320,11 @@ struct ShortFeedView: View {
     private var feedBottomBar: some View {
         ZStack(alignment: .bottom) {
             // 渐变是被绘制出来的视图，会吃手势 → 明确放行，上下滑照常切视频
-            LinearGradient(colors: [.clear, .black.opacity(0.45), .black.opacity(0.92)],
+            // 参考图是近乎实色的深色信息面板：渐变加强成「快速压黑」，
+            // 让标题/胶囊/按钮落在深色底上（和图一致），而不是浮在亮视频上发白
+            LinearGradient(colors: [.clear, .black.opacity(0.5), .black.opacity(0.95)],
                            startPoint: .top, endPoint: .bottom)
-                .frame(height: 250)
+                .frame(height: 230)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                 .allowsHitTesting(false)
 
@@ -362,7 +364,7 @@ struct ShortFeedView: View {
                         // 对齐参考图最后一行：左侧「关联内容」胶囊条（选集条式，
                         // 文字居左 / 箭头居右、深色半透明圆角底）+ 右侧「图标+文字」
                         // 横排按钮（无圆形底）。后续扩展同番号/同演员等只换跳转口径。
-                        HStack(spacing: 12) {
+                        HStack(spacing: 10) {
                             Button {
                                 relatedVideo = currentVideo
                             } label: {
@@ -376,10 +378,10 @@ struct ShortFeedView: View {
                                         .foregroundStyle(.white.opacity(0.7))
                                 }
                                 .padding(.horizontal, 12)
-                                .padding(.vertical, 8)
+                                .padding(.vertical, 9)
                                 .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                    .fill(Color.white.opacity(0.14)))
-                                .frame(width: 130)
+                                    .fill(Color.white.opacity(0.12)))
+                                .frame(width: 140)
                             }
                             .buttonStyle(.plain)
 
@@ -387,7 +389,7 @@ struct ShortFeedView: View {
 
                             // 收藏 / 连播 / 倍速：图标在左、文字在右（参考图
                             // 「HD 清晰度 / 倍速 / 清屏」式），激活态用品牌色高亮
-                            HStack(spacing: 14) {
+                            HStack(spacing: 12) {
                                 inlineButton(icon: isCurrentFavorite ? "heart.fill" : "heart",
                                              text: isCurrentFavorite ? "已收藏" : "收藏",
                                              tint: isCurrentFavorite ? .red : .white) {
@@ -485,7 +487,7 @@ struct ShortFeedView: View {
             }
         } label: {
             HStack(spacing: 5) {
-                Image(systemName: "speedometer")
+                Image(systemName: "clock")
                     .font(.system(size: 14, weight: .semibold))
                 Text(abs(controls.rate - 1.0) < 0.01 ? "倍速" : shortRateText(controls.rate))
                     .font(.subheadline.weight(.medium))
