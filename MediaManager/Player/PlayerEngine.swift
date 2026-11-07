@@ -58,6 +58,12 @@ final class PlayerEngine: ObservableObject {
     /// 循环播放：播到末尾回到开头重播（短视频抖音式刷要用）
     private var loop = false
     private var endObserver: NSObjectProtocol?
+    /// 播到末尾的额外通知（刷流「连播」用）。
+    /// ⚠️ 只在 loop=true 时生效；设置了它并**不会**改变循环行为 ——
+    ///    末尾仍然先 seek 回 0 继续播（保证没切成下一条时不会卡在静止画面），
+    ///    只是顺手通知外层去滚下一条。外层连播关闭时把它清空即可退回单条循环。
+    /// 独立播放器不设置，行为与以前完全一致。
+    var onPlaybackEnd: (() -> Void)? = nil
 
     // MARK: 画中画
     // 放弃 AVPlayerViewController 后系统 PiP 按钮也没了，必须自己接回来，
@@ -102,15 +108,22 @@ final class PlayerEngine: ObservableObject {
         bindPlayer()
         startTicking()
         if loop {
-            // 播到末尾自动回到开头重播。object 用 item，换源后旧 observer 会被 teardown 清掉
+            // 播到末尾自动回到开头重播。object 用 item，换源后旧 observer 会被 teardown 清掉。
+            // 刷流的「连播」：重播的同时通知外层滚到下一条；外层没有下一条 / 关掉开关时，
+            // 这一次重播已经让当前条继续播，不会出现播完卡在末尾的黑屏。
             endObserver = NotificationCenter.default.addObserver(
                 forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main) { [weak self] _ in
                 guard let self, self.loop else { return }
-                self.player.seek(to: .zero) { _ in self.player.play() }
+                // 回自己 play()（player.rate = rate），别用 player.play()：
+                // 后者会把倍速悄悄打回 1x，1.5x 看一条循环一次就丢了。
+                self.player.seek(to: .zero) { _ in self.play() }
+                self.onPlaybackEnd?()
             }
         }
+        // 走自己的 play()（player.rate = rate，同步赋值）而不是 player.play()：
+        // 刷流首条在 load 之后紧接着 setRate，需要此刻 player.rate 已经 > 0 才生效。
         if autoplay {
-            player.play()
+            play()
         }
     }
 
@@ -237,10 +250,14 @@ final class PlayerEngine: ObservableObject {
         if isPlaying { pause() } else { play() }
     }
 
-    /// 切换倍速。暂停状态下只记录，等 play() 时生效（AVPlayer.rate > 0 才代表播放）。
+    /// 切换倍速。播放中立即生效；暂停时只记录，等 play() 时 `player.rate = rate` 生效。
+    /// ⚠️ 判断用 AVPlayer 自己的 rate 而不是 KVO 的 isPlaying：engine.load(autoplay:)
+    ///    起播后立刻返回，但 isPlaying 要等 KVO 回调才翻成 true，刷流首条在
+    ///    load 之后紧接着 setRate 会落进「只记录、不生效」，表现为显示 1.5x
+    ///    画面却还是 1x。player.rate > 0 是同步可读的，能覆盖这个窗口。
     func setRate(_ newRate: Float) {
         rate = newRate
-        guard isPlaying else { return }
+        guard player.rate > 0 else { return }
         player.rate = newRate
     }
 
