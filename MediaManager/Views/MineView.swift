@@ -1,5 +1,142 @@
 import SwiftUI
 
+// MARK: - 服务器切换（已登录状态）
+// 「我的 → 服务器」进来：列出记住过的地址，一键切换；也能直接输入新 IP / 域名。
+// 特意挂在 MineView.swift 里、不新增 Swift 文件 —— 免得又要重新 xcodegen generate。
+struct ServerSwitchView: View {
+    @ObservedObject private var session = AppSession.shared
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var newAddress = ""
+    /// 正在切的那一台（用来在该行显示转圈）
+    @State private var switching: String?
+
+    var body: some View {
+        List {
+            Section {
+                HStack(spacing: 10) {
+                    Image(systemName: "network")
+                        .foregroundStyle(Theme.brand)
+                    Text("当前服务器")
+                    Spacer()
+                    Text(session.baseURL?.absoluteString ?? "—")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+
+            Section {
+                HStack(spacing: 8) {
+                    TextField("https://your.domain 或 http://IP:19876", text: $newAddress)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .keyboardType(.URL)
+                        .font(.subheadline)
+                    Button {
+                        addAndSwitch()
+                    } label: {
+                        Text("添加并切换")
+                            .font(.subheadline.weight(.semibold))
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .disabled(newAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                              || session.isConnecting)
+                }
+            } header: {
+                Text("添加服务器")
+            } footer: {
+                Text("外网请填 https 域名（需服务端配好证书或反向代理）；局域网可填 http://IP:19876。地址会自动记住，下次不用重输。")
+            }
+
+            if !session.servers.isEmpty {
+                Section {
+                    ForEach(session.servers, id: \.self) { address in
+                        Button {
+                            Task { await switchTo(address) }
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: "server.rack")
+                                    .foregroundStyle(Theme.brand)
+                                    .frame(width: 20)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(address)
+                                        .font(.subheadline.monospacedDigit())
+                                        .lineLimit(1)
+                                    if isCurrent(address) {
+                                        Text("当前使用中")
+                                            .font(.caption2)
+                                            .foregroundStyle(Theme.brand)
+                                    }
+                                }
+                                Spacer()
+                                if switching == address {
+                                    ProgressView()
+                                } else if isCurrent(address) {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundStyle(Theme.brand)
+                                } else {
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(session.isConnecting)
+                    }
+                    .onDelete { indexSet in
+                        let snapshot = session.servers
+                        for i in indexSet where i < snapshot.count {
+                            session.removeServer(snapshot[i])
+                        }
+                    }
+                } header: {
+                    Text("已保存的服务器")
+                } footer: {
+                    Text("登录过的服务器会免密直接切换；左滑可删除记录。")
+                }
+            }
+
+            if let err = session.errorMessage {
+                Section {
+                    Text(err)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .textSelection(.enabled)
+                } header: {
+                    Text("连接提示")
+                }
+            }
+        }
+        .navigationTitle("服务器")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar { EditButton() }
+    }
+
+    private func isCurrent(_ address: String) -> Bool {
+        address == session.baseURL?.absoluteString
+    }
+
+    private func addAndSwitch() {
+        let raw = newAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = AppSession.normalizeBaseURL(raw) else { return }
+        newAddress = url.absoluteString
+        Task { await switchTo(url.absoluteString) }
+    }
+
+    @MainActor
+    private func switchTo(_ address: String) async {
+        switching = address
+        let done = await session.switchServer(to: address)
+        switching = nil
+        // 只有真正切成功才收起页面：网络 / TLS 失败时保留页面，让「连接提示」能被看到。
+        // 成功时 sessionEpoch += 1 会让 RootView 重建、导航栈本来就会回到根。
+        if done, session.isLoggedIn { dismiss() }
+    }
+}
+
 // MARK: - 「我的」里的完整列表路由
 // 四个 tab 各自一个 NavigationStack，push 目标只能声明在自己的栈里，
 // 所以用一个 Hashable 路由值 + navigationDestination，而不是全局路径。
@@ -224,7 +361,30 @@ struct MineView: View {
             .padding(.horizontal, 20)
 
             VStack(spacing: 0) {
-                settingsRow(icon: "network", title: "服务器", value: session.baseURL?.absoluteString ?? "—")
+                // 服务器不再是一行只读文字：点进去能切 IP / 切外网域名、管理记住的地址
+                NavigationLink {
+                    ServerSwitchView()
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "network")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(Theme.brand)
+                            .frame(width: 20)
+                        Text("服务器")
+                            .font(.subheadline)
+                        Spacer()
+                        Text(session.baseURL?.absoluteString ?? "—")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        Image(systemName: "chevron.right")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 13)
+                }
+                .buttonStyle(.plain)
                 Divider().padding(.leading, 44)
                 settingsRow(icon: "person.circle", title: "账号",
                             value: session.user?.username ?? "—")

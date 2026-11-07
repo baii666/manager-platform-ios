@@ -32,6 +32,9 @@ struct MediaManagerApp: App {
                         .appBackground()
                 } else if session.isLoggedIn {
                     RootView()
+                        // 换服务器后强制重建：HomeViewModel / 各列表 ViewModel 都是
+                        // @StateObject，不重建就会一直显示上一台服务器缓存的数据。
+                        .id(session.sessionEpoch)
                 } else {
                     LoginView(session: session)
                 }

@@ -9,6 +9,8 @@ struct LoginView: View {
     @State private var server = ""
     @State private var username = ""
     @State private var password = ""
+    /// 「保存当前地址」之后的轻量反馈（成功才显示，不弹窗）
+    @State private var savedHint: String?
 
     var body: some View {
         VStack(spacing: 24) {
@@ -26,7 +28,31 @@ struct LoginView: View {
             }
 
             VStack(spacing: 14) {
-                field(systemImage: "network", placeholder: "http://192.168.1.100:19876", text: $server)
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 8) {
+                        field(systemImage: "network",
+                              placeholder: "https://your.domain 或 http://192.168.1.100:19876",
+                              text: $server)
+                        // 记住过的服务器：选一条回填 / 删一条 / 清空
+                        serverMenu
+                        // 只保存地址，不登录 —— 先把「家里 IP」和「外网域名」都存好
+                        Button {
+                            saveCurrentServer()
+                        } label: {
+                            Image(systemName: "square.and.arrow.down")
+                                .font(.system(size: 17, weight: .medium))
+                                .foregroundStyle(Theme.brand)
+                                .frame(width: 32, height: 32)
+                                .appSurface(in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(AppSession.normalizeBaseURL(server) == nil)
+                    }
+                    Text("外网请用 https 域名（服务端需配好证书或反向代理）；局域网可直接填 IP。")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 field(systemImage: "person", placeholder: "用户名", text: $username)
                 field(systemImage: "lock", placeholder: "密码", text: $password, secure: true)
             }
@@ -37,9 +63,16 @@ struct LoginView: View {
                     .font(.caption)
                     .foregroundStyle(.red)
                     .frame(maxWidth: 420, alignment: .leading)
+                    .textSelection(.enabled)
+            } else if let hint = savedHint {
+                Text(hint)
+                    .font(.caption)
+                    .foregroundStyle(.green)
+                    .frame(maxWidth: 420, alignment: .leading)
             }
 
             Button {
+                savedHint = nil
                 Task { await session.connect(server: server, username: username, password: password) }
             } label: {
                 Group {
@@ -62,8 +95,76 @@ struct LoginView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .appBackground()
         .onAppear {
-            if server.isEmpty { server = session.baseURL?.absoluteString ?? "" }
+            if server.isEmpty {
+                server = session.baseURL?.absoluteString ?? session.servers.first ?? ""
+            }
+            // 只预填用户名，密码永远不存
+            if username.isEmpty { username = session.lastUsername ?? "" }
         }
+    }
+
+    /// 历史服务器菜单：每条可「使用」或「删除」，另有清空全部。
+    /// 即使一条记录都没有也显示（菜单里给一句说明），保证入口位置稳定。
+    private var serverMenu: some View {
+        Menu {
+            if !session.servers.isEmpty {
+                Section("已保存的服务器") {
+                    ForEach(session.servers, id: \.self) { address in
+                        Menu {
+                            Button {
+                                server = address
+                                savedHint = nil
+                            } label: {
+                                Label("使用此地址", systemImage: "arrow.right.circle")
+                            }
+                            Button(role: .destructive) {
+                                session.removeServer(address)
+                            } label: {
+                                Label("删除记录", systemImage: "trash")
+                            }
+                        } label: {
+                            HStack {
+                                Text(address).font(.caption)
+                                if address == AppSession.normalizeBaseURL(server)?.absoluteString {
+                                    Image(systemName: "checkmark")
+                                }
+                            }
+                        }
+                    }
+                }
+                Section {
+                    Button(role: .destructive) {
+                        let snapshot = session.servers
+                        snapshot.forEach { session.removeServer($0) }
+                    } label: {
+                        Label("清空所有记录", systemImage: "trash.slash")
+                    }
+                }
+            } else {
+                Text("还没有保存过服务器地址")
+            }
+        } label: {
+            Image(systemName: "clock.arrow.circlepath")
+                .font(.system(size: 17, weight: .medium))
+                .foregroundStyle(Theme.brand)
+                .frame(width: 32, height: 32)
+                .appSurface(in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// 只把当前输入记进列表、规范化回填，不发起登录。
+    /// 这样「外网 https 域名」可以先存好，等服务端证书配好再连。
+    private func saveCurrentServer() {
+        guard let url = AppSession.normalizeBaseURL(server) else {
+            savedHint = nil
+            session.errorMessage = "服务器地址无效"
+            return
+        }
+        server = url.absoluteString
+        session.rememberServer(url)
+        session.errorMessage = nil
+        savedHint = "已保存：\(url.absoluteString)"
     }
 
     private func field(
