@@ -331,13 +331,12 @@ struct ShortFeedView: View {
             // 进度条贴底一条细线，标题紧挨在它上面。
             VStack(spacing: 0) {
                 if let video = currentVideo {
-                    HStack(alignment: .bottom, spacing: 10) {
-                        // 左侧：标题 → meta → 「关联内容」入口（抖音「选集」行式小字链接）。
-                        // 标题与关联内容同目标（关联页），后者是显式入口、一眼能点。
-                        VStack(alignment: .leading, spacing: 6) {
-                            Button {
-                                relatedVideo = currentVideo
-                            } label: {
+                    VStack(alignment: .leading, spacing: 6) {
+                        // 标题行：标题 ›（点击进关联页；对应参考图标题右侧的小箭头）
+                        Button {
+                            relatedVideo = currentVideo
+                        } label: {
+                            HStack(alignment: .firstTextBaseline, spacing: 5) {
                                 Text(video.titleText)
                                     .font(.headline.weight(.semibold))
                                     .foregroundStyle(.white)
@@ -345,58 +344,70 @@ struct ShortFeedView: View {
                                     .multilineTextAlignment(.leading)
                                     .fixedSize(horizontal: false, vertical: true)
                                     .shadow(color: .black.opacity(0.7), radius: 4, y: 1)
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 12, weight: .bold))
+                                    .foregroundStyle(.white.opacity(0.7))
                             }
-                            .buttonStyle(.plain)
+                        }
+                        .buttonStyle(.plain)
 
-                            if let meta = currentMeta {
-                                Text(meta)
-                                    .font(.caption)
-                                    .foregroundStyle(.white.opacity(0.72))
-                                    .lineLimit(1)
-                                    .allowsHitTesting(false)
-                            }
+                        if let meta = currentMeta {
+                            Text(meta)
+                                .font(.caption)
+                                .foregroundStyle(.white.opacity(0.72))
+                                .lineLimit(1)
+                                .allowsHitTesting(false)
+                        }
 
-                            // 「关联内容」：小字 + chevron，跳关联页。后续扩展同番号/
-                            // 同演员等只换跳转口径，入口文案不变。
+                        // 对齐参考图最后一行：左侧「关联内容」胶囊条（选集条式，
+                        // 文字居左 / 箭头居右、深色半透明圆角底）+ 右侧「图标+文字」
+                        // 横排按钮（无圆形底）。后续扩展同番号/同演员等只换跳转口径。
+                        HStack(spacing: 12) {
                             Button {
                                 relatedVideo = currentVideo
                             } label: {
-                                HStack(spacing: 3) {
+                                HStack(spacing: 6) {
                                     Text("关联内容")
+                                        .font(.subheadline.weight(.medium))
+                                        .foregroundStyle(.white)
+                                    Spacer(minLength: 8)
                                     Image(systemName: "chevron.right")
-                                        .font(.system(size: 10, weight: .bold))
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundStyle(.white.opacity(0.7))
                                 }
-                                .font(.subheadline.weight(.medium))
-                                .foregroundStyle(.white.opacity(0.9))
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                                .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .fill(Color.white.opacity(0.14)))
+                                .frame(width: 130)
                             }
                             .buttonStyle(.plain)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
 
-                        // 右侧：收藏 / 连播 / 倍速。抖音式「圆形半透明底 + 下方小字」，
-                        // 不用实体白板、不用方块。
-                        HStack(spacing: 12) {
-                            barButton(icon: isCurrentFavorite ? "heart.fill" : "heart",
-                                      label: isCurrentFavorite ? "已收藏" : "收藏",
-                                      tint: isCurrentFavorite ? .red : .white,
-                                      filled: false) {
-                                Task { await controls.toggleFavorite(id: video.id, client: viewModel.client) }
+                            Spacer(minLength: 8)
+
+                            // 收藏 / 连播 / 倍速：图标在左、文字在右（参考图
+                            // 「HD 清晰度 / 倍速 / 清屏」式），激活态用品牌色高亮
+                            HStack(spacing: 14) {
+                                inlineButton(icon: isCurrentFavorite ? "heart.fill" : "heart",
+                                             text: isCurrentFavorite ? "已收藏" : "收藏",
+                                             tint: isCurrentFavorite ? .red : .white) {
+                                    Task { await controls.toggleFavorite(id: video.id, client: viewModel.client) }
+                                }
+                                .disabled(controls.favoriteBusy)
+
+                                inlineButton(icon: "arrow.triangle.2.circlepath",
+                                             text: "连播",
+                                             tint: controls.autoAdvance ? Theme.brand : .white) {
+                                    controls.setAutoAdvance(!controls.autoAdvance)
+                                }
+
+                                rateButton
                             }
-                            .disabled(controls.favoriteBusy)
-
-                            barButton(icon: controls.autoAdvance ? "forward.fill" : "repeat.1",
-                                      label: controls.autoAdvance ? "连播开" : "连播关",
-                                      tint: .white,
-                                      filled: controls.autoAdvance) {
-                                controls.setAutoAdvance(!controls.autoAdvance)
-                            }
-
-                            rateButton
                         }
                     }
                     .padding(.leading, 16)
-                    .padding(.trailing, 10)
-                    .padding(.bottom, 2)
+                    .padding(.trailing, 12)
+                    .padding(.bottom, 4)
                 }
 
                 feedProgressBar
@@ -440,24 +451,20 @@ struct ShortFeedView: View {
         .frame(height: 34)
     }
 
-    private func barButton(icon: String, label: String, tint: Color, filled: Bool,
-                           action: @escaping () -> Void) -> some View {
+    /// 「图标在左、文字在右」的横排按钮（参考图「HD 清晰度 / 倍速 / 清屏」式）：
+    /// 无圆形底、无方块，纯图标+小字；激活态用 tint 变色表达。
+    private func inlineButton(icon: String, text: String, tint: Color,
+                              action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            VStack(spacing: 4) {
+            HStack(spacing: 5) {
                 Image(systemName: icon)
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(tint)
-                    .frame(width: 40, height: 40)
-                    .background(Circle().fill(filled
-                        ? Theme.brand.opacity(0.8)
-                        : Color.black.opacity(0.38)))
-                Text(label)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.88))
+                    .font(.system(size: 14, weight: .semibold))
+                Text(text)
+                    .font(.subheadline.weight(.medium))
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
             }
-            .frame(width: 54)
+            .foregroundStyle(tint)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -477,23 +484,15 @@ struct ShortFeedView: View {
                 }
             }
         } label: {
-            VStack(spacing: 4) {
-                ZStack {
-                    Circle().fill(abs(controls.rate - 1.0) < 0.01
-                        ? Color.black.opacity(0.38)
-                        : Theme.brand.opacity(0.8))
-                        .frame(width: 40, height: 40)
-                    Text(shortRateText(controls.rate))
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.7)
-                }
-                Text("倍速")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.88))
+            HStack(spacing: 5) {
+                Image(systemName: "speedometer")
+                    .font(.system(size: 14, weight: .semibold))
+                Text(abs(controls.rate - 1.0) < 0.01 ? "倍速" : shortRateText(controls.rate))
+                    .font(.subheadline.weight(.medium))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
             }
-            .frame(width: 54)
+            .foregroundStyle(abs(controls.rate - 1.0) < 0.01 ? Color.white : Theme.brand)
             .contentShape(Rectangle())
         }
     }
