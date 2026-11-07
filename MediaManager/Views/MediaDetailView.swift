@@ -78,6 +78,13 @@ struct MediaDetailView: View {
                 content(detail)
             }
         }
+        // ⚠️ destination 必须挂在 body 根（Group）上，不能放在 content() 的
+        //    ScrollView 内部 / `else if let detail` 条件分支里：那一层会随滚动与
+        //    加载状态重建，SwiftUI 可能在点击瞬间丢掉 ActorRoute 的注册，
+        //    表现就是演员卡片「点了没反应」。无条件挂在根上才稳定。
+        .navigationDestination(for: ActorRoute.self) { route in
+            ActorDetailView(actorId: route.id)
+        }
         .navigationTitle(detail?.title ?? media.title)
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
@@ -351,10 +358,6 @@ struct MediaDetailView: View {
             lowerContent(d)
         }
         .appBackground()
-        // 演员头像 → 演员详情页（ActorRoute 包一层，避免与栈里其它 Int value 撞车）
-        .navigationDestination(for: ActorRoute.self) { route in
-            ActorDetailView(actorId: route.id)
-        }
     }
 
     /// 类型标签：去空白 + 去重（保序）。见调用处的 id 说明。
