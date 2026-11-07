@@ -17,6 +17,9 @@ final class AppSession: ObservableObject {
     @Published var isConnecting = false
     /// 启动时正在用旧 cookie 静默校验登录态（此时不该闪登录页）
     @Published var isRestoring = false
+    /// 用户主动点了「跳过，切换服务器」后置 true：
+    /// 后台那次探测可能还在跑，迟到的结果必须丢弃，否则会把界面又踢回主界面
+    private var restoreSkipped = false
     @Published var errorMessage: String?
     /// 记住连过的服务器地址（规范化后的 absoluteString，最近使用在前）
     @Published var servers: [String] = []
@@ -285,6 +288,16 @@ final class AppSession: ObservableObject {
         return true
     }
 
+    /// 恢复期间用户点「跳过，切换服务器」：立刻解除全屏遮罩，落到登录页。
+    /// ⚠️ 不删 cookie、不改地址 —— 登录页的历史服务器列表和保存的地址都还在，
+    ///    可以直接选一台切过去；后台探测仍会跑完，但结果被 restoreSkipped 拦下。
+    @MainActor
+    func skipRestore() {
+        restoreSkipped = true
+        isRestoring = false
+        errorMessage = nil
+    }
+
     // MARK: - 启动恢复（杀掉 App 后免登录）
 
     /// 用上次的服务器地址 + 残留的 session cookie，静默校验一次登录态。
@@ -292,6 +305,11 @@ final class AppSession: ObservableObject {
     /// 后端 `setSessionCookie` 写的 cookie 带 `Max-Age`（默认 24h / remember 30 天），
     /// 服务端这边「杀 App」并不会让 session 失效 —— 真正缺的是启动时**拿 cookie 去
     /// /api/auth/me 校验一次**并据此恢复 client。以前只恢复地址，于是每次都要重登。
+    ///
+    /// ⚠️ 后台连不上时（Tailscale 没连 / 主机不可达）不能让用户干等：
+    /// URLSession.shared 默认 60s 请求超时，而恢复期间是**全屏转圈、没有任何出口**，
+    /// 于是「打不开 App、换不了服务器」。这里改用 6s 短超时只做探测，
+    /// 失败就立刻落回登录页；同时 MediaManagerApp 提供「跳过，切换服务器」按钮。
     @MainActor
     func restoreSession() async {
         guard !didRestore, client == nil else { return }
@@ -303,20 +321,35 @@ final class AppSession: ObservableObject {
         didRestore = true
         self.baseURL = url
         rememberServer(url)   // 老版本只有单地址，补进列表
+        restoreSkipped = false
         isRestoring = true
         defer { isRestoring = false }
 
-        let c = APIClient(baseURL: url)
+        // 探测专用短超时 session。⚠️ 只用于这一次 /api/auth/me：
+        // 恢复成功后 client 要换回 URLSession.shared，否则图片/播放等大请求也会 6s 超时。
+        let cfg = URLSessionConfiguration.default
+        cfg.timeoutIntervalForRequest = 6
+        cfg.timeoutIntervalForResource = 10
+        cfg.httpCookieStorage = HTTPCookieStorage.shared
+        cfg.httpCookieAcceptPolicy = .always
+        let quickSession = URLSession(configuration: cfg)
+        defer { quickSession.finishTasksAndInvalidate() }
+        let probe = APIClient(baseURL: url, session: quickSession)
+
         // 先用系统 cookie 试；失败再用自己落盘的那份注入试一次
         for attempt in 0..<2 {
+            if restoreSkipped || Task.isCancelled { return }
             if attempt == 1, !injectPersistedCookie(for: url) { break }
             do {
-                let u = try await c.fetchCurrentUser()
-                self.client = c
+                let u = try await probe.fetchCurrentUser()
+                // 用户点过「跳过」→ 迟到结果一律丢弃，别覆盖用户正在做的切换
+                if restoreSkipped || Task.isCancelled { return }
+                self.client = APIClient(baseURL: url)
                 self.user = u
                 persistSessionCookie()
                 return
             } catch {
+                if restoreSkipped || Task.isCancelled { return }
                 if !Self.isAuthFailure(error) {
                     // 网络 / TLS / 反代异常不代表登录态失效：cookie 和地址都留着，
                     // 等网络恢复后冷启动还能直接免密进来；登录页会显示排查提示
@@ -326,6 +359,7 @@ final class AppSession: ObservableObject {
                 // 401 / 403：继续下一次尝试 / 最终走清理
             }
         }
+        if restoreSkipped || Task.isCancelled { return }
         // 确实失效了：清掉残留，留在登录页（地址已预填）
         clearCookies(for: url)
         removePersistedCookie(for: url)

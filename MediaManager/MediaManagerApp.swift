@@ -25,11 +25,34 @@ struct MediaManagerApp: App {
     var body: some Scene {
         WindowGroup {
             Group {
-                // 恢复期间先转圈，避免每次冷启动都闪一下登录页
+                // 恢复期间先转圈，避免每次冷启动都闪一下登录页。
+                // ⚠️ 必须留出口：后台连不上时曾经只有这一层全屏遮罩、没有任何按钮，
+                //    用户既进不去也换不了服务器。现在显示正在连的地址 + 「跳过」按钮，
+                //    AppSession.restoreSession 另配了 6s 短超时，最坏 6 秒自动落到登录页。
                 if session.isRestoring {
-                    ProgressView("正在恢复登录…")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .appBackground()
+                    VStack(spacing: 16) {
+                        ProgressView()
+                            .controlSize(.large)
+                        Text("正在恢复登录…")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        if let host = session.baseURL?.host {
+                            Text(host)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
+                        Button {
+                            session.skipRestore()
+                        } label: {
+                            Text("跳过，切换服务器")
+                                .font(.subheadline.weight(.medium))
+                        }
+                        .buttonStyle(.bordered)
+                        .padding(.top, 8)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .appBackground()
                 } else if session.isLoggedIn {
                     RootView()
                         // 换服务器后强制重建：HomeViewModel / 各列表 ViewModel 都是
