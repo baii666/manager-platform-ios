@@ -392,8 +392,9 @@ struct ShortFeedView: View {
 
 // MARK: - 每页信息区（跟随上下滑一起滚）
 // 页面是**上下分区**，不是把控件浮在铺满全屏的视频上：
-//   上半：视频区（标题 / 简介透明地浮在视频底部，不铺任何背景层）
-//   下半：独立的底部状态栏（进度条紧贴它的上沿 + 关联内容 / 收藏·连播·倍速）
+//   上半：视频区（标题 / 简介透明地浮在视频底部；进度条贴视频区底边）
+//   下半：独立的底部状态栏（关联内容 / 收藏·连播·倍速）
+// 进度线正好压在「视频下沿 / 状态栏上沿」的接缝，三者零间距；
 // 视频层止于状态栏上沿，不与底 bar 叠加、不互相透色。整块都在 ShortFeedPage 内，
 // 上滑时随本页一起滚走，下一条的从屏幕下方升上来。
 
@@ -465,86 +466,21 @@ private struct FeedTitleBlock: View {
         }
         .padding(.leading, 16)
         .padding(.trailing, 12)
-        .padding(.bottom, 10)
+        // 上移避开视频区底部 34pt 的进度条热区，标题仍在进度条上方
+        .padding(.bottom, 34)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
-/// 底部状态栏：独立实底区域，视频层不铺到这里。进度条紧贴它的上沿。
-private struct FeedBottomBar: View {
-    let video: ShortVideo
-    let client: APIClient?
-    /// 本页自己的引擎（不是外层「当前页」引擎）：进度条随页滚动时必须对应本页
+/// 进度条：画在视频区最底部，进度线正好落在「视频下沿 / 状态栏上沿」的接缝上。
+/// 34pt 透明热区向视频区内延伸，不占状态栏高度；绑本页引擎而非外层当前页引擎。
+private struct FeedProgressOverlay: View {
     let engine: PlayerEngine?
-    /// 全局刷流设置（收藏 / 连播 / 倍速），跨页共享
-    @ObservedObject var controls: ShortFeedControls
-    /// 点「关联内容」→ 外层弹关联视频页
-    var onRelated: (ShortVideo) -> Void
 
     @State private var barScrubbing = false
     @State private var barScrubRatio = 0.0
 
-    private var isFavorite: Bool { controls.favoriteIDs.contains(video.id) }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            progressBar
-
-            HStack(spacing: 10) {
-                Button {
-                    onRelated(video)
-                } label: {
-                    HStack(spacing: 6) {
-                        Text("关联内容")
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(.white)
-                        Spacer(minLength: 8)
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.7))
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 9)
-                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(Color.white.opacity(0.12)))
-                    .frame(width: 140)
-                }
-                .buttonStyle(.plain)
-
-                Spacer(minLength: 8)
-
-                HStack(spacing: 12) {
-                    inlineButton(icon: isFavorite ? "heart.fill" : "heart",
-                                 text: isFavorite ? "已收藏" : "收藏",
-                                 tint: isFavorite ? .red : .white) {
-                        Task { await controls.toggleFavorite(id: video.id, client: client) }
-                    }
-                    .disabled(controls.favoriteBusy)
-
-                    inlineButton(icon: "arrow.triangle.2.circlepath",
-                                 text: "连播",
-                                 tint: controls.autoAdvance ? Theme.brand : .white) {
-                        controls.setAutoAdvance(!controls.autoAdvance)
-                    }
-
-                    rateButton
-                }
-            }
-            .padding(.leading, 16)
-            .padding(.trailing, 12)
-            .padding(.top, 8)
-            // 距物理屏底 14pt：给 home indicator 留余量
-            .padding(.bottom, 14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        // 整条状态栏的实底：视频不铺到这里，进度条也落在这条底上。
-        // 放行手势，落在空白处的上下滑照样切视频，按钮本身仍可点。
-        .background(Color.black.opacity(0.55).allowsHitTesting(false))
-    }
-
-    /// 本页进度条：复用 BottomProgressBar（internal），34pt 透明热区、点哪跳哪、
-    /// 横向拖 scrub、纯垂直滑动放行给切视频。绑的是本页 engine，不是外层当前页引擎。
-    private var progressBar: some View {
         TimelineView(.periodic(from: .now, by: 0.2)) { _ in
             let total = engine?.duration ?? 0
             let ratio: Double = total > 0
@@ -567,13 +503,77 @@ private struct FeedBottomBar: View {
                     if let r, let e = engine, total > 0 {
                         e.seek(to: r * total)
                     }
-                }
+                },
+                // 0 = 线贴热区底边 = 视频区底边 = 状态栏上沿
+                bottomInset: 0
             )
         }
         .frame(maxWidth: .infinity)
         .frame(height: 34)
-        // 抵消组件内进度线距底 8pt 的留白，让线正好贴住底 bar 顶边
-        .padding(.bottom, -8)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+    }
+}
+
+/// 底部状态栏：独立实底区域，上沿紧接视频下沿（进度线压在接缝上）。
+private struct FeedBottomBar: View {
+    let video: ShortVideo
+    let client: APIClient?
+    /// 全局刷流设置（收藏 / 连播 / 倍速），跨页共享
+    @ObservedObject var controls: ShortFeedControls
+    /// 点「关联内容」→ 外层弹关联视频页
+    var onRelated: (ShortVideo) -> Void
+
+    private var isFavorite: Bool { controls.favoriteIDs.contains(video.id) }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Button {
+                onRelated(video)
+            } label: {
+                HStack(spacing: 6) {
+                    Text("关联内容")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.white)
+                    Spacer(minLength: 8)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.7))
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 9)
+                .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.white.opacity(0.12)))
+                .frame(width: 140)
+            }
+            .buttonStyle(.plain)
+
+            Spacer(minLength: 8)
+
+            HStack(spacing: 12) {
+                inlineButton(icon: isFavorite ? "heart.fill" : "heart",
+                             text: isFavorite ? "已收藏" : "收藏",
+                             tint: isFavorite ? .red : .white) {
+                    Task { await controls.toggleFavorite(id: video.id, client: client) }
+                }
+                .disabled(controls.favoriteBusy)
+
+                inlineButton(icon: "arrow.triangle.2.circlepath",
+                             text: "连播",
+                             tint: controls.autoAdvance ? Theme.brand : .white) {
+                    controls.setAutoAdvance(!controls.autoAdvance)
+                }
+
+                rateButton
+            }
+        }
+        .padding(.leading, 16)
+        .padding(.trailing, 12)
+        .padding(.top, 8)
+        // 距物理屏底 14pt：给 home indicator 留余量
+        .padding(.bottom, 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        // 整条状态栏的实底：视频不铺到这里。放行手势，空白处上下滑仍切视频。
+        .background(Color.black.opacity(0.55).allowsHitTesting(false))
     }
 
     /// 「图标在左、文字在右」横排按钮，无圆形底；激活态用 tint 变色表达
@@ -692,13 +692,15 @@ private struct ShortFeedPage: View {
                 } else {
                     placeholder
                 }
-                // 标题 / 简介透明地浮在视频区底部，不与底部状态栏叠加
+                // 进度线贴视频区底边，正好压在视频下沿 / 状态栏上沿的接缝
+                FeedProgressOverlay(engine: pageEngine)
+                // 标题 / 简介透明地浮在视频区底部，上移避开 34pt 进度条热区
                 FeedTitleBlock(video: video, onRelated: { v in onRelated?(v) })
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            // 独立底部状态栏：进度条紧贴它的上沿；视频层止于这里
-            FeedBottomBar(video: video, client: client, engine: pageEngine,
+            // 独立底部状态栏：上沿紧贴视频下沿（进度线压在接缝）；视频层止于这里
+            FeedBottomBar(video: video, client: client,
                           controls: controls, onRelated: { v in onRelated?(v) })
         }
         .ignoresSafeArea(edges: .bottom)

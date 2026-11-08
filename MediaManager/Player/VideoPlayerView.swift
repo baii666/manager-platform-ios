@@ -830,6 +830,8 @@ struct BottomProgressBar: View {
     var onChange: (Double) -> Void
     /// nil = 取消（纯垂直滑动，交给刷流切页）；非 nil = 松手后要跳到的比例
     var onEnd: (Double?) -> Void
+    /// 进度线距热区底部的留白。刷流传 0：让线正好落在视频区与底部状态栏的接缝上
+    var bottomInset: CGFloat = 8
 
     @State private var started = false
 
@@ -848,7 +850,7 @@ struct BottomProgressBar: View {
                 .frame(height: scrubbing ? 6 : 3)
                 .clipShape(Capsule())
                 .frame(maxWidth: .infinity, alignment: .bottom)
-                .padding(.bottom, 8)
+                .padding(.bottom, bottomInset)
                 .animation(.easeOut(duration: 0.15), value: scrubbing)
                 .animation(.linear(duration: 0.2), value: ratio)
 
