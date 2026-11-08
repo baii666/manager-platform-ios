@@ -331,11 +331,11 @@ struct ShortFeedView: View {
 
     private var feedBottomBar: some View {
         ZStack(alignment: .bottom) {
-            // 渐变是被绘制出来的视图，会吃手势 → 明确放行，上下滑照常切视频
-
-            // 参考图底栏是近乎纯黑的信息面板：快速压黑到底，
-            // 标题/简介/胶囊/按钮全落在黑底上（和图一致）
-            LinearGradient(colors: [.clear, .black.opacity(0.72), .black],
+            // 参考图底栏是近乎纯黑的信息面板：快速压黑到底、下半段保持纯黑，
+            // 标题/简介/胶囊/按钮全落在黑底上（和图一致）。
+            // ⚠️ 面板必须铺到物理屏底：只停在 safe area 底，下方会露出一条视频画面，
+            //    看起来就是「底栏浮在半空、没贴底」（贴底由整块 ignoresSafeArea 保证）。
+            LinearGradient(colors: [.clear, .black.opacity(0.55), .black, .black],
                            startPoint: .top, endPoint: .bottom)
                 .frame(height: 240)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
@@ -344,7 +344,10 @@ struct ShortFeedView: View {
             // 从上到下（对齐参考图）：标题 › → 简介(展开) → **进度条** → 胶囊+按钮行(贴底)。
             // 图里进度条悬在「选集行」上方、标题/简介在进度条上方——「底bar」
             // 指最底下的胶囊+按钮行，不是整块信息区。
-            VStack(spacing: 0) {
+            // ⚠️ VStack 默认 .center：没撑满的子块（尤其标题块）会被水平居中，
+            //    标题就跑到屏幕中间去了。这里显式 leading，且每个子块各自
+            //    frame(maxWidth: .infinity)，标题贴左、进度条满宽、胶囊左/按钮右。
+            VStack(alignment: .leading, spacing: 0) {
                 if let video = currentVideo {
                     VStack(alignment: .leading, spacing: 6) {
                         // 标题行：标题 ›（点击进关联页；对应参考图标题右侧的小箭头）
@@ -363,6 +366,9 @@ struct ShortFeedView: View {
                                     .font(.system(size: 12, weight: .bold))
                                     .foregroundStyle(.white.opacity(0.7))
                             }
+                            // plain Button 的 label 对齐行为不稳定，显式撑满并靠左：
+                            // 否则标题会在按钮内部被居中，看起来仍不在左侧
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
                         .buttonStyle(.plain)
 
@@ -393,6 +399,7 @@ struct ShortFeedView: View {
                     .padding(.leading, 16)
                     .padding(.trailing, 12)
                     .padding(.bottom, 4)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
                 // 进度条：图里它悬在选集行上方、文字信息区之下
@@ -446,12 +453,19 @@ struct ShortFeedView: View {
                     }
                     .padding(.leading, 16)
                     .padding(.trailing, 12)
-                    .padding(.bottom, 10)
+                    // 距物理屏底 14pt：给 home indicator 留一点余量，但不再把
+                    // 整条底栏顶到 safe area 上方去（配合下面的 ignoresSafeArea）
+                    .padding(.bottom, 14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+        // 整块忽略底部安全区：ZStack 的 .bottom 对齐到**物理屏底**，
+        // 黑色面板连续铺满、胶囊+按钮行真正贴底；顶边仍尊重安全区，
+        // 不受影响（本层只有底部内容）。
+        .ignoresSafeArea(edges: .bottom)
     }
 
     /// 固定进度条：挂在当前播放引擎上（换页自动跟换），位置在简介区之下、
@@ -485,6 +499,8 @@ struct ShortFeedView: View {
                 }
             )
         }
+        // 外层 VStack 改 leading 后，进度条若不自撑满会被压成内容宽度、缩到左边一点
+        .frame(maxWidth: .infinity)
         .frame(height: 34)
     }
 
