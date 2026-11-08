@@ -396,8 +396,8 @@ struct ShortFeedView: View {
 // 不是外层固定层。收藏 / 连播 / 倍速仍是全局状态，由外层传入并共享。
 //
 // 布局（对齐参考图）：进度条在简介区之下、最底行（关联内容胶囊 +
-// 收藏/连播/倍速）之上；全部左对齐。背景**全透明**——不铺渐变、不铺黑面板，
-// 文字与按钮直接浮在视频画面上。
+// 收藏/连播/倍速）之上；全部左对齐。进度条**上方全透明**（不铺渐变/黑面板），
+// 只有最底行有一条贴物理屏底的窄深色底，不是覆盖整块信息区的大黑框。
 private struct FeedBottomBar: View {
     let video: ShortVideo
     let client: APIClient?
@@ -431,7 +431,8 @@ private struct FeedBottomBar: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            // 不铺任何背景层：进度条上方、下方都是全透明，直接透出视频画面。
+            // 进度条上方全透明：标题 / 简介 / 进度条都不铺任何背景层，直接透出视频。
+            // 只给最底行加一条窄深色底（见下方 .background），不覆盖上方信息区。
             // ⚠️ VStack 默认 .center 会把没撑满的标题块水平居中 → 显式 leading，
             //    每个子块各自 frame(maxWidth: .infinity, alignment: .leading)。
             VStack(alignment: .leading, spacing: 0) {
@@ -527,9 +528,15 @@ private struct FeedBottomBar: View {
                 }
                 .padding(.leading, 16)
                 .padding(.trailing, 12)
+                .padding(.top, 8)
                 // 距物理屏底 14pt：给 home indicator 留余量
                 .padding(.bottom, 14)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                // 底 bar 自己这条窄色带：只包住这一行 + 底部 padding；因为整块
+                // ignoresSafeArea(bottom)，会一直铺到物理屏底、不留缝。
+                // ⚠️ 放在 frame(maxWidth:.infinity) 之后才会满宽；显式放行手势，
+                //    落在空白处的上下滑照样切视频，按钮本身仍可点。
+                .background(Color.black.opacity(0.55).allowsHitTesting(false))
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         }
