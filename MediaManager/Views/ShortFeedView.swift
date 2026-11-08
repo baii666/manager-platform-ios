@@ -100,7 +100,7 @@ final class ShortFeedControls: ObservableObject {
 // MARK: - 抖音式短视频刷流
 // 短视频页点开某一条后，进入这个全屏的、上下滑切片的刷流。
 // 对齐抖音的交互：一屏一条、上下滑切换、当前页自动循环播、滑到末尾自动加载更多，
-// 底部一条固定信息栏（左侧标题 + 副信息，右侧收藏 / 连播 / 倍速）。
+// 每条视频自带一条底部信息区（标题 / 简介 / 进度条 / 关联内容 / 收藏·连播·倍速）。
 //
 // 实现要点：
 //   1. 垂直分页用 iOS 17 的 ScrollView + .scrollTargetBehavior(.paging) + containerRelativeFrame，
@@ -110,9 +110,9 @@ final class ShortFeedControls: ObservableObject {
 //   3. 只对当前页 ±2 的窗口做预加载（解析地址 + 起 AVPlayer），更远的只挂封面占位，
 //      避免 1 万多条全起 AVPlayer 把内存吃爆。
 //   4. 短视频 99% 是 MP4，streamURL 同步拿地址、零等待；AVI/MKV 才走 HLS 会话。
-//   5. 底栏是**固定**在屏幕上的（不随上下滑滚走）：之前把标题也挪进每页内部后，
-//      整页只剩视频 + 三个角，太空旷。现在按抖音补齐底部信息区，标题回到固定层，
-//      每页内部只留跟着滚的进度条。
+//   5. 信息区挂在**每一页内部**（FeedBottomBar）：上滑时随本页一起滚走、下一条的
+//      从屏幕下方升上来；固定层只留右上角画中画/投屏与顶部关闭。进度条绑本页引擎，
+//      全局状态（收藏 / 连播 / 倍速）仍由外层 ShortFeedControls 共享。
 struct ShortFeedView: View {
     @ObservedObject var viewModel: ShortsViewModel
     let startIndex: Int
@@ -144,11 +144,8 @@ struct ShortFeedView: View {
     @State private var scrollProxy: ScrollViewProxy?
     /// 非nil 时弹「同文件夹关联视频页」（item 式 fullScreenCover，跟随当前视频换内容）
     @State private var relatedVideo: ShortVideo?
-    /// 固定进度条的手势态（拖动中 / 拖动比例），与引擎进度采样解耦
-    @State private var barScrubbing = false
-    @State private var barScrubRatio = 0.0
-    /// 简介行展开/收起（对应图里简介行末尾的「展开」）；换视频自动收回
-    @State private var descExpanded = false
+    // 进度条手势态 / 简介展开态已下沉到每页的 FeedBottomBar（各自独立，
+    // 换页天然不带旧状态，不需要在外层重置）。
 
     /// 预加载窗口半径：当前页 ±2
     private let windowRadius = 2
@@ -177,6 +174,8 @@ struct ShortFeedView: View {
                                           client: viewModel.client,
                                           isActive: index == currentIndex,
                                           inWindow: abs(index - currentIndex) <= windowRadius,
+                                          controls: controls,
+                                          onRelated: { relatedVideo = $0 },
                                           onEngineReady: { engine in
                                               engineHandle.attach(engine)
                                               configure(engine, for: video.id)
@@ -229,9 +228,9 @@ struct ShortFeedView: View {
             .padding(.trailing, 16)
             .padding(.top, 8)
 
-            // 固定底栏：左侧标题 + 副信息，右侧收藏 / 连播 / 倍速。
-            // 不做实体白板卡片，只用一层自下而上的黑色渐变把文字托起来（沉浸式）。
-            feedBottomBar
+            // 信息区（标题 / 简介 / 进度条 / 关联内容 / 收藏·连播·倍速）已下沉到
+            // 每一页内部：上滑时随本页一起滚走、下一条的从下方升上来（抖音式）。
+            // 右上角画中画 / 投屏 / 顶部关闭仍钉在屏幕上，不随页滚。
         }
         // 右滑退出：页面跟手向右移动，松手超过阈值向右滑出屏幕（露出背后的来源页）
         .offset(x: dragOffsetX)
@@ -244,7 +243,6 @@ struct ShortFeedView: View {
             guard let id = currentID,
                   let idx = viewModel.items.firstIndex(where: { $0.id == id }) else { return }
             currentIndex = idx
-            descExpanded = false // 简介行收回，别把上一条的展开状态带到下一条
             // 滑到倒数第 3 条就预加载下一页，别等滑到底才卡一下
             if idx >= viewModel.items.count - 3 {
                 Task { await viewModel.loadMore() }
@@ -257,8 +255,8 @@ struct ShortFeedView: View {
         }
         // 连播开关：立刻改当前引擎的「播完通知」。关掉就退回单条循环。
         .onChange(of: controls.autoAdvance) {
-            guard let engine = engineHandle.engine, let video = currentVideo else { return }
-            configure(engine, for: video.id)
+            guard let engine = engineHandle.engine, let id = currentID else { return }
+            configure(engine, for: id)
         }
         // 全局倍速：即时生效，且下一条 attach 时也会重新应用
         .onChange(of: controls.rate) {
@@ -297,265 +295,6 @@ struct ShortFeedView: View {
                 return true
             }
         }
-    }
-
-    // MARK: 固定底栏
-
-    private var currentVideo: ShortVideo? {
-        viewModel.items.indices.contains(currentIndex) ? viewModel.items[currentIndex] : nil
-    }
-
-    /// 标题下面的一行副信息：时长 · 分辨率 · 年份。不是计数，也不重复任何入口。
-    private var currentMeta: String? {
-        guard let v = currentVideo else { return nil }
-        var parts: [String] = []
-        if let d = v.durationText { parts.append(d) }
-        if let dim = v.dimensionText { parts.append(dim) }
-        if let y = v.year, y > 0 { parts.append(String(y)) }
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
-    }
-
-    /// 简介行文本（对应图里「第29集 | 简介…… 展开」）：有独立标题时用真实文件名，
-    /// 没有独立标题（标题即文件名）时返回 nil，底栏退回显示 meta
-    private var descText: String? {
-        guard let v = currentVideo,
-              let t = v.title, !t.isEmpty,
-              t != v.fileName, !v.fileName.isEmpty else { return nil }
-        return v.fileName
-    }
-
-    private var isCurrentFavorite: Bool {
-        guard let v = currentVideo else { return false }
-        return controls.favoriteIDs.contains(v.id)
-    }
-
-    private var feedBottomBar: some View {
-        ZStack(alignment: .bottom) {
-            // 参考图底栏是近乎纯黑的信息面板：快速压黑到底、下半段保持纯黑，
-            // 标题/简介/胶囊/按钮全落在黑底上（和图一致）。
-            // ⚠️ 面板必须铺到物理屏底：只停在 safe area 底，下方会露出一条视频画面，
-            //    看起来就是「底栏浮在半空、没贴底」（贴底由整块 ignoresSafeArea 保证）。
-            LinearGradient(colors: [.clear, .black.opacity(0.55), .black, .black],
-                           startPoint: .top, endPoint: .bottom)
-                .frame(height: 240)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-                .allowsHitTesting(false)
-
-            // 从上到下（对齐参考图）：标题 › → 简介(展开) → **进度条** → 胶囊+按钮行(贴底)。
-            // 图里进度条悬在「选集行」上方、标题/简介在进度条上方——「底bar」
-            // 指最底下的胶囊+按钮行，不是整块信息区。
-            // ⚠️ VStack 默认 .center：没撑满的子块（尤其标题块）会被水平居中，
-            //    标题就跑到屏幕中间去了。这里显式 leading，且每个子块各自
-            //    frame(maxWidth: .infinity)，标题贴左、进度条满宽、胶囊左/按钮右。
-            VStack(alignment: .leading, spacing: 0) {
-                if let video = currentVideo {
-                    VStack(alignment: .leading, spacing: 6) {
-                        // 标题行：标题 ›（点击进关联页；对应参考图标题右侧的小箭头）
-                        Button {
-                            relatedVideo = currentVideo
-                        } label: {
-                            HStack(alignment: .firstTextBaseline, spacing: 5) {
-                                Text(video.titleText)
-                                    .font(.headline.weight(.semibold))
-                                    .foregroundStyle(.white)
-                                    .lineLimit(2)
-                                    .multilineTextAlignment(.leading)
-                                    .fixedSize(horizontal: false, vertical: true)
-                                    .shadow(color: .black.opacity(0.7), radius: 4, y: 1)
-                                Image(systemName: "chevron.right")
-                                    .font(.system(size: 12, weight: .bold))
-                                    .foregroundStyle(.white.opacity(0.7))
-                            }
-                            // plain Button 的 label 对齐行为不稳定，显式撑满并靠左：
-                            // 否则标题会在按钮内部被居中，看起来仍不在左侧
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        .buttonStyle(.plain)
-
-                        // 简介行：对应图里「第29集 | 简介…… 展开」——有独立标题时
-                        // 显示真实文件名，单行截断 + 展开/收起；否则退回 meta
-                        if let desc = descText {
-                            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                                Text(desc)
-                                    .font(.caption)
-                                    .foregroundStyle(.white.opacity(0.7))
-                                    .lineLimit(descExpanded ? nil : 1)
-                                    .allowsHitTesting(false)
-                                Button(descExpanded ? "收起" : "展开") {
-                                    withAnimation(.easeInOut(duration: 0.15)) { descExpanded.toggle() }
-                                }
-                                .buttonStyle(.plain)
-                                .font(.caption.weight(.medium))
-                                .foregroundStyle(.white.opacity(0.85))
-                            }
-                        } else if let meta = currentMeta {
-                            Text(meta)
-                                .font(.caption)
-                                .foregroundStyle(.white.opacity(0.72))
-                                .lineLimit(1)
-                                .allowsHitTesting(false)
-                        }
-                    }
-                    .padding(.leading, 16)
-                    .padding(.trailing, 12)
-                    .padding(.bottom, 4)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-
-                // 进度条：图里它悬在选集行上方、文字信息区之下
-                feedProgressBar
-
-                // 最底行：左侧「关联内容」胶囊条（选集条式，文字居左 / 箭头居右、
-                // 深色半透明圆角底）+ 右侧「图标+文字」横排按钮（无圆形底）。
-                // 后续扩展同番号/同演员等只换跳转口径。
-                if let video = currentVideo {
-                    HStack(spacing: 10) {
-                        Button {
-                            relatedVideo = currentVideo
-                        } label: {
-                            HStack(spacing: 6) {
-                                Text("关联内容")
-                                    .font(.subheadline.weight(.medium))
-                                    .foregroundStyle(.white)
-                                Spacer(minLength: 8)
-                                Image(systemName: "chevron.right")
-                                    .font(.system(size: 11, weight: .semibold))
-                                    .foregroundStyle(.white.opacity(0.7))
-                            }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 9)
-                            .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .fill(Color.white.opacity(0.12)))
-                            .frame(width: 140)
-                        }
-                        .buttonStyle(.plain)
-
-                        Spacer(minLength: 8)
-
-                        // 收藏 / 连播 / 倍速：图标在左、文字在右（参考图
-                        // 「HD 清晰度 / 倍速 / 清屏」式），激活态用品牌色高亮
-                        HStack(spacing: 12) {
-                            inlineButton(icon: isCurrentFavorite ? "heart.fill" : "heart",
-                                         text: isCurrentFavorite ? "已收藏" : "收藏",
-                                         tint: isCurrentFavorite ? .red : .white) {
-                                Task { await controls.toggleFavorite(id: video.id, client: viewModel.client) }
-                            }
-                            .disabled(controls.favoriteBusy)
-
-                            inlineButton(icon: "arrow.triangle.2.circlepath",
-                                         text: "连播",
-                                         tint: controls.autoAdvance ? Theme.brand : .white) {
-                                controls.setAutoAdvance(!controls.autoAdvance)
-                            }
-
-                            rateButton
-                        }
-                    }
-                    .padding(.leading, 16)
-                    .padding(.trailing, 12)
-                    // 距物理屏底 14pt：给 home indicator 留一点余量，但不再把
-                    // 整条底栏顶到 safe area 上方去（配合下面的 ignoresSafeArea）
-                    .padding(.bottom, 14)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-        // 整块忽略底部安全区：ZStack 的 .bottom 对齐到**物理屏底**，
-        // 黑色面板连续铺满、胶囊+按钮行真正贴底；顶边仍尊重安全区，
-        // 不受影响（本层只有底部内容）。
-        .ignoresSafeArea(edges: .bottom)
-    }
-
-    /// 固定进度条：挂在当前播放引擎上（换页自动跟换），位置在简介区之下、
-    /// 胶囊+按钮行之上（对齐参考图）。复用 VideoPlayerView 的 BottomProgressBar
-    /// （已改 internal），交互一致：34pt 透明热区、点哪跳哪、横向拖 scrub、纯垂直滑动放行。
-    /// 短视频 99% 是 MP4 直连，seek 直接走 engine.seek(to:)（精确 seek）。
-    private var feedProgressBar: some View {
-        TimelineView(.periodic(from: .now, by: 0.2)) { _ in
-            let engine = engineHandle.engine
-            let total = engine?.duration ?? 0
-            let ratio: Double = total > 0
-                ? (barScrubbing ? barScrubRatio : min(max((engine?.currentTime ?? 0) / total, 0), 1))
-                : 0
-            BottomProgressBar(
-                ratio: ratio,
-                duration: total,
-                scrubbing: barScrubbing,
-                onStart: {
-                    barScrubbing = true
-                    engineHandle.engine?.isScrubbing = true
-                },
-                onChange: { r in
-                    barScrubRatio = r
-                },
-                onEnd: { r in
-                    barScrubbing = false
-                    engineHandle.engine?.isScrubbing = false
-                    if let r, let e = engineHandle.engine, total > 0 {
-                        e.seek(to: r * total)
-                    }
-                }
-            )
-        }
-        // 外层 VStack 改 leading 后，进度条若不自撑满会被压成内容宽度、缩到左边一点
-        .frame(maxWidth: .infinity)
-        .frame(height: 34)
-    }
-
-    /// 「图标在左、文字在右」的横排按钮（参考图「HD 清晰度 / 倍速 / 清屏」式）：
-    /// 无圆形底、无方块，纯图标+小字；激活态用 tint 变色表达。
-    private func inlineButton(icon: String, text: String, tint: Color,
-                              action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 5) {
-                Image(systemName: icon)
-                    .font(.system(size: 14, weight: .semibold))
-                Text(text)
-                    .font(.subheadline.weight(.medium))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-            }
-            .foregroundStyle(tint)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-
-    private var rateButton: some View {
-        Menu {
-            ForEach(PlayerEngine.rates, id: \.self) { r in
-                Button {
-                    controls.setRate(r)
-                } label: {
-                    if abs(controls.rate - r) < 0.01 {
-                        Label(rateLabel(r), systemImage: "checkmark")
-                    } else {
-                        Text(rateLabel(r))
-                    }
-                }
-            }
-        } label: {
-            HStack(spacing: 5) {
-                Image(systemName: "clock")
-                    .font(.system(size: 14, weight: .semibold))
-                Text(abs(controls.rate - 1.0) < 0.01 ? "倍速" : shortRateText(controls.rate))
-                    .font(.subheadline.weight(.medium))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-            }
-            .foregroundStyle(abs(controls.rate - 1.0) < 0.01 ? Color.white : Theme.brand)
-            .contentShape(Rectangle())
-        }
-    }
-
-    private func shortRateText(_ r: Float) -> String {
-        abs(r - 1.0) < 0.01 ? "1x" : String(format: "%gx", Double(r))
-    }
-
-    private func rateLabel(_ r: Float) -> String {
-        abs(r - 1.0) < 0.01 ? "正常" : String(format: "%gx", Double(r))
     }
 
     // MARK: 播放设置 / 连播
@@ -627,7 +366,7 @@ struct ShortFeedView: View {
     }
 
     /// ZStack 坐标可能不含安全区，用屏幕高度比例兜底：底部约 24% 视为
-    /// 「进度条 + 底栏」保留区（进度条现在悬在底栏上方，整块比旧版更高）。
+    /// 「进度条 + 信息区」保留区（信息区虽随页滚动，静止时仍落在这一带）。
     /// 正常的右滑退出都从屏幕中上部起手，不受影响；从进度条/按钮上起手的
     /// 右滑不会误触发退出（进度条横拖是 seek、按钮横拖不该把整页拖走）。
     private func startsInBottomBar(_ y: CGFloat) -> Bool {
@@ -651,6 +390,244 @@ struct ShortFeedView: View {
     }
 }
 
+// MARK: - 每页信息区（跟随上下滑一起滚）
+// 抖音竖屏：标题 / 简介 / 进度条 / 选集行属于「这一条视频」，上滑时随本页一起
+// 滚走，下一条的信息区从屏幕下方升上来。所以它挂在 ShortFeedPage 内部，
+// 不是外层固定层。收藏 / 连播 / 倍速仍是全局状态，由外层传入并共享。
+//
+// 布局（对齐参考图）：近乎纯黑面板压到物理屏底；进度条在简介区之下、
+// 最底行（关联内容胶囊 + 收藏/连播/倍速）之上；全部左对齐。
+private struct FeedBottomBar: View {
+    let video: ShortVideo
+    let client: APIClient?
+    /// 本页自己的引擎（不是外层「当前页」引擎）：进度条随页滚动时必须对应本页
+    let engine: PlayerEngine?
+    /// 全局刷流设置（收藏 / 连播 / 倍速），跨页共享
+    @ObservedObject var controls: ShortFeedControls
+    /// 点标题 / 「关联内容」→ 外层弹关联视频页
+    var onRelated: (ShortVideo) -> Void
+
+    @State private var descExpanded = false
+    @State private var barScrubbing = false
+    @State private var barScrubRatio = 0.0
+
+    private var currentMeta: String? {
+        var parts: [String] = []
+        if let d = video.durationText { parts.append(d) }
+        if let dim = video.dimensionText { parts.append(dim) }
+        if let y = video.year, y > 0 { parts.append(String(y)) }
+        return parts.isEmpty ? nil : parts.joined(separator: " \u{00B7} ")
+    }
+
+    /// 有独立标题时用真实文件名当简介；标题即文件名时退回 meta
+    private var descText: String? {
+        guard let t = video.title, !t.isEmpty,
+              t != video.fileName, !video.fileName.isEmpty else { return nil }
+        return video.fileName
+    }
+
+    private var isFavorite: Bool { controls.favoriteIDs.contains(video.id) }
+
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            // 近乎纯黑的信息面板，压到物理屏底。本页一份，跟着滚。
+            LinearGradient(colors: [.clear, .black.opacity(0.55), .black, .black],
+                           startPoint: .top, endPoint: .bottom)
+                .frame(height: 240)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                .allowsHitTesting(false)
+
+            // ⚠️ VStack 默认 .center 会把没撑满的标题块水平居中 → 显式 leading，
+            //    每个子块各自 frame(maxWidth: .infinity, alignment: .leading)。
+            VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Button {
+                        onRelated(video)
+                    } label: {
+                        HStack(alignment: .firstTextBaseline, spacing: 5) {
+                            Text(video.titleText)
+                                .font(.headline.weight(.semibold))
+                                .foregroundStyle(.white)
+                                .lineLimit(2)
+                                .multilineTextAlignment(.leading)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .shadow(color: .black.opacity(0.7), radius: 4, y: 1)
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundStyle(.white.opacity(0.7))
+                        }
+                        // plain Button 的 label 对齐行为不稳定，显式撑满并靠左
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(.plain)
+
+                    if let desc = descText {
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Text(desc)
+                                .font(.caption)
+                                .foregroundStyle(.white.opacity(0.7))
+                                .lineLimit(descExpanded ? nil : 1)
+                                .allowsHitTesting(false)
+                            Button(descExpanded ? "收起" : "展开") {
+                                withAnimation(.easeInOut(duration: 0.15)) { descExpanded.toggle() }
+                            }
+                            .buttonStyle(.plain)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.white.opacity(0.85))
+                        }
+                    } else if let meta = currentMeta {
+                        Text(meta)
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.72))
+                            .lineLimit(1)
+                            .allowsHitTesting(false)
+                    }
+                }
+                .padding(.leading, 16)
+                .padding(.trailing, 12)
+                .padding(.bottom, 4)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                progressBar
+
+                HStack(spacing: 10) {
+                    Button {
+                        onRelated(video)
+                    } label: {
+                        HStack(spacing: 6) {
+                            Text("关联内容")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(.white)
+                            Spacer(minLength: 8)
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.7))
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 9)
+                        .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(Color.white.opacity(0.12)))
+                        .frame(width: 140)
+                    }
+                    .buttonStyle(.plain)
+
+                    Spacer(minLength: 8)
+
+                    HStack(spacing: 12) {
+                        inlineButton(icon: isFavorite ? "heart.fill" : "heart",
+                                     text: isFavorite ? "已收藏" : "收藏",
+                                     tint: isFavorite ? .red : .white) {
+                            Task { await controls.toggleFavorite(id: video.id, client: client) }
+                        }
+                        .disabled(controls.favoriteBusy)
+
+                        inlineButton(icon: "arrow.triangle.2.circlepath",
+                                     text: "连播",
+                                     tint: controls.autoAdvance ? Theme.brand : .white) {
+                            controls.setAutoAdvance(!controls.autoAdvance)
+                        }
+
+                        rateButton
+                    }
+                }
+                .padding(.leading, 16)
+                .padding(.trailing, 12)
+                // 距物理屏底 14pt：给 home indicator 留余量
+                .padding(.bottom, 14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+        .ignoresSafeArea(edges: .bottom)
+    }
+
+    /// 本页进度条：复用 BottomProgressBar（internal），34pt 透明热区、点哪跳哪、
+    /// 横向拖 scrub、纯垂直滑动放行给切视频。绑的是本页 engine，不是外层当前页引擎。
+    private var progressBar: some View {
+        TimelineView(.periodic(from: .now, by: 0.2)) { _ in
+            let total = engine?.duration ?? 0
+            let ratio: Double = total > 0
+                ? (barScrubbing ? barScrubRatio : min(max((engine?.currentTime ?? 0) / total, 0), 1))
+                : 0
+            BottomProgressBar(
+                ratio: ratio,
+                duration: total,
+                scrubbing: barScrubbing,
+                onStart: {
+                    barScrubbing = true
+                    engine?.isScrubbing = true
+                },
+                onChange: { r in
+                    barScrubRatio = r
+                },
+                onEnd: { r in
+                    barScrubbing = false
+                    engine?.isScrubbing = false
+                    if let r, let e = engine, total > 0 {
+                        e.seek(to: r * total)
+                    }
+                }
+            )
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 34)
+    }
+
+    /// 「图标在左、文字在右」横排按钮，无圆形底；激活态用 tint 变色表达
+    private func inlineButton(icon: String, text: String, tint: Color,
+                              action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Image(systemName: icon)
+                    .font(.system(size: 14, weight: .semibold))
+                Text(text)
+                    .font(.subheadline.weight(.medium))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            .foregroundStyle(tint)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var rateButton: some View {
+        Menu {
+            ForEach(PlayerEngine.rates, id: \.self) { r in
+                Button {
+                    controls.setRate(r)
+                } label: {
+                    if abs(controls.rate - r) < 0.01 {
+                        Label(rateLabel(r), systemImage: "checkmark")
+                    } else {
+                        Text(rateLabel(r))
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "clock")
+                    .font(.system(size: 14, weight: .semibold))
+                Text(abs(controls.rate - 1.0) < 0.01 ? "倍速" : shortRateText(controls.rate))
+                    .font(.subheadline.weight(.medium))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            .foregroundStyle(abs(controls.rate - 1.0) < 0.01 ? Color.white : Theme.brand)
+            .contentShape(Rectangle())
+        }
+    }
+
+    private func shortRateText(_ r: Float) -> String {
+        abs(r - 1.0) < 0.01 ? "1x" : String(format: "%gx", Double(r))
+    }
+
+    private func rateLabel(_ r: Float) -> String {
+        abs(r - 1.0) < 0.01 ? "正常" : String(format: "%gx", Double(r))
+    }
+}
+
 // MARK: - 刷流里的单页
 // 一页 = 一条短视频。职责：拿播放地址（MP4 同步、其他 HLS）+ 挂播放器。
 private struct ShortFeedPage: View {
@@ -658,12 +635,18 @@ private struct ShortFeedPage: View {
     let client: APIClient?
     let isActive: Bool
     let inWindow: Bool
-    /// 本页成为当前页时，把播放引擎交给外层（右上角固定图标 / 底栏倍速要用）
+    /// 全局刷流设置（收藏 / 连播 / 倍速）：底栏随页滚，但设置跨页共享
+    @ObservedObject var controls: ShortFeedControls
+    /// 点标题 / 「关联内容」→ 外层弹关联视频页
+    var onRelated: ((ShortVideo) -> Void)? = nil
+    /// 本页成为当前页时，把播放引擎交给外层（右上角固定图标 / 全局倍速要用）
     var onEngineReady: ((PlayerEngine) -> Void)? = nil
 
     @State private var target: PlaybackTarget?
     @State private var error: String?
     @State private var attempt = 0
+    /// 本页自己的引擎：进度条画在页内，必须绑本页而非外层「当前页」引擎
+    @State private var pageEngine: PlayerEngine?
 
     private var poster: URL? {
         guard let raw = video.posterUrl, let u = URL(string: raw) else { return nil }
@@ -687,23 +670,30 @@ private struct ShortFeedPage: View {
                                 isActive: isActive,
                                 showsCloseButton: false,
                                 dragGesturesEnabled: false,
-                                // 控制条每页一份会跟着上下滑一起滚，且它的片名在左上角、
-                                // 正好和左上角固定的退出按钮挤在一起 —— 刷流里关掉。
-                                // 标题改由外层固定底栏画，本页不再重复画一份。
+                                // 播放器自带控制条的片名在左上角、会和固定退出按钮挤在一起，
+                                // 刷流里关掉；标题/信息改由本页 FeedBottomBar 画（随页滚动）。
                                 showsControlBar: false,
                                 // 本页成为当前页时把引擎交给外层。
                                 // ⚠️ 参数顺序必须和 VideoPlayerView 的声明顺序一致：
                                 // Swift 不允许实参乱序（会报 “must precede argument”）
-                                onEngineReady: onEngineReady,
+                                onEngineReady: { engine in
+                                    pageEngine = engine
+                                    onEngineReady?(engine)
+                                },
                                 // 刷流里状态栏常驻（退出时才不会「闪」）：
                                 // 播放器别再自己藏一次，控制条也会自动让开状态栏
                                 hidesStatusBar: false,
-                                // 进度条移到固定层（底栏上方），不再每页内部画一条：
-                                // 否则会贴在屏幕最底、和底栏挤在一起，还跟着视频一起滚
+                                // 进度条由本页 FeedBottomBar 画（页内、随页滚），
+                                // 播放器自己那条关掉，避免一页出现两条
                                 showsBottomProgressBar: false)
             } else {
                 placeholder
             }
+
+            // 信息区属于这一条视频：挂在页内，上滑时随本页一起滚走，
+            // 下一条的从屏幕下方升上来（固定层做不到这个效果）。
+            FeedBottomBar(video: video, client: client, engine: pageEngine,
+                          controls: controls, onRelated: { v in onRelated?(v) })
         }
         // inWindow 或 attempt 变化都重跑；拿到地址后 guard 直接返回，不重复解析
         .task(id: "\(inWindow)-\(attempt)") {
