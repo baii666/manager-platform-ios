@@ -71,6 +71,10 @@ struct VideoPlayerView: View {
     /// 是否在**本页底部**画一条细进度条。短视频刷流传 true：
     /// 它跟着页面一起上下滚（抖音式），所以必须画在页面内部而不是外层固定位置。
     var showsBottomProgressBar: Bool = false
+    /// 非当前页（刷流预取页）要提前缓冲的秒数。0 = 系统默认。
+    /// ⚠️ 放在参数列表末尾并带默认值：详情页 / 关联页 / 拍摄集等既有调用点全部不受影响，
+    ///    Swift 也要求实参顺序与声明一致，追加在最后最安全。
+    var prefetchSeconds: Double = 0
 
     @StateObject private var engine = PlayerEngine()
     @Environment(\.dismiss) private var dismiss
@@ -217,7 +221,9 @@ struct VideoPlayerView: View {
             if engine.videoTrackDisabled { startFallback() }
         }
         .onChange(of: isActive) {
-            // 刷流里滑走暂停、滑回来继续播。首次出现时 setup() 已按 autoplay 决定，这里只处理切换
+            // 刷流里滑走暂停、滑回来继续播。首次出现时 setup() 已按 autoplay 决定，这里只处理切换。
+            // 成为当前页后不再需要超长前向缓冲，交回系统默认（多条同时大缓冲会抢带宽）。
+            engine.setPrefetchBuffer(isActive ? 0 : prefetchSeconds)
             if isActive { engine.play() } else { engine.pause() }
         }
     }
@@ -522,6 +528,7 @@ struct VideoPlayerView: View {
 
     private func setup() {
         configureAudioSession()
+        engine.prefetchSeconds = prefetchSeconds
         engine.load(url: activeURL, startAt: fallback?.startAt ?? startPosition,
                     autoplay: autoplay, loop: loop)
         scheduleHide()

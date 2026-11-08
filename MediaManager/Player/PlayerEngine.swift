@@ -31,6 +31,12 @@ final class PlayerEngine: ObservableObject {
     /// 碰上就直接禁用视频轨 —— iPad Air M4 解 10-bit HEVC 毫无压力，不是能力问题。
     @Published private(set) var videoTrackDisabled = false
 
+    /// 离屏预取页要提前缓冲的秒数。0 = 交回系统默认（当前播放页用它）。
+    /// 刷流给「下一条」设 10s：AVPlayer 在 rate=0 时也会尽量把前向缓冲填到这个值，
+    /// 配合 preroll 解出首帧，滑过去就能立刻出画面，不用再等握手 / moov 解析 / 首帧解码。
+    /// ⚠️ 只影响离屏页；成为当前页时由 setPrefetchBuffer(0) 调回系统默认，省带宽。
+    var prefetchSeconds: Double = 0
+
     /// 用户正在拖动进度条 / 快进手势中。为 true 时屏蔽时间回调，避免进度条回跳。
     var isScrubbing = false
 
@@ -102,6 +108,12 @@ final class PlayerEngine: ObservableObject {
         trackCheckWork?.cancel()
         isReady = false
         let item = AVPlayerItem(url: url)
+        if prefetchSeconds > 0 {
+            // 暂停态也要把前向缓冲填到目标长度（0 = 系统默认，通常只有几秒）。
+            // 不设的话离屏页几乎不下载数据，滑过去等于从头开始加载。
+            item.preferredForwardBufferDuration = prefetchSeconds
+            player.automaticallyWaitsToMinimizeStalling = true
+        }
         player.replaceCurrentItem(with: item)
         pendingStart = (startAt ?? 0) > 0 ? startAt : nil
         bindItem(item)
@@ -194,6 +206,11 @@ final class PlayerEngine: ObservableObject {
                         self.pendingStart = nil
                         self.seek(to: start)
                     }
+                    // 离屏预取页：item 一就绪就预卷解出首帧，但保持暂停、不出声。
+                    // 这样切到本页时 play() 立刻有画面，不会先黑一帧再等解码。
+                    if self.prefetchSeconds > 0, self.player.rate == 0 {
+                        self.prerollForPrefetch()
+                    }
                 } else if item.status == .failed {
                     let desc = item.error?.localizedDescription ?? "未知错误"
                     self.failure = desc
@@ -237,6 +254,20 @@ final class PlayerEngine: ObservableObject {
     }
 
     // MARK: 控制
+
+    /// 预卷：解出首帧、备好解码管线，但不推进播放时间、不出声。
+    /// ⚠️ 必须等 item.status == .readyToPlay 之后调，否则会直接失败；
+    ///    rate 传当前档位（>0），传 0 在部分系统版本会被判定为无效参数。
+    private func prerollForPrefetch() {
+        player.preroll(atRate: max(rate, 1.0)) { _ in }
+    }
+
+    /// 当前页 / 离屏页切换时调整前向缓冲。0 = 交回系统默认。
+    /// 写成显式方法而不是直接改属性：还要同步改到已经装载的 AVPlayerItem 上。
+    func setPrefetchBuffer(_ seconds: Double) {
+        prefetchSeconds = seconds
+        player.currentItem?.preferredForwardBufferDuration = seconds
+    }
 
     func play() {
         player.rate = rate

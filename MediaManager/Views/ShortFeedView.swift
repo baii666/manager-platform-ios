@@ -97,6 +97,107 @@ final class ShortFeedControls: ObservableObject {
     }
 }
 
+// MARK: - 刷流预加载池（地址 + 首帧缓冲）
+// 目标：播当前条时就把「下一条」备好，滑过去零等待。分两层：
+//   1. 地址层：提前解析并缓存 PlaybackTarget。直连 MP4 只是同步拼 URL（零成本）；
+//      非直连容器要开 HLS 会话（服务端会起 ffmpeg），**只给紧邻下一条**开，一次最多一个。
+//   2. 缓冲层：PlayerEngine 给离屏页设 preferredForwardBufferDuration + preroll，
+//      AVPlayer 在暂停态也会把首段数据与首帧准备好（见 PlayerEngine）。
+// ⚠️ 旧实现的「±2 窗口」只在 currentIndex 更新后（滚动停稳）才解析地址，等于没提前；
+//    这里由外层 .task(id: currentID) 主动预热，页面 body 同步读缓存，视图一出现就能渲染播放器。
+// ⚠️ 正在进行的解析按 id 存 Task：页面 await 同一个 Task，不会重复开会话。
+// ⚠️ 刻意不标 @MainActor（类与方法都不标）：
+//    1. SwiftUI 的 ObservableObject 协议要求 objectWillChange 非隔离，类级标注会顶协议；
+//    2. body / .task / .onChange 的隔离上下文在不同 SDK 版本不完全一致，方法非隔离
+//       才能在任何调用点直接调，不必插 await MainActor.run。
+//    实际读写全部发生在主线程（SwiftUI 调用链 + prepare 的 @MainActor），
+//    Task 内也显式 @MainActor；字典只做简单值读写，不构成跨线程竞态。
+final class ShortFeedPrefetcher: ObservableObject {
+    /// 让挂在页面上的 @ObservedObject 在缓存落地时重算 body（placeholder → 播放器）
+    @Published private(set) var revision = 0
+    /// 已解析完成的地址
+    private var resolved: [Int: PlaybackTarget] = [:]
+    /// 正在进行的完整解析（非直连容器要发请求 / 开 HLS 会话），按 id 去重
+    private var inflight: [Int: Task<PlaybackTarget?, Never>] = [:]
+    /// 最近一个非直连预解析的 id。快速连滑时旧的会话还没用上就过期了，
+    /// 起新的之前把旧的取消，保证服务端同时最多只有一个为预加载开的转码会话。
+    private var hlsInflightID: Int? = nil
+
+    /// 当前页一确定就调用。顺序按「下滑方向优先」：下一条 > 下两条 > 上一条 > 上两条。
+    /// allowHLS 只给紧邻下一条为 true，避免一次起多个服务端转码会话。
+    func prefetch(around index: Int, items: [ShortVideo], client: APIClient?) {
+        guard let client else { return }
+        let before = resolved.count
+        let plan: [(Int, Bool)] = [(1, true), (2, false), (-1, false), (-2, false)]
+        for (offset, allowHLS) in plan {
+            let i = index + offset
+            guard i >= 0, i < items.count else { continue }
+            start(items[i], client: client, allowHLS: allowHLS)
+        }
+        trim(around: index, items: items)
+        // 一批地址只发一次变更，别让 5 页 × 4 次 body 重算落在滚动刚停的那一帧
+        if resolved.count != before { revision += 1 }
+    }
+
+    /// 同步快查：页面 body 里直接用，视图一出现就能渲染播放器，不必等 .task 跑完
+    func cachedTarget(for id: Int) -> PlaybackTarget? { resolved[id] }
+
+    /// 页面 prepare 时用：已解析直接回，正在解析就等同一个 Task（不重复请求）
+    func resolvedTarget(for id: Int) async -> PlaybackTarget? {
+        if let t = resolved[id] { return t }
+        guard let task = inflight[id] else { return nil }
+        return await task.value
+    }
+
+    /// 页面自己解析成功后回填，回滑时零等待
+    func store(_ target: PlaybackTarget, for id: Int) {
+        resolved[id] = target
+        revision += 1
+    }
+
+    private func start(_ video: ShortVideo, client: APIClient, allowHLS: Bool) {
+        guard resolved[video.id] == nil, inflight[video.id] == nil,
+              let path = video.filePath, !path.isEmpty else { return }
+        // 99% 的短视频是 MP4/M4V/MOV：同步拼直连 URL，零网络、零服务端成本。
+        // 这里直接写字典、不逐条发变更，由 prefetch 末尾统一发一次。
+        if let url = client.streamURL(path: path) {
+            resolved[video.id] = PlaybackTarget(url: url, title: video.titleText,
+                                                assetType: nil, assetID: nil,
+                                                startAt: 0, timeOffset: 0,
+                                                knownDuration: video.duration, sourcePath: path)
+            return
+        }
+        guard allowHLS else { return }
+        let id = video.id
+        if let old = hlsInflightID, old != id, let stale = inflight.removeValue(forKey: old) {
+            stale.cancel()
+        }
+        hlsInflightID = id
+        inflight[id] = Task { @MainActor [weak self] in
+            let t = try? await resolveShortPlayback(video, path: path, client: client)
+            if let t { self?.store(t, for: id) }
+            self?.inflight.removeValue(forKey: id)
+            // 不用 optional chaining 直接比（会变成 Int??）：显式解包成单层可选
+            if let s = self, s.hlsInflightID == id { s.hlsInflightID = nil }
+            return t
+        }
+    }
+
+    /// 缓存很轻（一个 URL + 几个字符串），只在刷了几百条之后才清理一次；
+    /// 保留 ±20，正常滚动绝不会把还在窗口内的页清掉。in-flight 的 Task 不动
+    /// （可能正被页面 await），它自己完成时会回填 / 移除。
+    private func trim(around index: Int, items: [ShortVideo]) {
+        guard resolved.count > 200, !items.isEmpty else { return }
+        let lo = max(0, index - 20)
+        let hi = min(items.count - 1, index + 20)
+        guard lo <= hi else { return }
+        var keep = Set<Int>()
+        for i in lo...hi { keep.insert(items[i].id) }
+        // 不在 trim 里单独发变更：prefetch 末尾按 count 变化统一发一次
+        resolved = resolved.filter { keep.contains($0.key) }
+    }
+}
+
 // MARK: - 抖音式短视频刷流
 // 短视频页点开某一条后，进入这个全屏的、上下滑切片的刷流。
 // 对齐抖音的交互：一屏一条、上下滑切换、当前页自动循环播、滑到末尾自动加载更多，
@@ -107,8 +208,9 @@ final class ShortFeedControls: ObservableObject {
 //      每页占满整屏，比 TabView 旋转 hack 干净。
 //   2. 复用 VideoPlayerView（手势/倍速/降级/进度上报都在），加 loop + isActive：
 //      当前页循环播放，滑走暂停、滑回来续播。
-//   3. 只对当前页 ±2 的窗口做预加载（解析地址 + 起 AVPlayer），更远的只挂封面占位，
-//      避免 1 万多条全起 AVPlayer 把内存吃爆。
+//   3. 只对当前页 ±2 的窗口起 AVPlayer（更远的只挂封面占位，避免 1 万多条把内存吃爆）；
+//      地址解析不依赖这个窗口：外层 ShortFeedPrefetcher 在播当前条时就把相邻页备好，
+//      离屏页还会设前向缓冲并预卷首帧，滑过去不用重新握手 / 等首帧（无缝下滑）。
 //   4. 短视频 99% 是 MP4，streamURL 同步拿地址、零等待；AVI/MKV 才走 HLS 会话。
 //   5. 信息区挂在**每一页内部**（FeedBottomBar）：上滑时随本页一起滚走、下一条的
 //      从屏幕下方升上来；固定层只留右上角画中画/投屏与顶部关闭。进度条绑本页引擎，
@@ -134,6 +236,8 @@ struct ShortFeedView: View {
     @StateObject private var engineHandle = FeedEngineHandle()
     /// 底栏三件套的状态（收藏 / 连播 / 倍速），独立于引擎，见上面 ShortFeedControls 注释
     @StateObject private var controls = ShortFeedControls()
+    /// 相邻页的地址预取缓存：播当前条时就把下一条备好，切过去零等待
+    @StateObject private var prefetcher = ShortFeedPrefetcher()
     /// 当前正在看的页（scrollPosition 跟踪，滑到哪更新到哪）
     @State private var currentID: Int?
     @State private var currentIndex: Int
@@ -175,6 +279,7 @@ struct ShortFeedView: View {
                                           isActive: index == currentIndex,
                                           inWindow: abs(index - currentIndex) <= windowRadius,
                                           controls: controls,
+                                          prefetcher: prefetcher,
                                           onRelated: { relatedVideo = $0 },
                                           onEngineReady: { engine in
                                               engineHandle.attach(engine)
@@ -248,10 +353,22 @@ struct ShortFeedView: View {
                 Task { await viewModel.loadMore() }
             }
         }
+        // 当前页一确定（含首次进入）就做两件事：先同步预热相邻页地址，再查收藏。
+        // ⚠️ 不能靠页面自己的 inWindow —— 那个值只在滚动停稳后 currentIndex 才更新，
+        //    等于没提前。这里主动解析完缓存，页面 body 同步读，视图一出现就有播放器。
         // 每切一条查一次收藏状态（请求很轻；失败静默，不挡刷流）
         .task(id: currentID) {
             guard let id = currentID else { return }
+            if let idx = viewModel.items.firstIndex(where: { $0.id == id }) {
+                prefetcher.prefetch(around: idx, items: viewModel.items, client: viewModel.client)
+            }
             await controls.loadFavorite(id: id, client: viewModel.client)
+        }
+        // 滑到末尾 loadMore 追加了新数据：补一次预取，让跨页加载后仍无缝
+        .onChange(of: viewModel.items.count) {
+            guard let id = currentID,
+                  let idx = viewModel.items.firstIndex(where: { $0.id == id }) else { return }
+            prefetcher.prefetch(around: idx, items: viewModel.items, client: viewModel.client)
         }
         // 连播开关：立刻改当前引擎的「播完通知」。关掉就退回单条循环。
         .onChange(of: controls.autoAdvance) {
@@ -639,6 +756,8 @@ private struct ShortFeedPage: View {
     let inWindow: Bool
     /// 全局刷流设置（收藏 / 连播 / 倍速）：底栏随页滚，但设置跨页共享
     @ObservedObject var controls: ShortFeedControls
+    /// 相邻页地址预取缓存（@ObservedObject：缓存落地时要重算 body，把占位换成播放器）
+    @ObservedObject var prefetcher: ShortFeedPrefetcher
     /// 点标题 / 「关联内容」→ 外层弹关联视频页
     var onRelated: ((ShortVideo) -> Void)? = nil
     /// 本页成为当前页时，把播放引擎交给外层（右上角固定图标 / 全局倍速要用）
@@ -650,6 +769,12 @@ private struct ShortFeedPage: View {
     /// 本页自己的引擎：进度条画在页内，必须绑本页而非外层「当前页」引擎
     @State private var pageEngine: PlayerEngine?
 
+    /// 本页自己的解析结果优先；没有就同步读预取池 —— 视图一出现就能渲染播放器，
+    /// 不必等 .task 那一帧。缓存命中后 .task 会把它写回 target，之后不再依赖池子。
+    private var effectiveTarget: PlaybackTarget? {
+        target ?? prefetcher.cachedTarget(for: video.id)
+    }
+
     private var poster: URL? {
         guard let raw = video.posterUrl, let u = URL(string: raw) else { return nil }
         return client?.resolve(u) ?? u
@@ -659,12 +784,12 @@ private struct ShortFeedPage: View {
         VStack(spacing: 0) {
             ZStack(alignment: .bottom) {
                 Color.black
-                if let target {
-                    VideoPlayerView(url: target.url,
+                if let playTarget = effectiveTarget {
+                    VideoPlayerView(url: playTarget.url,
                                     startPosition: 0,
                                     timeOffset: 0,
-                                    sourcePath: target.sourcePath,
-                                    knownDuration: target.knownDuration ?? video.duration,
+                                    sourcePath: playTarget.sourcePath,
+                                    knownDuration: playTarget.knownDuration ?? video.duration,
                                     title: video.titleText,
                                     assetType: nil,
                                     assetID: nil,
@@ -688,7 +813,10 @@ private struct ShortFeedPage: View {
                                     hidesStatusBar: false,
                                     // 进度条由本页 FeedBottomBar 画（页内、随页滚），
                                     // 播放器自己那条关掉，避免一页出现两条
-                                    showsBottomProgressBar: false)
+                                    showsBottomProgressBar: false,
+                                    // 非当前页提前缓冲 10s + 预卷首帧（暂停态、不出声）。
+                                    // 成为当前页后 VideoPlayerView 会调回 0（系统默认），省带宽。
+                                    prefetchSeconds: isActive ? 0 : 10)
                 } else {
                     placeholder
                 }
@@ -704,9 +832,15 @@ private struct ShortFeedPage: View {
                           controls: controls, onRelated: { v in onRelated?(v) })
         }
         .ignoresSafeArea(edges: .bottom)
-        // inWindow 或 attempt 变化都重跑；拿到地址后 guard 直接返回，不重复解析
+        // inWindow 或 attempt 变化都重跑。
+        // 先把预取池的结果（含正在进行的解析）写回本页 @State：之后池子清理缓存也不影响本页。
         .task(id: "\(inWindow)-\(attempt)") {
-            guard inWindow, target == nil else { return }
+            guard inWindow else { return }
+            if target == nil, let cached = await prefetcher.resolvedTarget(for: video.id) {
+                target = cached
+                return
+            }
+            guard target == nil else { return }
             await prepare()
         }
     }
@@ -754,16 +888,20 @@ private struct ShortFeedPage: View {
         }
         do {
             // MP4/M4V/MOV 直接直连，同步拿到 URL、零等待；只有 AVI/MKV 才开会话
+            let resolved: PlaybackTarget
             if let url = client.streamURL(path: path) {
-                target = PlaybackTarget(url: url, title: video.titleText,
-                                        assetType: nil, assetID: nil,
-                                        startAt: 0, timeOffset: 0,
-                                        knownDuration: video.duration, sourcePath: path)
+                resolved = PlaybackTarget(url: url, title: video.titleText,
+                                          assetType: nil, assetID: nil,
+                                          startAt: 0, timeOffset: 0,
+                                          knownDuration: video.duration, sourcePath: path)
             } else {
-                target = try await client.resolvePlayback(
+                resolved = try await client.resolvePlayback(
                     path: path, startAt: nil, title: video.titleText,
                     assetType: nil, assetID: nil, knownDuration: video.duration)
             }
+            target = resolved
+            // 回填预取池：滑走再滑回来不用重新解析（非直连容器尤其省一次 HLS 会话）
+            prefetcher.store(resolved, for: video.id)
         } catch {
             self.error = error.localizedDescription
         }
