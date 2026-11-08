@@ -395,8 +395,9 @@ struct ShortFeedView: View {
 // 滚走，下一条的信息区从屏幕下方升上来。所以它挂在 ShortFeedPage 内部，
 // 不是外层固定层。收藏 / 连播 / 倍速仍是全局状态，由外层传入并共享。
 //
-// 布局（对齐参考图）：近乎纯黑面板压到物理屏底；进度条在简介区之下、
-// 最底行（关联内容胶囊 + 收藏/连播/倍速）之上；全部左对齐。
+// 布局（对齐参考图）：进度条在简介区之下、最底行（关联内容胶囊 +
+// 收藏/连播/倍速）之上；全部左对齐。背景**全透明**——不铺渐变、不铺黑面板，
+// 文字与按钮直接浮在视频画面上。
 private struct FeedBottomBar: View {
     let video: ShortVideo
     let client: APIClient?
@@ -430,13 +431,7 @@ private struct FeedBottomBar: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            // 近乎纯黑的信息面板，压到物理屏底。本页一份，跟着滚。
-            LinearGradient(colors: [.clear, .black.opacity(0.55), .black, .black],
-                           startPoint: .top, endPoint: .bottom)
-                .frame(height: 240)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-                .allowsHitTesting(false)
-
+            // 不铺任何背景层：进度条上方、下方都是全透明，直接透出视频画面。
             // ⚠️ VStack 默认 .center 会把没撑满的标题块水平居中 → 显式 leading，
             //    每个子块各自 frame(maxWidth: .infinity, alignment: .leading)。
             VStack(alignment: .leading, spacing: 0) {
@@ -709,9 +704,7 @@ private struct ShortFeedPage: View {
                         fallbackColors: Theme.placeholderGradient(for: .short))
                 .imageFilled()
                 .ignoresSafeArea()
-            LinearGradient(colors: [.clear, .black.opacity(0.8)],
-                           startPoint: .center, endPoint: .bottom)
-                .ignoresSafeArea()
+            // 与 FeedBottomBar 一致：不压暗角/渐变，进度条上方保持全透明
             VStack(spacing: 12) {
                 if let error {
                     Image(systemName: "exclamationmark.triangle.fill")
