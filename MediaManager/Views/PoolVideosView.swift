@@ -107,11 +107,10 @@ struct PoolVideosView: View {
                          highlighted: viewModel.descending, iconOnly: true) {
                     Task { await viewModel.toggleDirection() }
                 }
-                // 随机起播：池内随机（「全部」页就是全库随机，同首页「连播」卡）
+                // 真随机刷流：池内随机（「全部」页 = 全库随机）。
+                // 队列由后端随机批次供给，不再只是从已加载列表里挑一个随机起点。
                 ToolChip(label: "随机", icon: "shuffle", iconOnly: true) {
-                    guard !viewModel.items.isEmpty else { return }
-                    let idx = Int.random(in: 0..<viewModel.items.count)
-                    feedPresenter.open(viewModel: viewModel, startIndex: idx)
+                    feedPresenter.open(viewModel: viewModel, startIndex: 0, random: true)
                 }
                 if hSizeClass == .regular {
                     Text("\(viewModel.items.count) / \(viewModel.totalCount)")

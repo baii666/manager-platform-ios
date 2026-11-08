@@ -519,6 +519,19 @@ final class APIClient: DataProviding, @unchecked Sendable {
         return (resp.items, resp.total)
     }
 
+    /// 真随机批次：后端 /api/shorts/random 走 `ORDER BY RANDOM()`（n 上限 30）。
+    /// 与 fetchShortVideos 的区别是**没有 page/offset**：每次都是全库重新抽，
+    /// 所以刷流端要按 id 本地去重，再拼成可持续补充的随机队列。
+    /// - Returns: (本批随机视频, 该范围可见总数) —— 响应结构与列表接口一致
+    func fetchShortRandomBatch(poolId: Int? = nil, size: Int = 30) async throws -> ([ShortVideo], Int) {
+        var qi: [URLQueryItem] = [
+            URLQueryItem(name: "n", value: "\(min(max(size, 1), 30))"),
+        ]
+        if let poolId, poolId > 0 { qi.append(URLQueryItem(name: "pool", value: "\(poolId)")) }
+        let resp: ShortVideosResponse = try await request("/api/shorts/random", queryItems: qi)
+        return (resp.items, resp.total)
+    }
+
     /// 同文件夹关联视频（刷流底栏标题入口）。
     /// 后端按 file_path 父目录匹配（/api/shorts/videos/:id/related），
     /// 已排除本条、过滤禁用池/无权限池，返回按文件名排序（上限 200 条）+ 文件夹路径。

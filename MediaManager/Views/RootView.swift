@@ -136,6 +136,7 @@ struct RootView: View {
                 // ⚠️ 不能挂在 ShortsView 内部：那样右滑露出的永远是短视频列表页。
                 if shortsFeed.isActive, let vm = shortsFeed.viewModel {
                     ShortFeedView(viewModel: vm, startIndex: shortsFeed.startIndex,
+                                  randomMode: shortsFeed.randomMode,
                                   onClose: { shortsFeed.close() },
                                   onBeginExit: { shortsFeed.beginExit() })
                         // 每次打开都重建：起始下标是 init 时的快照（@State currentIndex）

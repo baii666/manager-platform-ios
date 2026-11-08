@@ -198,6 +198,83 @@ final class ShortFeedPrefetcher: ObservableObject {
     }
 }
 
+// MARK: - 真随机刷流队列
+// 旧「随机连播」只随机挑一个起始下标，队列仍是 /api/shorts/videos 的
+// created_desc 顺序分页 —— 同目录 / 同批入库的视频连成一片，看着就是顺序播放。
+// 这里改由后端 /api/shorts/random（ORDER BY RANDOM()）分批供给整条队列：
+// 每批 30 条，按 id 本地去重后 append，滑到队尾继续补，形成可持续的随机流。
+// 刻意不新增 Swift 文件（xcodegen 红线），与 ShortFeedPrefetcher 同放本文件。
+final class ShortRandomFeedLoader: ObservableObject {
+    @Published private(set) var items: [ShortVideo] = []
+    @Published private(set) var isLoading = false
+    @Published private(set) var errorMessage: String?
+
+    private let batchSize = 30
+    /// 已出现过的 id：后端每批都是全库重新抽，跨批会重复，必须本地去重
+    private var seen = Set<Int>()
+    private var total = Int.max
+    private var poolId: Int?
+    private var client: APIClient?
+    /// 连续两批全重复 → 认为这个范围已刷遍，停止再请求（小池不会空转）
+    private var emptyStreak = 0
+
+    private var hasMore: Bool { emptyStreak < 2 && seen.count < total }
+
+    /// 只在首次进入时拉第一批；client 从常驻的列表 VM 借，不另建会话
+    func start(poolId: Int?, client: APIClient?) async {
+        guard items.isEmpty, !isLoading else { return }
+        self.poolId = poolId
+        guard let client else {
+            errorMessage = "未连接服务器"
+            return
+        }
+        self.client = client
+        await loadMore()
+        if items.isEmpty, errorMessage == nil {
+            errorMessage = "这个范围没有可随机播放的视频"
+        }
+    }
+
+    func loadMore() async {
+        guard let client, !isLoading, hasMore else { return }
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            let (batch, totalCount) = try await client.fetchShortRandomBatch(
+                poolId: poolId, size: batchSize)
+            total = totalCount
+            var fresh: [ShortVideo] = []
+            for v in batch where !seen.contains(v.id) {
+                seen.insert(v.id)
+                fresh.append(v)
+            }
+            if fresh.isEmpty {
+                emptyStreak += 1
+            } else {
+                emptyStreak = 0
+                items.append(contentsOf: fresh)
+            }
+            errorMessage = nil
+        } catch {
+            // 不弹错打断刷流：已有队列继续看，下次滑到队尾会再试
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// 重试：重新绑定 client（可能刚重连 / 换过服务器），并清掉耗尽标记
+    func retry(poolId: Int?, client: APIClient?) async {
+        self.poolId = poolId
+        guard let client else {
+            errorMessage = "未连接服务器"
+            return
+        }
+        self.client = client
+        errorMessage = nil
+        emptyStreak = 0
+        await loadMore()
+    }
+}
+
 // MARK: - 抖音式短视频刷流
 // 短视频页点开某一条后，进入这个全屏的、上下滑切片的刷流。
 // 对齐抖音的交互：一屏一条、上下滑切换、当前页自动循环播、滑到末尾自动加载更多，
@@ -215,9 +292,14 @@ final class ShortFeedPrefetcher: ObservableObject {
 //   5. 信息区挂在**每一页内部**（FeedBottomBar）：上滑时随本页一起滚走、下一条的
 //      从屏幕下方升上来；固定层只留右上角画中画/投屏与顶部关闭。进度条绑本页引擎，
 //      全局状态（收藏 / 连播 / 倍速）仍由外层 ShortFeedControls 共享。
+//   6. randomMode = 真随机连播：队列改由 ShortRandomFeedLoader 从
+//      /api/shorts/random 分批抽取（本地按 id 去重、滑到队尾自动补），
+//      不再是「随机起点 + created_desc 顺序队列」。
 struct ShortFeedView: View {
     @ObservedObject var viewModel: ShortsViewModel
     let startIndex: Int
+    /// true = 真随机刷流：队列由 randomLoader 供给，不用列表 VM 的顺序分页
+    var randomMode: Bool = false
     /// 退出回调：关掉根层 overlay 回到**进来时的那个 tab**（首页进的回首页、
     /// 短视频页进的回短视频页）—— 刷流挂在 RootView 的 overlay 上，背后就是来源页
     var onClose: () -> Void = {}
@@ -238,6 +320,9 @@ struct ShortFeedView: View {
     @StateObject private var controls = ShortFeedControls()
     /// 相邻页的地址预取缓存：播当前条时就把下一条备好，切过去零等待
     @StateObject private var prefetcher = ShortFeedPrefetcher()
+    /// 真随机队列：每次打开都随 ShortFeedView 一起重建（RootView .id(generation)），
+    /// 所以每次进随机连播都是一批全新的随机视频
+    @StateObject private var randomLoader = ShortRandomFeedLoader()
     /// 当前正在看的页（scrollPosition 跟踪，滑到哪更新到哪）
     @State private var currentID: Int?
     @State private var currentIndex: Int
@@ -255,25 +340,80 @@ struct ShortFeedView: View {
     private let windowRadius = 2
 
     init(viewModel: ShortsViewModel, startIndex: Int,
+         randomMode: Bool = false,
          onClose: @escaping () -> Void = {},
          onBeginExit: @escaping () -> Void = {}) {
         self.viewModel = viewModel
         self.startIndex = startIndex
+        self.randomMode = randomMode
         self.onClose = onClose
         self.onBeginExit = onBeginExit
-        let idx = min(max(startIndex, 0), viewModel.items.count - 1)
+        // 随机模式的队列要等首批网络结果，此刻为空 → currentID 从 nil 起，
+        // 由 .task 里的 start() 完成后设为第一条；顺序模式沿用列表快照。
+        let initial: [ShortVideo] = randomMode ? [] : viewModel.items
+        let idx = min(max(startIndex, 0), max(initial.count - 1, 0))
         _currentIndex = State(initialValue: idx)
-        _currentID = State(initialValue: viewModel.items.indices.contains(idx) ? viewModel.items[idx].id : nil)
+        _currentID = State(initialValue: initial.indices.contains(idx) ? initial[idx].id : nil)
+    }
+
+    /// 刷流队列：随机模式用随机批次，其余用列表 VM 的顺序分页。
+    /// 预取 / 连播 / 关联页回跳都只认它，不各自去读 viewModel.items。
+    private var items: [ShortVideo] { randomMode ? randomLoader.items : viewModel.items }
+
+    private func loadMore() async {
+        if randomMode { await randomLoader.loadMore() } else { await viewModel.loadMore() }
+    }
+
+    /// 首批随机队列落地后把 scrollPosition 落到第一条（含失败后重试成功的场景）
+    private func settleRandomStart() {
+        if currentID == nil, let first = randomLoader.items.first {
+            currentIndex = 0
+            currentID = first.id
+        }
     }
 
     var body: some View {
         ZStack(alignment: .topLeading) {
             Color.black.ignoresSafeArea()
 
+            // 真随机首批要等一次网络请求；队列为空时给个明确的加载/失败态，
+            // 而不是一片黑屏。关闭按钮与右上角图标都在本层之后，仍可点。
+            if randomMode && items.isEmpty {
+                ZStack {
+                    Color.black.ignoresSafeArea()
+                    VStack(spacing: 14) {
+                        if let msg = randomLoader.errorMessage {
+                            Image(systemName: "shuffle")
+                                .font(.system(size: 34))
+                                .foregroundStyle(.white.opacity(0.55))
+                            Text(msg)
+                                .font(.subheadline)
+                                .foregroundStyle(.white.opacity(0.8))
+                                .multilineTextAlignment(.center)
+                            Button("重试") {
+                                Task {
+                                    await randomLoader.retry(poolId: viewModel.poolId,
+                                                             client: viewModel.client)
+                                    settleRandomStart()
+                                }
+                            }
+                                .buttonStyle(.bordered)
+                                .tint(.white)
+                        } else {
+                            ProgressView().tint(.white)
+                            Text("正在抽取随机视频…")
+                                .font(.caption)
+                                .foregroundStyle(.white.opacity(0.65))
+                        }
+                    }
+                    .padding(.horizontal, 32)
+                }
+            }
+
             ScrollViewReader { proxy in
                 ScrollView(.vertical) {
                     LazyVStack(spacing: 0) {
-                        ForEach(Array(viewModel.items.enumerated()), id: \.element.id) { index, video in
+                        ForEach(Array(items.enumerated()), id: \.element.id) { index, video in
                             ShortFeedPage(video: video,
                                           client: viewModel.client,
                                           isActive: index == currentIndex,
@@ -346,11 +486,11 @@ struct ShortFeedView: View {
         // 状态栏保持系统默认（常驻显示）：由 RootView 统一控制，刷流不参与隐藏
         .onChange(of: currentID) {
             guard let id = currentID,
-                  let idx = viewModel.items.firstIndex(where: { $0.id == id }) else { return }
+                  let idx = items.firstIndex(where: { $0.id == id }) else { return }
             currentIndex = idx
-            // 滑到倒数第 3 条就预加载下一页，别等滑到底才卡一下
-            if idx >= viewModel.items.count - 3 {
-                Task { await viewModel.loadMore() }
+            // 滑到倒数第 3 条就补下一批（随机模式补随机批次，顺序模式翻下一页）
+            if idx >= items.count - 3 {
+                Task { await loadMore() }
             }
         }
         // 当前页一确定（含首次进入）就做两件事：先同步预热相邻页地址，再查收藏。
@@ -359,16 +499,26 @@ struct ShortFeedView: View {
         // 每切一条查一次收藏状态（请求很轻；失败静默，不挡刷流）
         .task(id: currentID) {
             guard let id = currentID else { return }
-            if let idx = viewModel.items.firstIndex(where: { $0.id == id }) {
-                prefetcher.prefetch(around: idx, items: viewModel.items, client: viewModel.client)
+            if let idx = items.firstIndex(where: { $0.id == id }) {
+                prefetcher.prefetch(around: idx, items: items, client: viewModel.client)
             }
             await controls.loadFavorite(id: id, client: viewModel.client)
         }
-        // 滑到末尾 loadMore 追加了新数据：补一次预取，让跨页加载后仍无缝
-        .onChange(of: viewModel.items.count) {
+        // 队列追加了新数据（顺序翻页 / 随机补批）：补一次预取，跨批加载后仍无缝
+        .onChange(of: items.count) {
             guard let id = currentID,
-                  let idx = viewModel.items.firstIndex(where: { $0.id == id }) else { return }
-            prefetcher.prefetch(around: idx, items: viewModel.items, client: viewModel.client)
+                  let idx = items.firstIndex(where: { $0.id == id }) else { return }
+            prefetcher.prefetch(around: idx, items: items, client: viewModel.client)
+        }
+        // 真随机首批：拿到结果后把 scrollPosition 落到第一条。
+        // 用 onAppear 而不是再叠一个 .task（同一视图多个 .task 行为不稳）；
+        // loader.start 自带 guard，重复 appear 不会重复抽批次把队列打乱。
+        .onAppear {
+            guard randomMode else { return }
+            Task {
+                await randomLoader.start(poolId: viewModel.poolId, client: viewModel.client)
+                settleRandomStart()
+            }
         }
         // 连播开关：立刻改当前引擎的「播完通知」。关掉就退回单条循环。
         .onChange(of: controls.autoAdvance) {
@@ -396,7 +546,7 @@ struct ShortFeedView: View {
         // 跳回刷流并定位到那条；不在队列 → 关联页自己起播放器。
         .fullScreenCover(item: $relatedVideo) { v in
             ShortRelatedView(video: v, client: viewModel.client) { picked in
-                guard viewModel.items.contains(where: { $0.id == picked.id }) else { return false }
+                guard items.contains(where: { $0.id == picked.id }) else { return false }
                 relatedVideo = nil
                 if let proxy = scrollProxy {
                     withAnimation(.easeInOut(duration: 0.3)) { proxy.scrollTo(picked.id, anchor: .top) }
@@ -434,9 +584,9 @@ struct ShortFeedView: View {
     /// 引擎在播完那一刻已经 seek 回 0 继续循环了，不会卡在静止画面。
     private func advance(from id: Int) {
         guard controls.autoAdvance,
-              let idx = viewModel.items.firstIndex(where: { $0.id == id }),
-              idx + 1 < viewModel.items.count else { return }
-        let nextID = viewModel.items[idx + 1].id
+              let idx = items.firstIndex(where: { $0.id == id }),
+              idx + 1 < items.count else { return }
+        let nextID = items[idx + 1].id
         if let proxy = scrollProxy {
             withAnimation(.easeInOut(duration: 0.3)) { proxy.scrollTo(nextID, anchor: .top) }
             // 兜底：paging + containerRelativeFrame 下 scrollTo 偶尔第一次不落地。

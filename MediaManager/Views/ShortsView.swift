@@ -33,10 +33,16 @@ final class ShortFeedPresenter: ObservableObject {
     /// 数据源：短视频页的 VM（ShortsView 常驻挂载，不会被释放）
     private(set) var viewModel: ShortsViewModel?
     private(set) var startIndex = 0
+    /// true = 真随机刷流：整条队列由后端 /api/shorts/random 分批供给。
+    /// false = 点具体卡片进来，按列表 VM 的顺序分页继续看（既有行为）。
+    /// ⚠️ 旧版只做「随机起始下标」，之后仍按 created_desc 顺序一页页 append，
+    ///    同目录/同批入库的视频连成一片，看起来就像在顺序播放。
+    private(set) var randomMode = false
 
-    func open(viewModel: ShortsViewModel, startIndex: Int) {
+    func open(viewModel: ShortsViewModel, startIndex: Int, random: Bool = false) {
         self.viewModel = viewModel
         self.startIndex = startIndex
+        self.randomMode = random
         generation += 1
         isActive = true
         // 底 bar 在 RootView 的 safeAreaInset 里、层级比刷流高，刷流盖不住它
@@ -75,8 +81,6 @@ struct ShortsView: View {
     @ObservedObject private var feedPresenter = ShortFeedPresenter.shared
     /// 随机刷流请求（首页「短视频连播」卡）：generation 自增即触发一次
     @ObservedObject private var randomRequest = ShortsRandomRequest.shared
-    /// 请求到达时 items 还没加载完（首帧 loading 中）：置位，items 到达后补开
-    @State private var pendingRandomOpen = false
     /// 池列表（卡片数据源）
     @State private var pools: [ShortPool] = []
     /// 池列表是否加载过（区分「加载中」与「真的没有池」，别闪空状态）
@@ -159,21 +163,13 @@ struct ShortsView: View {
         .task { await viewModel.loadInitial() }
         .task { await loadPools() }
         .refreshing { await loadPools() }
-        // 首页「短视频连播」卡 → 随机起始的沉浸刷流
+        // 首页「短视频连播」卡 → 真随机沉浸刷流。
+        // ⚠️ 不再等 viewModel.items 加载：随机队列自己走 /api/shorts/random，
+        //    旧版靠 pendingRandomOpen 等 items.count 变化，若列表已加载过
+        //    （loadInitial 直接 return、count 不变）就永远等不到，刷流打不开。
         .onChange(of: randomRequest.generation) {
             guard !feedPresenter.isActive else { return }
-            if viewModel.items.isEmpty {
-                pendingRandomOpen = true
-                Task { await viewModel.loadInitial() }
-            } else {
-                startRandomFeed()
-            }
-        }
-        .onChange(of: viewModel.items.count) {
-            if pendingRandomOpen, !viewModel.items.isEmpty {
-                pendingRandomOpen = false
-                startRandomFeed()
-            }
+            startRandomFeed()
         }
     }
 
@@ -324,11 +320,11 @@ struct ShortsView: View {
 
     // MARK: 随机刷流
 
-    /// 随机起始下标开沉浸刷流：从「全部」范围随机
+    /// 真随机刷流：整条队列都由后端 ORDER BY RANDOM() 分批供给，
+    /// 不再是「随机起点 + 顺序队列」。范围由 VM 的 poolId 决定（nil = 全库）。
+    /// 不依赖 items 是否已加载 —— 首页卡片点进来也能立刻开刷。
     private func startRandomFeed() {
-        guard !viewModel.items.isEmpty else { return }
-        let idx = Int.random(in: 0..<viewModel.items.count)
-        feedPresenter.open(viewModel: viewModel, startIndex: idx)
+        feedPresenter.open(viewModel: viewModel, startIndex: 0, random: true)
     }
 
     // MARK: 池列表
