@@ -1532,7 +1532,10 @@ private struct SimilarPhotoOverlay: View {
                         SimilarPhotoPage(
                             url: Self.url(for: sp, size: "original", client: client),
                             thumbURL: Self.url(for: sp, size: "600", client: client),
-                            placeholder: i == initialIndex ? heroImage : nil
+                            placeholder: i == initialIndex ? heroImage : nil,
+                            // 挂载盘原图一张 15MB / 6s，别让整组相似图一起拉：
+                            // 只给当前页和左右相邻页加载高清，其余页先用 600 档顶着。
+                            loadFull: abs(i - page) <= 1
                         )
                         .tag(i)
                     }
@@ -1667,14 +1670,16 @@ private struct SimilarPhotoOverlay: View {
     }
 }
 
-/// 相似图放大层里的单页：原图等比缩放、居中铺满整屏，左右翻页查看。
-/// 显示优先级 原图 → 首帧同步缓存 → 600 档异步占位 → 低调进度圈。
-/// ⚠️ 三者合成一个 `display` 用同一个 Image 视图承载：原图到位时只是位图变了，
+/// 相似图放大层里的单页：等比铺满整屏，左右翻页查看。
+/// 显示优先级 原图(降采样) → 首帧同步缓存 → 600 档异步占位 → 低调进度圈。
+/// ⚠️ 三者合成一个 `display` 用同一个 Image 视图承载：高清到位时只是位图变了，
 /// 视图身份不变，不会触发分支切换（分支切换是「闪一下」的常见来源）。
 private struct SimilarPhotoPage: View {
     let url: URL?
     let thumbURL: URL?
     var placeholder: UIImage? = nil
+    /// 只有当前页和左右相邻页为 true，避免整组相似图并发拉原图把挂载盘压死
+    var loadFull: Bool = true
     @State private var image: UIImage?
     @State private var thumb: UIImage?
 
@@ -1695,9 +1700,15 @@ private struct SimilarPhotoPage: View {
             guard let thumbURL, placeholder == nil, thumb == nil else { return }
             thumb = await ImageCache.shared.load(from: thumbURL)
         }
-        .task(id: url?.absoluteString ?? "") {
-            guard let url, image == nil else { return }
-            image = await ImageCache.shared.load(from: url)
+        // ⚠️ 别用 load(from:) 拉原图：它会 forceDecoded 出 6000×4000 全尺寸位图
+        //（48~96MB），再 jpegData 重编码把 15MB 原图写进磁盘缓存，几张就撑满
+        // NSCache 把 600 档小图全挤掉 —— 表现就是「弹窗里的图越点越慢」。
+        // 改成 ImageIO 后台降采样到 2400px 长边（已解码、约 15MB 位图），
+        // 磁盘只落这份降采样小图；第二次打开同步命中，不再回源。
+        .task(id: "\(url?.absoluteString ?? "")|\(loadFull)") {
+            guard let url, loadFull, image == nil else { return }
+            image = await ImageCache.shared.loadDownsampled(from: url, maxPixel: 2400,
+                                                            cacheToDisk: true)
         }
     }
 }
