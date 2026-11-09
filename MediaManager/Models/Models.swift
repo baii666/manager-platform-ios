@@ -439,6 +439,9 @@ struct PhotoFace: Identifiable, Decodable, Sendable {
         var p = Person(id: personId)
         p.name = personName ?? ""
         p.faceCount = personFaceCount ?? 0
+        // 从看图器点头像进来时没有「代表脸」字段，就把被点的这张脸当头像兜底，
+        // 人物页顶部信息区不会是空白占位。人物列表入口由后端给真正的代表脸。
+        p.representativeFaceId = id
         return p
     }
 
