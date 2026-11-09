@@ -85,11 +85,12 @@ struct PhotoViewerView: View {
     @State private var facesLoading = false
     @State private var similarPhotos: [SimilarPhoto] = []
     @State private var similarLoading = false
-    /// 点击相似图后，在看图器内部盖一层「原地放大 → 左右翻阅」的自绘层。
-    /// 非 nil 时显示；元素为相似图列表 + 起始下标。
-    @State private var similarOverlay: (photos: [SimilarPhoto], index: Int)?
+    /// 点击相似图 / 人物头像后，在看图器内部盖一层「原地放大 → 左右翻阅」的自绘层。
+    /// 两种入口共用同一层：items 里各自带好缩略图 / 高清 URL。
+    /// 非 nil 时显示；元素为放大项列表 + 起始下标。
+    @State private var zoomOverlay: (items: [ZoomItem], index: Int)?
     /// 被点缩略图在整屏坐标系里的 frame，放大动画从它的位置出发。
-    @State private var similarZoomOrigin: CGRect = .zero
+    @State private var zoomOrigin: CGRect = .zero
 
     private var client: APIClient? { AppSession.shared.client }
 
@@ -188,13 +189,13 @@ struct PhotoViewerView: View {
         .overlay {
             if showInfo, let photo { detailCard(photo) }
         }
-        // 相似图放大层：挂在看图器最顶层（详情卡片之上），自绘而非 fullScreenCover，
-        // 打开时从缩略图原地放大，不会由系统把整层从屏幕底部推上来。
+        // 相似图 / 人物头像放大层：挂在看图器最顶层（详情卡片之上），自绘而非
+        // fullScreenCover，打开时从缩略图原地放大，不会由系统把整层从屏幕底部推上来。
         .overlay {
-            if let data = similarOverlay {
-                SimilarPhotoOverlay(photos: data.photos, initialIndex: data.index,
-                                    origin: similarZoomOrigin, client: client) {
-                    similarOverlay = nil
+            if let data = zoomOverlay {
+                ZoomOverlay(items: data.items, initialIndex: data.index,
+                            origin: zoomOrigin) {
+                    zoomOverlay = nil
                 }
             }
         }
@@ -720,8 +721,33 @@ struct PhotoViewerView: View {
     /// 点击相似图查看：从被点缩略图的位置原地放大，再左右翻阅整组相似图。
     private func viewSimilarPhoto(_ sp: SimilarPhoto, origin: CGRect) {
         guard let idx = similarPhotos.firstIndex(where: { $0.id == sp.id }) else { return }
-        similarZoomOrigin = origin
-        similarOverlay = (photos: similarPhotos, index: idx)
+        zoomOrigin = origin
+        zoomOverlay = (items: similarPhotos.map { zoomItem($0) }, index: idx)
+    }
+
+    private func zoomItem(_ sp: SimilarPhoto) -> ZoomItem {
+        ZoomItem(id: sp.id,
+                 thumbURL: client?.makeURL("/photo", queryItems: [
+                    URLQueryItem(name: "id", value: "\(sp.id)"),
+                    URLQueryItem(name: "size", value: "600"),
+                 ]),
+                 fullURL: client?.makeURL("/photo", queryItems: [
+                    URLQueryItem(name: "id", value: "\(sp.id)"),
+                    URLQueryItem(name: "size", value: "original"),
+                 ]),
+                 caption: sp.scoreText)
+    }
+
+    /// 点击人物头像：和相似图共用同一套放大层，左右翻阅这张照片里检测到的所有人脸。
+    /// ⚠️ 后端 /face-thumb 只有 600 档裁切方图，没有原图档，所以 fullURL 置 nil：
+    /// 首帧直接复用详情卡片里已缓存的头像，打开即清晰，不会去拉挂载盘。
+    private func viewFace(_ face: PhotoFace, origin: CGRect) {
+        guard let idx = faces.firstIndex(where: { $0.id == face.id }) else { return }
+        zoomOrigin = origin
+        zoomOverlay = (items: faces.map { f in
+            ZoomItem(id: f.id, thumbURL: client?.faceThumbURL(f.id),
+                     fullURL: nil, caption: f.scoreText)
+        }, index: idx)
     }
 
     /// 关详情卡片（统一带动画 + 复位跟手位移）
@@ -986,7 +1012,7 @@ struct PhotoViewerView: View {
         }
     }
 
-    /// 人脸列表网格
+    /// 人脸列表网格：点头像原地放大，左右翻阅整组人脸（与相似图同一套交互）
     private var facesSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             if facesLoading {
@@ -1000,9 +1026,19 @@ struct PhotoViewerView: View {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 62), spacing: 6)], spacing: 6) {
                     ForEach(faces) { face in
                         VStack(spacing: 2) {
-                            ViewerThumb(url: client?.faceThumbURL(face.id))
-                                .frame(width: 62, height: 62)
-                                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                            // GeometryReader 只包住头像本身，放大起点贴合这张 62×62 小图；
+                            // 置信度文字留在外面，不参与点击区域。
+                            GeometryReader { cellGeo in
+                                Button {
+                                    viewFace(face, origin: cellGeo.frame(in: .global))
+                                } label: {
+                                    ViewerThumb(url: client?.faceThumbURL(face.id))
+                                        .frame(width: 62, height: 62)
+                                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            .frame(width: 62, height: 62)
                             Text(face.scoreText)
                                 .font(.system(size: 9))
                                 .foregroundStyle(.secondary)
@@ -1442,18 +1478,29 @@ private struct ViewerThumb: View {
     }
 }
 
-// MARK: - 相似图放大层
+// MARK: - 图片放大层（相似图 / 人物头像共用）
 // 不用 fullScreenCover：系统 presentation 会把整层从屏幕底部推上来，像「弹出一个页面」。
 // 也不用「hero 放大 → 交棒 TabView」两阶段：交棒那一刻要做一次视图替换，
 // 原图有没有加载完决定那一帧是清晰图 / 占位图 / 进度圈，于是「有时候会闪一下」。
 // 现在全程只有一个视图树：TabView 从第一帧就在、布局恒定全屏，只对它的渲染层做
 // scale + offset，从被点缩略图的位置/尺寸平滑放大到整屏；放大完直接就能左右翻阅。
-private struct SimilarPhotoOverlay: View {
-    let photos: [SimilarPhoto]
+
+/// 放大层通用数据源：相似图与人物头像共用一套动画 / 手势 / 缓存策略。
+/// - thumbURL：首帧与低清占位（详情卡片里刚显示过，ImageCache 必然命中）
+/// - fullURL：可选高清源；人脸只有 600 档裁切方图，传 nil 即不请求、不回挂载盘
+/// - caption：顶栏页码旁的小尾巴（相似度 / 检测置信度）
+private struct ZoomItem: Identifiable {
+    let id: Int
+    let thumbURL: URL?
+    let fullURL: URL?
+    var caption: String? = nil
+}
+
+private struct ZoomOverlay: View {
+    let items: [ZoomItem]
     let initialIndex: Int
     /// 被点缩略图在整屏坐标系里的 frame（.global），放大动画的起点
     let origin: CGRect
-    let client: APIClient?
     var onClose: () -> Void
 
     /// 0 = 缩略图原位尺寸，1 = 整屏。scale / offset / 顶栏透明度都由它插值
@@ -1471,27 +1518,26 @@ private struct SimilarPhotoOverlay: View {
     /// 手势被系统抢走时 onEnded 不回调，安静 0.9s 就替用户收尾，避免图片卡在半路
     @State private var healTask: Task<Void, Never>?
 
-    init(photos: [SimilarPhoto], initialIndex: Int, origin: CGRect,
-         client: APIClient?, onClose: @escaping () -> Void) {
-        self.photos = photos
+    init(items: [ZoomItem], initialIndex: Int, origin: CGRect,
+         onClose: @escaping () -> Void) {
+        self.items = items
         self.initialIndex = initialIndex
         self.origin = origin
-        self.client = client
         self.onClose = onClose
         // page 在初始化时直接落到所点那张：若等 onAppear 再赋值，TabView 会先
         // 显示第 0 页再切页，切页过程可能正好撞上放大动画，表现为闪一下。
         _page = State(initialValue: initialIndex)
-        if photos.indices.contains(initialIndex),
-           let thumb = Self.url(for: photos[initialIndex], size: "600", client: client) {
+        if items.indices.contains(initialIndex),
+           let thumb = items[initialIndex].thumbURL {
             _heroImage = State(initialValue: ImageCache.shared.image(for: thumb))
         }
     }
 
-    private static func url(for sp: SimilarPhoto, size: String, client: APIClient?) -> URL? {
-        client?.makeURL("/photo", queryItems: [
-            URLQueryItem(name: "id", value: "\(sp.id)"),
-            URLQueryItem(name: "size", value: size),
-        ])
+    /// 顶栏文案：页码 + 可选的相似度 / 检测置信度
+    private var pageCaption: String {
+        let base = "\(page + 1) / \(items.count)"
+        guard items.indices.contains(page), let caption = items[page].caption else { return base }
+        return "\(base)  ·  \(caption)"
     }
 
     var body: some View {
@@ -1528,12 +1574,11 @@ private struct SimilarPhotoOverlay: View {
 
                 // 唯一的图片视图树：内部布局恒定为整屏，只变换渲染层，全程无视图替换
                 TabView(selection: $page) {
-                    ForEach(Array(photos.enumerated()), id: \.element.id) { i, sp in
-                        SimilarPhotoPage(
-                            url: Self.url(for: sp, size: "original", client: client),
-                            thumbURL: Self.url(for: sp, size: "600", client: client),
+                    ForEach(Array(items.enumerated()), id: \.element.id) { i, item in
+                        ZoomPage(
+                            item: item,
                             placeholder: i == initialIndex ? heroImage : nil,
-                            // 挂载盘原图一张 15MB / 6s，别让整组相似图一起拉：
+                            // 挂载盘原图一张 15MB / 6s，别让整组一起拉：
                             // 只给当前页和左右相邻页加载高清，其余页先用 600 档顶着。
                             loadFull: abs(i - page) <= 1
                         )
@@ -1551,7 +1596,7 @@ private struct SimilarPhotoOverlay: View {
                 // 顶部：页码 + 关闭
                 VStack {
                     HStack {
-                        Text("\(page + 1) / \(photos.count)")
+                        Text(pageCaption)
                             .font(.system(size: 13, weight: .medium))
                             .foregroundStyle(.white.opacity(0.9))
                             .padding(.horizontal, 12)
@@ -1670,15 +1715,14 @@ private struct SimilarPhotoOverlay: View {
     }
 }
 
-/// 相似图放大层里的单页：等比铺满整屏，左右翻页查看。
-/// 显示优先级 原图(降采样) → 首帧同步缓存 → 600 档异步占位 → 低调进度圈。
+/// 放大层里的单页：等比铺满整屏，左右翻页查看。
+/// 显示优先级 高清(降采样) → 首帧同步缓存 → 600 档异步占位 → 低调进度圈。
 /// ⚠️ 三者合成一个 `display` 用同一个 Image 视图承载：高清到位时只是位图变了，
 /// 视图身份不变，不会触发分支切换（分支切换是「闪一下」的常见来源）。
-private struct SimilarPhotoPage: View {
-    let url: URL?
-    let thumbURL: URL?
+private struct ZoomPage: View {
+    let item: ZoomItem
     var placeholder: UIImage? = nil
-    /// 只有当前页和左右相邻页为 true，避免整组相似图并发拉原图把挂载盘压死
+    /// 只有当前页和左右相邻页为 true，避免整组并发拉高清把挂载盘压死
     var loadFull: Bool = true
     @State private var image: UIImage?
     @State private var thumb: UIImage?
@@ -1696,8 +1740,8 @@ private struct SimilarPhotoPage: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .task(id: thumbURL?.absoluteString ?? "") {
-            guard let thumbURL, placeholder == nil, thumb == nil else { return }
+        .task(id: item.thumbURL?.absoluteString ?? "") {
+            guard let thumbURL = item.thumbURL, placeholder == nil, thumb == nil else { return }
             thumb = await ImageCache.shared.load(from: thumbURL)
         }
         // ⚠️ 别用 load(from:) 拉原图：它会 forceDecoded 出 6000×4000 全尺寸位图
@@ -1705,8 +1749,9 @@ private struct SimilarPhotoPage: View {
         // NSCache 把 600 档小图全挤掉 —— 表现就是「弹窗里的图越点越慢」。
         // 改成 ImageIO 后台降采样到 2400px 长边（已解码、约 15MB 位图），
         // 磁盘只落这份降采样小图；第二次打开同步命中，不再回源。
-        .task(id: "\(url?.absoluteString ?? "")|\(loadFull)") {
-            guard let url, loadFull, image == nil else { return }
+        // fullURL 为 nil（人脸头像只有 600 档裁切图）时直接跳过，不回挂载盘。
+        .task(id: "\(item.fullURL?.absoluteString ?? "")|\(loadFull)") {
+            guard let url = item.fullURL, loadFull, image == nil else { return }
             image = await ImageCache.shared.loadDownsampled(from: url, maxPixel: 2400,
                                                             cacheToDisk: true)
         }
