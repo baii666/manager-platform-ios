@@ -1443,10 +1443,11 @@ private struct ViewerThumb: View {
 }
 
 // MARK: - 相似图放大层
-// 不再用 fullScreenCover：系统 presentation 会把整层从屏幕底部推上来，看着像「弹出一个页面」。
-// 现在是看图器内部的一层：被点那张从缩略图的原始位置**原地放大**到全屏，黑底同步淡入；
-// 放大结束原地交给 TabView，左右滑动翻阅整组相似图，右上 X 关闭后回到详情卡片。
-// 因为与详情卡片同属一个视图树，关闭不会重建看图器，也不会有 sheet/cover 层级冲突。
+// 不用 fullScreenCover：系统 presentation 会把整层从屏幕底部推上来，像「弹出一个页面」。
+// 也不用「hero 放大 → 交棒 TabView」两阶段：交棒那一刻要做一次视图替换，
+// 原图有没有加载完决定那一帧是清晰图 / 占位图 / 进度圈，于是「有时候会闪一下」。
+// 现在全程只有一个视图树：TabView 从第一帧就在、布局恒定全屏，只对它的渲染层做
+// scale + offset，从被点缩略图的位置/尺寸平滑放大到整屏；放大完直接就能左右翻阅。
 private struct SimilarPhotoOverlay: View {
     let photos: [SimilarPhoto]
     let initialIndex: Int
@@ -1455,17 +1456,33 @@ private struct SimilarPhotoOverlay: View {
     let client: APIClient?
     var onClose: () -> Void
 
-    /// 0 = 缩略图原位，1 = 铺满整屏。frame / position 都由它线性插值
+    /// 0 = 缩略图原位尺寸，1 = 整屏。scale / offset / 顶栏透明度都由它插值
     @State private var progress: CGFloat = 0
-    /// 放大动画已结束：隐藏 hero，把画面交给可左右翻页的 TabView
-    @State private var browsing = false
+    /// 放大动画结束后才放开左右翻页手势（缩放期间别让分页手势打断动画）
+    @State private var zoomed = false
     @State private var dismissing = false
-    @State private var page = 0
-    /// 放大起始帧用缩略图的缓存图（600 档刚在网格里显示过，必然命中），避免首帧空白
-    @State private var heroImage: UIImage?
+    @State private var page: Int
+    /// 600 档缓存图：init 时就取好，保证插入的第一帧就有图，不会出现白块 / 进度圈
+    @State private var heroImage: UIImage? = nil
     @State private var settleTask: Task<Void, Never>?
 
-    private func url(for sp: SimilarPhoto, size: String) -> URL? {
+    init(photos: [SimilarPhoto], initialIndex: Int, origin: CGRect,
+         client: APIClient?, onClose: @escaping () -> Void) {
+        self.photos = photos
+        self.initialIndex = initialIndex
+        self.origin = origin
+        self.client = client
+        self.onClose = onClose
+        // page 在初始化时直接落到所点那张：若等 onAppear 再赋值，TabView 会先
+        // 显示第 0 页再切页，切页过程可能正好撞上放大动画，表现为闪一下。
+        _page = State(initialValue: initialIndex)
+        if photos.indices.contains(initialIndex),
+           let thumb = Self.url(for: photos[initialIndex], size: "600", client: client) {
+            _heroImage = State(initialValue: ImageCache.shared.image(for: thumb))
+        }
+    }
+
+    private static func url(for sp: SimilarPhoto, size: String, client: APIClient?) -> URL? {
         client?.makeURL("/photo", queryItems: [
             URLQueryItem(name: "id", value: "\(sp.id)"),
             URLQueryItem(name: "size", value: size),
@@ -1479,49 +1496,44 @@ private struct SimilarPhotoOverlay: View {
             let start = origin.width > 1
                 ? origin
                 : CGRect(x: screen.midX - 36, y: screen.midY - 36, width: 72, height: 72)
-            // ⚠️ .position 用的是 ZStack 的局部坐标，缩略图 frame 是 .global ——
-            // 统一减掉 screen 原点换算到局部，否则有安全区时放大起点会整体偏移。
-            let sx = start.midX - screen.minX
-            let sy = start.midY - screen.minY
-            let w = start.width + (screen.width - start.width) * progress
-            let h = start.height + (screen.height - start.height) * progress
-            let cx = sx + (screen.width / 2 - sx) * progress
-            let cy = sy + (screen.height / 2 - sy) * progress
+            // ⚠️ .offset 用 ZStack 局部坐标，缩略图 frame 是 .global ——
+            // 减掉 screen 原点换算到局部，否则有安全区时放大起点整体偏移。
+            let sx0 = start.midX - screen.minX
+            let sy0 = start.midY - screen.minY
+            // 起始态非等比压到缩略图的 72×72，放大过程中比例逐渐恢复正常
+            //（缩略图本来就是方形裁切，这样第一帧最贴被点的小图）。
+            let x0 = start.width / screen.width
+            let y0 = start.height / screen.height
+            let sx = x0 + (1 - x0) * progress
+            let sy = y0 + (1 - y0) * progress
+            let dx = (sx0 - screen.width / 2) * (1 - progress)
+            let dy = (sy0 - screen.height / 2) * (1 - progress)
 
             ZStack {
-                Color.black.opacity(0.94 * Double(progress))
+                // ⚠️ 黑底首帧就不透明：跟着 progress 从 0 淡入的话，起始那一帧
+                // 详情卡片里的原缩略图会和放大层的小图叠在一起，出现重影闪一下。
+                Color.black.opacity(0.94)
                     .ignoresSafeArea()
                     .allowsHitTesting(false)
 
-                // 分页浏览层：放大期间必须藏起来，否则小图后面会露出一张全屏大图。
-                // 但它一直挂载，original 会趁放大这段时间先加载好，交棒时直接是清晰图。
+                // 唯一的图片视图树：内部布局恒定为整屏，只变换渲染层，全程无视图替换
                 TabView(selection: $page) {
                     ForEach(Array(photos.enumerated()), id: \.element.id) { i, sp in
-                        SimilarPhotoPage(url: url(for: sp, size: "original"),
-                                         placeholder: i == initialIndex ? heroImage : nil)
-                            .tag(i)
+                        SimilarPhotoPage(
+                            url: Self.url(for: sp, size: "original", client: client),
+                            thumbURL: Self.url(for: sp, size: "600", client: client),
+                            placeholder: i == initialIndex ? heroImage : nil
+                        )
+                        .tag(i)
                     }
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
                 .ignoresSafeArea()
-                .opacity(browsing ? 1 : 0)
-                .allowsHitTesting(browsing && !dismissing)
-
-                // 放大动画层：从缩略图位置长大到整屏，结束后直接移除（下面那层是同一张图）
-                if !browsing {
-                    Group {
-                        if let heroImage {
-                            Image(uiImage: heroImage)
-                                .resizable()
-                                .scaledToFit()
-                        } else {
-                            Color.white.opacity(0.08)
-                        }
-                    }
-                    .frame(width: max(w, 1), height: max(h, 1))
-                    .clipped()
-                    .position(x: cx, y: cy)
-                }
+                .frame(width: screen.width, height: screen.height)
+                .clipped()
+                .scaleEffect(x: sx, y: sy)
+                .offset(x: dx, y: dy)
+                .allowsHitTesting(zoomed && !dismissing)
 
                 // 顶部：页码 + 关闭
                 VStack {
@@ -1549,7 +1561,7 @@ private struct SimilarPhotoOverlay: View {
                     Spacer()
                 }
                 .opacity(Double(progress))
-                .allowsHitTesting(browsing && !dismissing)
+                .allowsHitTesting(zoomed && !dismissing)
             }
         }
         .ignoresSafeArea()
@@ -1557,16 +1569,10 @@ private struct SimilarPhotoOverlay: View {
         .scaleEffect(dismissing ? 0.94 : 1)
         .opacity(dismissing ? 0 : 1)
         .onAppear {
-            page = initialIndex
-            if photos.indices.contains(initialIndex),
-               let thumb = url(for: photos[initialIndex], size: "600") {
-                heroImage = ImageCache.shared.image(for: thumb)
-            }
             withAnimation(.spring(response: 0.32, dampingFraction: 0.88)) { progress = 1 }
-            // 交棒故意比动画略晚：hero 停在终点也不会有视觉变化，避免中途切 TabView 闪一下
             settleTask = Task { @MainActor in
-                try? await Task.sleep(nanoseconds: 380_000_000)
-                browsing = true
+                try? await Task.sleep(nanoseconds: 340_000_000)
+                zoomed = true
             }
         }
         .onDisappear { settleTask?.cancel() }
@@ -1584,27 +1590,33 @@ private struct SimilarPhotoOverlay: View {
 }
 
 /// 相似图放大层里的单页：原图等比缩放、居中铺满整屏，左右翻页查看。
-/// placeholder 是交棒时顶着的缩略图，避免 original 还没下完先闪一个进度圈。
+/// 显示优先级 原图 → 首帧同步缓存 → 600 档异步占位 → 低调进度圈。
+/// ⚠️ 三者合成一个 `display` 用同一个 Image 视图承载：原图到位时只是位图变了，
+/// 视图身份不变，不会触发分支切换（分支切换是「闪一下」的常见来源）。
 private struct SimilarPhotoPage: View {
     let url: URL?
+    let thumbURL: URL?
     var placeholder: UIImage? = nil
     @State private var image: UIImage?
+    @State private var thumb: UIImage?
+
+    private var display: UIImage? { image ?? placeholder ?? thumb }
 
     var body: some View {
         Group {
-            if let image {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFit()
-            } else if let placeholder {
-                Image(uiImage: placeholder)
+            if let display {
+                Image(uiImage: display)
                     .resizable()
                     .scaledToFit()
             } else {
-                ProgressView().tint(.white)
+                ProgressView().tint(.white.opacity(0.45))
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .task(id: thumbURL?.absoluteString ?? "") {
+            guard let thumbURL, placeholder == nil, thumb == nil else { return }
+            thumb = await ImageCache.shared.load(from: thumbURL)
+        }
         .task(id: url?.absoluteString ?? "") {
             guard let url, image == nil else { return }
             image = await ImageCache.shared.load(from: url)
