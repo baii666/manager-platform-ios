@@ -85,9 +85,11 @@ struct PhotoViewerView: View {
     @State private var facesLoading = false
     @State private var similarPhotos: [SimilarPhoto] = []
     @State private var similarLoading = false
-    /// 点击相似图后，用全屏蒙层左右滚动翻阅整组相似图（不顶掉当前看图器）。
-    /// 非 nil 时显示蒙层；元素为相似图列表 + 起始下标。
+    /// 点击相似图后，在看图器内部盖一层「原地放大 → 左右翻阅」的自绘层。
+    /// 非 nil 时显示；元素为相似图列表 + 起始下标。
     @State private var similarOverlay: (photos: [SimilarPhoto], index: Int)?
+    /// 被点缩略图在整屏坐标系里的 frame，放大动画从它的位置出发。
+    @State private var similarZoomOrigin: CGRect = .zero
 
     private var client: APIClient? { AppSession.shared.client }
 
@@ -185,6 +187,16 @@ struct PhotoViewerView: View {
         // 返回（撤掉相册层）时卡片本来就在那儿，@State 全保留。
         .overlay {
             if showInfo, let photo { detailCard(photo) }
+        }
+        // 相似图放大层：挂在看图器最顶层（详情卡片之上），自绘而非 fullScreenCover，
+        // 打开时从缩略图原地放大，不会由系统把整层从屏幕底部推上来。
+        .overlay {
+            if let data = similarOverlay {
+                SimilarPhotoOverlay(photos: data.photos, initialIndex: data.index,
+                                    origin: similarZoomOrigin, client: client) {
+                    similarOverlay = nil
+                }
+            }
         }
     }
 
@@ -705,9 +717,10 @@ struct PhotoViewerView: View {
         presenter.openAlbum(album, libID: libID)
     }
 
-    /// 点击相似图查看：全屏蒙层左右翻阅整组相似图，定位到所点那张。
-    private func viewSimilarPhoto(_ sp: SimilarPhoto) {
+    /// 点击相似图查看：从被点缩略图的位置原地放大，再左右翻阅整组相似图。
+    private func viewSimilarPhoto(_ sp: SimilarPhoto, origin: CGRect) {
         guard let idx = similarPhotos.firstIndex(where: { $0.id == sp.id }) else { return }
+        similarZoomOrigin = origin
         similarOverlay = (photos: similarPhotos, index: idx)
     }
 
@@ -911,20 +924,6 @@ struct PhotoViewerView: View {
             )
             }   // ZStack
         }       // GeometryReader
-        // 相似图蒙层：全屏覆盖，左右滑动放大翻阅整组相似图，关闭回详情卡片。
-        // ⚠️ 现在详情卡片是自绘层（不再是 sheet），fullScreenCover 挂在 body 上也不会
-        // 出现「sheet 已 present、cover 被系统忽略」那个冲突。
-        .fullScreenCover(isPresented: Binding(
-            get: { similarOverlay != nil },
-            set: { if !$0 { similarOverlay = nil } }
-        )) {
-            if let data = similarOverlay {
-                SimilarPhotoOverlay(photos: data.photos, initialIndex: data.index,
-                                    client: client) { similarOverlay = nil }
-            } else {
-                Color.black.ignoresSafeArea()
-            }
-        }
     }
 
     /// 拍摄信息区块是否有内容（对标网页版：任一 EXIF 字段存在即显示）
@@ -952,29 +951,34 @@ struct PhotoViewerView: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
                         ForEach(similarPhotos) { sp in
-                            Button {
-                                viewSimilarPhoto(sp)
-                            } label: {
-                                ViewerThumb(url: client?.makeURL("/photo", queryItems: [
-                                    URLQueryItem(name: "id", value: "\(sp.id)"),
-                                    URLQueryItem(name: "size", value: "600"),
-                                ]))
-                                .frame(width: 72, height: 72)
-                                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                                .overlay(alignment: .bottom) {
-                                    if let score = sp.scoreText {
-                                        Text(score)
-                                            .font(.system(size: 9, weight: .semibold))
-                                            .foregroundStyle(.white)
-                                            .padding(.horizontal, 4)
-                                            .padding(.vertical, 1)
-                                            .background(.black.opacity(0.65))
-                                            .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
-                                            .padding(3)
+                            // GeometryReader 只用来记下缩略图在整屏里的位置：
+                            // 点开时放大动画从这张小图出发，而不是屏幕中心或底部。
+                            GeometryReader { cellGeo in
+                                Button {
+                                    viewSimilarPhoto(sp, origin: cellGeo.frame(in: .global))
+                                } label: {
+                                    ViewerThumb(url: client?.makeURL("/photo", queryItems: [
+                                        URLQueryItem(name: "id", value: "\(sp.id)"),
+                                        URLQueryItem(name: "size", value: "600"),
+                                    ]))
+                                    .frame(width: 72, height: 72)
+                                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                                    .overlay(alignment: .bottom) {
+                                        if let score = sp.scoreText {
+                                            Text(score)
+                                                .font(.system(size: 9, weight: .semibold))
+                                                .foregroundStyle(.white)
+                                                .padding(.horizontal, 4)
+                                                .padding(.vertical, 1)
+                                                .background(.black.opacity(0.65))
+                                                .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
+                                                .padding(3)
+                                        }
                                     }
                                 }
+                                .buttonStyle(.plain)
                             }
-                            .buttonStyle(.plain)
+                            .frame(width: 72, height: 72)
                         }
                     }
                 }
@@ -1438,77 +1442,162 @@ private struct ViewerThumb: View {
     }
 }
 
-// MARK: - 相似图查看蒙层
-// 点相似图时全屏、最顶层弹出一层灰蒙层：左右滑动翻阅整组相似图，
-// 每页一张原图（竖图超高可上下滚动看全貌），顶部显示页码，点右上关闭回卡片。
+// MARK: - 相似图放大层
+// 不再用 fullScreenCover：系统 presentation 会把整层从屏幕底部推上来，看着像「弹出一个页面」。
+// 现在是看图器内部的一层：被点那张从缩略图的原始位置**原地放大**到全屏，黑底同步淡入；
+// 放大结束原地交给 TabView，左右滑动翻阅整组相似图，右上 X 关闭后回到详情卡片。
+// 因为与详情卡片同属一个视图树，关闭不会重建看图器，也不会有 sheet/cover 层级冲突。
 private struct SimilarPhotoOverlay: View {
     let photos: [SimilarPhoto]
     let initialIndex: Int
+    /// 被点缩略图在整屏坐标系里的 frame（.global），放大动画的起点
+    let origin: CGRect
     let client: APIClient?
     var onClose: () -> Void
 
+    /// 0 = 缩略图原位，1 = 铺满整屏。frame / position 都由它线性插值
+    @State private var progress: CGFloat = 0
+    /// 放大动画已结束：隐藏 hero，把画面交给可左右翻页的 TabView
+    @State private var browsing = false
+    @State private var dismissing = false
     @State private var page = 0
+    /// 放大起始帧用缩略图的缓存图（600 档刚在网格里显示过，必然命中），避免首帧空白
+    @State private var heroImage: UIImage?
+    @State private var settleTask: Task<Void, Never>?
 
-    private func url(for sp: SimilarPhoto) -> URL? {
+    private func url(for sp: SimilarPhoto, size: String) -> URL? {
         client?.makeURL("/photo", queryItems: [
             URLQueryItem(name: "id", value: "\(sp.id)"),
-            URLQueryItem(name: "size", value: "original"),
+            URLQueryItem(name: "size", value: size),
         ])
     }
 
     var body: some View {
-        ZStack {
-            // 全屏灰蒙层（贴满整屏）：盖住底下的详情卡片
-            Color(white: 0.08).opacity(0.94)
-                .ignoresSafeArea()
+        GeometryReader { geo in
+            let screen = geo.frame(in: .global)
+            // origin 拿不到时退化成屏幕正中一个小方块，别从左上角炸开
+            let start = origin.width > 1
+                ? origin
+                : CGRect(x: screen.midX - 36, y: screen.midY - 36, width: 72, height: 72)
+            // ⚠️ .position 用的是 ZStack 的局部坐标，缩略图 frame 是 .global ——
+            // 统一减掉 screen 原点换算到局部，否则有安全区时放大起点会整体偏移。
+            let sx = start.midX - screen.minX
+            let sy = start.midY - screen.minY
+            let w = start.width + (screen.width - start.width) * progress
+            let h = start.height + (screen.height - start.height) * progress
+            let cx = sx + (screen.width / 2 - sx) * progress
+            let cy = sy + (screen.height / 2 - sy) * progress
 
-            // 左右翻页浏览整组相似图
-            TabView(selection: $page) {
-                ForEach(Array(photos.enumerated()), id: \.element.id) { i, sp in
-                    SimilarPhotoPage(url: url(for: sp))
-                        .tag(i)
-                }
-            }
-            .tabViewStyle(.page(indexDisplayMode: .never))
-            .ignoresSafeArea()
+            ZStack {
+                Color.black.opacity(0.94 * Double(progress))
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
 
-            // 顶部：页码 + 关闭
-            VStack {
-                HStack {
-                    Text("\(page + 1) / \(photos.count)")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.9))
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(.black.opacity(0.35), in: Capsule())
-                    Spacer()
-                    Button(action: onClose) {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .frame(width: 34, height: 34)
-                            .background(.black.opacity(0.35), in: Circle())
+                // 分页浏览层：放大期间必须藏起来，否则小图后面会露出一张全屏大图。
+                // 但它一直挂载，original 会趁放大这段时间先加载好，交棒时直接是清晰图。
+                TabView(selection: $page) {
+                    ForEach(Array(photos.enumerated()), id: \.element.id) { i, sp in
+                        SimilarPhotoPage(url: url(for: sp, size: "original"),
+                                         placeholder: i == initialIndex ? heroImage : nil)
+                            .tag(i)
                     }
-                    .buttonStyle(.plain)
                 }
-                .padding(.top, 8)
-                .padding(.horizontal, 16)
-                Spacer()
+                .tabViewStyle(.page(indexDisplayMode: .never))
+                .ignoresSafeArea()
+                .opacity(browsing ? 1 : 0)
+                .allowsHitTesting(browsing && !dismissing)
+
+                // 放大动画层：从缩略图位置长大到整屏，结束后直接移除（下面那层是同一张图）
+                if !browsing {
+                    Group {
+                        if let heroImage {
+                            Image(uiImage: heroImage)
+                                .resizable()
+                                .scaledToFit()
+                        } else {
+                            Color.white.opacity(0.08)
+                        }
+                    }
+                    .frame(width: max(w, 1), height: max(h, 1))
+                    .clipped()
+                    .position(x: cx, y: cy)
+                }
+
+                // 顶部：页码 + 关闭
+                VStack {
+                    HStack {
+                        Text("\(page + 1) / \(photos.count)")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.9))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(.black.opacity(0.35), in: Capsule())
+                        Spacer()
+                        Button {
+                            close()
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .frame(width: 34, height: 34)
+                                .background(.black.opacity(0.35), in: Circle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.top, geo.safeAreaInsets.top + 8)
+                    .padding(.horizontal, 16)
+                    Spacer()
+                }
+                .opacity(Double(progress))
+                .allowsHitTesting(browsing && !dismissing)
             }
         }
-        .onAppear { page = initialIndex }
+        .ignoresSafeArea()
+        // 关闭：整层轻微缩小 + 淡出，不是从底部滑走
+        .scaleEffect(dismissing ? 0.94 : 1)
+        .opacity(dismissing ? 0 : 1)
+        .onAppear {
+            page = initialIndex
+            if photos.indices.contains(initialIndex),
+               let thumb = url(for: photos[initialIndex], size: "600") {
+                heroImage = ImageCache.shared.image(for: thumb)
+            }
+            withAnimation(.spring(response: 0.32, dampingFraction: 0.88)) { progress = 1 }
+            // 交棒故意比动画略晚：hero 停在终点也不会有视觉变化，避免中途切 TabView 闪一下
+            settleTask = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 380_000_000)
+                browsing = true
+            }
+        }
+        .onDisappear { settleTask?.cancel() }
+    }
+
+    private func close() {
+        guard !dismissing else { return }
+        settleTask?.cancel()
+        withAnimation(.easeOut(duration: 0.2)) { dismissing = true }
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 210_000_000)
+            onClose()
+        }
     }
 }
 
-/// 相似图蒙层里的单页：原图等比缩放、居中铺满整屏，左右翻页查看。
+/// 相似图放大层里的单页：原图等比缩放、居中铺满整屏，左右翻页查看。
+/// placeholder 是交棒时顶着的缩略图，避免 original 还没下完先闪一个进度圈。
 private struct SimilarPhotoPage: View {
     let url: URL?
+    var placeholder: UIImage? = nil
     @State private var image: UIImage?
 
     var body: some View {
         Group {
             if let image {
                 Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+            } else if let placeholder {
+                Image(uiImage: placeholder)
                     .resizable()
                     .scaledToFit()
             } else {
