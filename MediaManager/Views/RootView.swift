@@ -131,6 +131,16 @@ struct RootView: View {
                     // 识别器在图解器里跟看图器的下拉退出手势抢触摸。
                     .allowsHitTesting(!photoViewer.viewerAboveAlbum)
                 }
+                // 详情卡片点头像 → 人物照片集层（与相册层互斥，同为 z2）。
+                // 同样用 presenter 里的整屏快照做根背景，系统 push/pop 不露白屏。
+                if let person = photoViewer.personPageTarget {
+                    PersonPageLayer(person: person,
+                                    backdrop: photoViewer.personBackdrop,
+                                    onClose: { photoViewer.closePerson() })
+                        .id(photoViewer.personOpenGeneration)
+                        .zIndex(2)
+                        .allowsHitTesting(!photoViewer.viewerAboveAlbum)
+                }
                 // 短视频刷流：挂在 tab 层之上（z4），右滑退出时露出的是它背后的
                 // 那个 tab —— 首页卡进的露首页，短视频页点卡片进的露短视频页。
                 // ⚠️ 不能挂在 ShortsView 内部：那样右滑露出的永远是短视频列表页。

@@ -738,16 +738,15 @@ struct PhotoViewerView: View {
                  caption: sp.scoreText)
     }
 
-    /// 点击人物头像：和相似图共用同一套放大层，左右翻阅这张照片里检测到的所有人脸。
-    /// ⚠️ 后端 /face-thumb 只有 600 档裁切方图，没有原图档，所以 fullURL 置 nil：
-    /// 首帧直接复用详情卡片里已缓存的头像，打开即清晰，不会去拉挂载盘。
-    private func viewFace(_ face: PhotoFace, origin: CGRect) {
-        guard let idx = faces.firstIndex(where: { $0.id == face.id }) else { return }
-        zoomOrigin = origin
-        zoomOverlay = (items: faces.map { f in
-            ZoomItem(id: f.id, thumbURL: client?.faceThumbURL(f.id),
-                     fullURL: nil, caption: f.scoreText)
-        }, index: idx)
+    /// 点击人物头像：跳到这个聚类人物的全部照片（不再放大头像）。
+    /// 看图器是 RootView 的 overlay、不在 NavigationStack 内，所以与「进入相册」
+    /// 用同一套做法：在看图器之上盖一层自带 NavigationStack 的人物页层。
+    private func openPersonPage(_ face: PhotoFace) {
+        guard let person = face.person else {
+            showTip("该人脸尚未聚类，暂无人物页")
+            return
+        }
+        presenter.openPerson(person)
     }
 
     /// 关详情卡片（统一带动画 + 复位跟手位移）
@@ -1012,7 +1011,7 @@ struct PhotoViewerView: View {
         }
     }
 
-    /// 人脸列表网格：点头像原地放大，左右翻阅整组人脸（与相似图同一套交互）
+    /// 人脸列表网格：点头像跳到该人物的全部照片（不是放大头像）
     private var facesSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             if facesLoading {
@@ -1026,19 +1025,14 @@ struct PhotoViewerView: View {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 62), spacing: 6)], spacing: 6) {
                     ForEach(faces) { face in
                         VStack(spacing: 2) {
-                            // GeometryReader 只包住头像本身，放大起点贴合这张 62×62 小图；
-                            // 置信度文字留在外面，不参与点击区域。
-                            GeometryReader { cellGeo in
-                                Button {
-                                    viewFace(face, origin: cellGeo.frame(in: .global))
-                                } label: {
-                                    ViewerThumb(url: client?.faceThumbURL(face.id))
-                                        .frame(width: 62, height: 62)
-                                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                                }
-                                .buttonStyle(.plain)
+                            Button {
+                                openPersonPage(face)
+                            } label: {
+                                ViewerThumb(url: client?.faceThumbURL(face.id))
+                                    .frame(width: 62, height: 62)
+                                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                             }
-                            .frame(width: 62, height: 62)
+                            .buttonStyle(.plain)
                             Text(face.scoreText)
                                 .font(.system(size: 9))
                                 .foregroundStyle(.secondary)
@@ -1813,6 +1807,61 @@ struct AlbumPageLayer: View {
             closeTask?.cancel()
             // ⚠️ 不能马上撤层：系统 pop 动画约 0.35s，此刻撤会把 NavigationStack
             // 从过渡容器里撕下来，中途闪白。快照与实时画面一致，等动画结束再撤。
+            guard count == 0 else { return }
+            closeTask = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 350_000_000)
+                onClose()
+            }
+        }
+        .onDisappear { closeTask?.cancel() }
+    }
+}
+
+// MARK: - 人物照片页层（盖在看图器之上）
+// 与 AlbumPageLayer 同构：详情卡片点人物头像 → 在看图器之上盖一层自带
+// NavigationStack 的页面，系统 push 带原生右滑返回；pop 掉后撤层，
+// 下面的看图器 + 详情卡片原地可见，全程不重建、不重新弹出。
+//
+// ⚠️ 看图器是 RootView 的 overlay、不在 tab 的 NavigationStack 内，
+// navigationDestination(for: Person.self) 只注册在 PersonsView / AlbumListView，
+// 不能直接 NavigationLink —— 本层自己带一个 NavigationStack。
+struct PersonPageLayer: View {
+    let person: Person
+    /// push/pop 过渡期的不透明根背景（openPerson 时抓的整屏快照），
+    /// 避免系统过渡中透明根露出窗口底色（浅色模式 = 大白屏）。
+    let backdrop: UIImage?
+    var onClose: () -> Void
+
+    /// 人物页是本层内部 push 上去的，pop 掉它才算返回
+    @State private var path = NavigationPath()
+    @State private var closeTask: Task<Void, Never>?
+
+    var body: some View {
+        NavigationStack(path: $path) {
+            Group {
+                if let backdrop {
+                    Image(uiImage: backdrop).resizable()
+                } else {
+                    Color.clear
+                }
+            }
+            .ignoresSafeArea()
+            // 只藏 root 的导航栏（人物页自己的栏照常显示），否则 UINavigationBar
+            // 会在快照上糊一条底色/毛玻璃。系统右滑返回由栈顶页面决定。
+            .toolbar(.hidden, for: .navigationBar)
+            .navigationDestination(for: Person.self) { p in
+                PersonPhotosView(person: p)
+            }
+        }
+        .ignoresSafeArea()
+        // pop 之后本层只剩静态快照，关掉交互让底下的看图器立即可用
+        .allowsHitTesting(!path.isEmpty)
+        .onAppear {
+            if path.isEmpty { path.append(person) }
+        }
+        .onChange(of: path.count) { _, count in
+            closeTask?.cancel()
+            // 等系统 pop 动画（约 0.35s）结束再撤层，否则中途会闪白
             guard count == 0 else { return }
             closeTask = Task { @MainActor in
                 try? await Task.sleep(nanoseconds: 350_000_000)

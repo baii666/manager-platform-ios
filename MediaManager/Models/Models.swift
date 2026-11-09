@@ -424,9 +424,23 @@ struct PhotoFace: Identifiable, Decodable, Sendable {
     var bboxX2: Double = 0
     var bboxY2: Double = 0
     var detScore: Double = 0
+    /// 聚类人物 id（face_cluster_map_040）。未聚类的脸为 nil —— 别用
+    /// photo_faces.person_id，那是个全 NULL 的遗留列。
+    var personId: Int? = nil
+    var personName: String? = nil
+    var personFaceCount: Int? = nil
 
     /// 检测置信度百分比文案（如 "87%"）
     var scoreText: String { String(format: "%.0f%%", detScore * 100) }
+
+    /// 直接构造人物页所需的目标；未聚类时返回 nil
+    var person: Person? {
+        guard let personId else { return nil }
+        var p = Person(id: personId)
+        p.name = personName ?? ""
+        p.faceCount = personFaceCount ?? 0
+        return p
+    }
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -435,6 +449,9 @@ struct PhotoFace: Identifiable, Decodable, Sendable {
         case bboxX2 = "bbox_x2"
         case bboxY2 = "bbox_y2"
         case detScore = "det_score"
+        case personId = "person_id"
+        case personName = "person_name"
+        case personFaceCount = "person_face_count"
     }
 }
 

@@ -46,8 +46,15 @@ final class PhotoViewerPresenter: ObservableObject {
     /// 之前把相册页 push 到 tab 导航栈、看图器设成透明挂起，结果滑到一半时
     /// 看图器还是透明的（path 要等 pop 完成才变化），半路露出的是照片流。
     @Published var albumPageTarget: AlbumOpenTarget?
-    /// 相册页里点开照片时，看图器要临时升到相册层之上（RootView 按它排 zIndex）。
+    /// 详情卡片点「人物头像」打开的照片集层：非 nil 时 RootView 在看图器之上
+    /// 盖一层 PersonPageLayer。与相册层互斥（一次只开一个），看图器全程不卸载。
+    @Published var personPageTarget: Person?
+    /// 相册页 / 人物页里点开照片时，看图器要临时升到该层之上（RootView 按它排 zIndex）。
     @Published var viewerAboveAlbum = false
+
+    /// 相册层或人物层是否正盖在看图器上。状态栏语义对两者完全一致：
+    /// 有层盖着时，退出看图器露出的仍是不带状态栏的那一层。
+    private var hasPageLayer: Bool { albumPageTarget != nil || personPageTarget != nil }
 
     /// 「进入相册」时抓的整屏快照（看图器 + 详情卡片），相册层 NavigationStack 根的
     /// 不透明背景。普通属性（非 @Published）：openAlbum 里先抓快照再设 albumPageTarget，
@@ -62,14 +69,17 @@ final class PhotoViewerPresenter: ObservableObject {
     /// 每次 openAlbum 自增。RootView 用它给相册层做 .id：返回后 350ms 撤层等待期内
     /// 再次「进入相册」也能立刻重建图层并 push（否则图层不重建、onAppear 不再触发）。
     var albumOpenGeneration = 0
+    /// 人物层的整屏快照与代际令牌，用途与相册层完全相同（push/pop 过渡不露白屏）。
+    var personBackdrop: UIImage? = nil
+    var personOpenGeneration = 0
 
     func show(_ photos: [Photo], index: Int, hasMore: Bool = false, onLoadMore: (() -> Void)? = nil) {
         self.photos = photos
         self.startIndex = index
         self.hasMore = hasMore
         self.onLoadMore = onLoadMore
-        // 相册页里点开照片 → 看图器升到相册层之上；关掉后露出相册层（不是照片流）
-        viewerAboveAlbum = (albumPageTarget != nil)
+        // 相册页 / 人物页里点开照片 → 看图器升到那一层之上；关掉后露出该层
+        viewerAboveAlbum = hasPageLayer
         generation += 1
         isVisible = true
         // 状态栏与打开**同刻**隐藏。之所以可以立即置 true（不像以前担心的那样抖）：
@@ -92,14 +102,14 @@ final class PhotoViewerPresenter: ObservableObject {
     /// 相册层同样不要状态栏，这里保持隐藏，等相册层自己关闭时看图器仍在，
     /// 状态栏继续藏着，语义一致。
     func beginDismiss() {
-        if albumPageTarget == nil { statusBarHidden = false }
+        if !hasPageLayer { statusBarHidden = false }
     }
 
     /// 下拉**中途改主意**（改横滑翻页 / 松手回弹）时调：下层重新被黑底盖严，
     /// 状态栏藏回去。与 beginDismiss 对称。
     /// ⚠️ 同样要判断相册层：露的是相册层，状态栏全程保持隐藏。
     func rehideStatusBar() {
-        if albumPageTarget == nil { statusBarHidden = true }
+        if !hasPageLayer { statusBarHidden = true }
     }
 
     /// 翻页时回写当前下标（看图器若被重建，能回到原来那张而不是最初打开的那张）
@@ -123,7 +133,25 @@ final class PhotoViewerPresenter: ObservableObject {
         albumBackdrop = nil
         // 兜底：若看图器已经退了（相册层内点开的看图器先关），beginDismiss 因
         // 「露的是相册层」没有恢复状态栏 —— 这里补上，否则状态栏会一直藏着
-        if !isVisible { statusBarHidden = false }
+        if !isVisible && !hasPageLayer { statusBarHidden = false }
+    }
+
+    /// 点头像进入「这个人的所有照片」：看图器（连同详情卡片）原地不动，
+    /// 人物页层直接盖上来。返回时撤层就是详情卡片。
+    func openPerson(_ person: Person) {
+        viewerAboveAlbum = false
+        personOpenGeneration += 1
+        // 先抓快照再设 target：RootView 因 target 变化刷新建层时，快照必须已就位。
+        personBackdrop = Self.captureWindowSnapshot()
+        personPageTarget = person
+    }
+
+    /// 关闭人物页层（返回）：下面的看图器和详情卡片本来就在那儿
+    func closePerson() {
+        personPageTarget = nil
+        viewerAboveAlbum = false
+        personBackdrop = nil
+        if !isVisible && !hasPageLayer { statusBarHidden = false }
     }
 
     /// 抓当前 key window 的整屏快照。失败返回 nil（调用方退回透明根）。

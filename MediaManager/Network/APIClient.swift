@@ -317,8 +317,13 @@ final class APIClient: DataProviding, @unchecked Sendable {
     }
 
     /// 人脸检测结果。GET /api/photos/:id/faces → {faces:[{id,bbox,det_score}]}
-    func fetchPhotoFaces(photoId: Int) async throws -> [PhotoFace] {
-        let resp: PhotoFacesResponse = try await request("/api/photos/\(photoId)/faces")
+    /// 某张照片的人脸。带 threshold=0.40 让后端 LEFT JOIN 聚类映射表，
+    /// 每项多返回 person_id / person_name / person_face_count（点头像跳人物页用）。
+    func fetchPhotoFaces(photoId: Int, threshold: Double = 0.40) async throws -> [PhotoFace] {
+        let resp: PhotoFacesResponse = try await request(
+            "/api/photos/\(photoId)/faces",
+            queryItems: [URLQueryItem(name: "threshold", value: String(threshold))]
+        )
         return resp.faces
     }
 
