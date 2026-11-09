@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import Combine
 
 // MARK: - 相册列表状态
 final class AlbumListViewModel: ObservableObject {
@@ -35,16 +36,17 @@ final class AlbumListViewModel: ObservableObject {
     @Published var sort: Sort {
         didSet { ListSearchPrefs.saveSort(prefsPage, raw: sort.rawValue) }
     }
-    /// 搜索词：同样记忆 —— 离开页面再回来（含杀进程重开）不用重新打字
-    @Published var searchText = "" {
-        didSet { ListSearchPrefs.saveSearch(prefsPage, searchText) }
-    }
+    /// 搜索词：相册页按用户要求「切走即清空」——不落盘、不还原。
+    /// 置空后由页面的 .onChange(of: searchText) 350ms 防抖 reload 回完整列表。
+    @Published var searchText = ""
     @Published var totalCount = 0
     @Published var isLoading = false
     @Published var errorMessage: String?
 
-    /// 记忆键按「页」分：相册列表记一份
+    /// 记忆键按「页」分：相册列表记一份（排序仍持久化）
     private let prefsPage = "albums"
+    /// 切页面信号订阅：tab 是 ZStack + opacity 常驻，页面不卸载，onDisappear 不触发
+    private var leaveCancellable: AnyCancellable? = nil
 
     private var page = 1
     private let pageSize = 60
@@ -57,9 +59,21 @@ final class AlbumListViewModel: ObservableObject {
     init(library: Library? = nil) {
         self.fixedLibrary = library
         self.selectedLibID = library?.id
-        // 还原上次的搜索词与排序（没记过就用默认值）
-        self.searchText = ListSearchPrefs.loadSearch(prefsPage)
-        self.sort = ListSearchPrefs.loadSort(prefsPage, fallback: .updatedDesc)
+        // 🔴 2026-11-10 用户要求「相册搜索框切走就清空」：不再还原上次搜索词，
+        // 顺手抹掉旧版本已写进 UserDefaults 的值（否则杀进程重开旧词又冒出来）。
+        ListSearchPrefs.clearSearch("albums")
+        self.searchText = ""
+        self.sort = ListSearchPrefs.loadSort("albums", fallback: .updatedDesc)
+        // RootView 切 tab / 导航栈 push 时页面并不卸载（ZStack + opacity 常驻），
+        // onDisappear 不触发，所以用通知清。只置空，reload 交给页面 onChange 防抖。
+        leaveCancellable = NotificationCenter.default.publisher(for: .listPageShouldResetSearch)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                Task { @MainActor in
+                    guard let self, !self.searchText.isEmpty else { return }
+                    self.searchText = ""
+                }
+            }
     }
 
     @MainActor
@@ -168,6 +182,9 @@ struct AlbumListView: View {
     @StateObject private var layout: CardLayoutController
     /// 捏合手势起始宽度
     @State private var pinchStartWidth: CGFloat = 0
+    /// 搜索防抖任务：切走清空时要取消上一次输入挂起的 reload，
+    /// 否则两个 Task 竞争，可能又把列表刷回搜索结果。
+    @State private var searchDebounce: Task<Void, Never>? = nil
     /// 窄屏（iPhone）下隐藏滑块与计数 —— 一行塞不下时优先让出冗余信息（捏合也能缩放）
     @Environment(\.horizontalSizeClass) private var hSizeClass
 
@@ -287,7 +304,8 @@ struct AlbumListView: View {
         .refreshing { await viewModel.refresh() }
         // ⚠️ iOS 17 起 onChange(of:) 零参闭包
         .onChange(of: viewModel.searchText) {
-            Task {
+            searchDebounce?.cancel()
+            searchDebounce = Task {
                 try? await Task.sleep(nanoseconds: 350_000_000)
                 guard !Task.isCancelled else { return }
                 await viewModel.reload()

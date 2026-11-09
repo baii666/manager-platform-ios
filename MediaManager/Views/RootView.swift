@@ -171,6 +171,18 @@ struct RootView: View {
         // 状态栏的显示/隐藏是系统级的、无法动画，它一出现窗口 safeArea 就变，
         // 背后页面随之重排 —— 无论把恢复时机提前到动画开始还是等 close，
         // 用户都能看到那一下「闪」。所以刷流期间状态栏一直在，退出时零变化。
+        // 切页面时通知「切走即清空」的列表页（当前只有相册搜索词订阅）。
+        // ⚠️ 不能靠页面自己的 onDisappear：这里四个 tab 是 ZStack + opacity 常驻，
+        // 切 tab 与导航栈 push/pop 都不会让列表页卸载，ViewModel 也不会重建。
+        .onChange(of: tab) { _, _ in
+            NotificationCenter.default.post(name: .listPageShouldResetSearch, object: nil)
+        }
+        .onChange(of: libraryPath.count) { _, _ in
+            NotificationCenter.default.post(name: .listPageShouldResetSearch, object: nil)
+        }
+        .onChange(of: homePath.count) { _, _ in
+            NotificationCenter.default.post(name: .listPageShouldResetSearch, object: nil)
+        }
     }
 }
 
