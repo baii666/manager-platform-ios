@@ -1465,6 +1465,11 @@ private struct SimilarPhotoOverlay: View {
     /// 600 档缓存图：init 时就取好，保证插入的第一帧就有图，不会出现白块 / 进度圈
     @State private var heroImage: UIImage? = nil
     @State private var settleTask: Task<Void, Never>?
+    /// 下拉退出的跟手位移（只有 >0 时生效）
+    @State private var dragY: CGFloat = 0
+    @State private var dragging = false
+    /// 手势被系统抢走时 onEnded 不回调，安静 0.9s 就替用户收尾，避免图片卡在半路
+    @State private var healTask: Task<Void, Never>?
 
     init(photos: [SimilarPhoto], initialIndex: Int, origin: CGRect,
          client: APIClient?, onClose: @escaping () -> Void) {
@@ -1508,11 +1513,16 @@ private struct SimilarPhotoOverlay: View {
             let sy = y0 + (1 - y0) * progress
             let dx = (sx0 - screen.width / 2) * (1 - progress)
             let dy = (sy0 - screen.height / 2) * (1 - progress)
+            // 下拉退出进度：0 = 常态，1 = 黑底透净、图片缩到 0.88。
+            // 位移越大背景越亮，下面的详情卡片自然露出来，而不是整层硬淡出。
+            let pull = min(max(dragY / 260, 0), 1)
+            let pullScale = 1 - 0.12 * pull
 
             ZStack {
                 // ⚠️ 黑底首帧就不透明：跟着 progress 从 0 淡入的话，起始那一帧
                 // 详情卡片里的原缩略图会和放大层的小图叠在一起，出现重影闪一下。
-                Color.black.opacity(0.94)
+                // 下拉退出时再随 pull 渐透，露出下面的详情卡片。
+                Color.black.opacity(0.94 * (1 - Double(pull)))
                     .ignoresSafeArea()
                     .allowsHitTesting(false)
 
@@ -1531,8 +1541,8 @@ private struct SimilarPhotoOverlay: View {
                 .ignoresSafeArea()
                 .frame(width: screen.width, height: screen.height)
                 .clipped()
-                .scaleEffect(x: sx, y: sy)
-                .offset(x: dx, y: dy)
+                .scaleEffect(x: sx * pullScale, y: sy * pullScale)
+                .offset(x: dx, y: dy + dragY)
                 .allowsHitTesting(zoomed && !dismissing)
 
                 // 顶部：页码 + 关闭
@@ -1560,9 +1570,11 @@ private struct SimilarPhotoOverlay: View {
                     .padding(.horizontal, 16)
                     Spacer()
                 }
-                .opacity(Double(progress))
+                .opacity(Double(progress) * (1 - Double(pull)))
                 .allowsHitTesting(zoomed && !dismissing)
             }
+            // 下拉退出：与分页横滑同时候选，靠方向判定分流（纵向才接管）
+            .simultaneousGesture(pullGesture)
         }
         .ignoresSafeArea()
         // 关闭：整层轻微缩小 + 淡出，不是从底部滑走
@@ -1575,15 +1587,81 @@ private struct SimilarPhotoOverlay: View {
                 zoomed = true
             }
         }
-        .onDisappear { settleTask?.cancel() }
+        .onDisappear { cancelTasks() }
     }
 
+    /// 下拉退出手势：只对「向下、且纵向明显大于横向」的拖动生效，横滑完整留给分页。
+    /// 挂在 ZStack 上用 simultaneousGesture，不与 UIPageViewController 的 pan 抢识别。
+    private var pullGesture: some Gesture {
+        DragGesture(minimumDistance: 12)
+            .onChanged { v in
+                guard zoomed, !dismissing else { return }
+                let t = v.translation
+                guard t.height > 0, t.height > abs(t.width) * 1.1 else { return }
+                dragging = true
+                dragY = t.height
+                scheduleHeal()
+            }
+            .onEnded { v in
+                healTask?.cancel()
+                dragging = false
+                // 已经在退出动画里就别再回弹（会把飞出去的图片又拉回来）
+                guard zoomed, !dismissing else { return }
+                let t = v.translation
+                guard t.height > abs(t.width) else {
+                    springBack()
+                    return
+                }
+                // 拖过阈值，或向下甩得够快（predictedEnd 兜 fling），都算退出
+                let fling = v.predictedEndTranslation.height > 340
+                if dragY > 110 || fling { finishPullClose() } else { springBack() }
+            }
+    }
+
+    /// 拖拽每帧重排一个「安静 0.9s 就收尾」的任务：手势被系统抢走时
+    /// onEnded 根本不回调，dragY 会停在半路 —— 图片既退不出去也弹不回来。
+    private func scheduleHeal() {
+        healTask?.cancel()
+        healTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 900_000_000)
+            guard dragging, !dismissing else { return }
+            dragging = false
+            if dragY > 110 { finishPullClose() } else { springBack() }
+        }
+    }
+
+    private func springBack() {
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) { dragY = 0 }
+    }
+
+    /// 点 X：整层轻微缩小 + 淡出
     private func close() {
         guard !dismissing else { return }
-        settleTask?.cancel()
+        cancelTasks()
         withAnimation(.easeOut(duration: 0.2)) { dismissing = true }
+        finishAfter(210)
+    }
+
+    /// 下拉松手：图片顺着手指继续飞出、黑底透净，再撤层回到详情卡片
+    private func finishPullClose() {
+        guard !dismissing else { return }
+        cancelTasks()
+        dragging = false
+        withAnimation(.easeOut(duration: 0.24)) {
+            dismissing = true
+            dragY = UIScreen.main.bounds.height
+        }
+        finishAfter(250)
+    }
+
+    private func cancelTasks() {
+        settleTask?.cancel()
+        healTask?.cancel()
+    }
+
+    private func finishAfter(_ milliseconds: UInt64) {
         Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 210_000_000)
+            try? await Task.sleep(nanoseconds: milliseconds * 1_000_000)
             onClose()
         }
     }
