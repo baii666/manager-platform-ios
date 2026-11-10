@@ -1095,6 +1095,14 @@ private struct ShortRelatedView: View {
     /// 点某条视频：返回 true = 刷流层已接手（已跳转并关闭本页）；false = 本页自己起播放器
     let onPick: (ShortVideo) -> Bool
 
+    /// 卡片规格与 PoolVideosView（池内视频墙）逐项对齐：关联页以前用
+    /// 108 宽 / 150 封面的小卡，看起来跟外面是两套样式。
+    /// ⚠️ 要改就两边一起改：gridSpacing / edgePadding / coverHeight / titleHeight。
+    private let gridSpacing: CGFloat = 12
+    private let edgePadding: CGFloat = 16
+    private let coverHeight: CGFloat = 240
+    private let titleHeight: CGFloat = 28
+
     @Environment(\.dismiss) private var dismiss
     @State private var items: [ShortVideo] = []
     @State private var folder = ""
@@ -1103,84 +1111,99 @@ private struct ShortRelatedView: View {
     @State private var playing: ShortVideo?
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
+        ZStack {
             Color.black.ignoresSafeArea()
 
-            if isLoading {
-                ProgressView().controlSize(.large).tint(.white)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-            } else if let errorText {
-                VStack(spacing: 14) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 26))
-                        .foregroundStyle(.orange)
-                    Text(errorText)
-                        .font(.subheadline)
-                        .foregroundStyle(.white.opacity(0.85))
-                        .multilineTextAlignment(.center)
-                    Button("重试") { Task { await load() } }
-                        .buttonStyle(.plain)
-                        .font(.subheadline.weight(.semibold))
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 8)
-                        .background(Capsule().fill(Color.white.opacity(0.2)))
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding(24)
-            } else if items.isEmpty {
-                Text("这个文件夹里没有其他视频")
-                    .font(.subheadline)
-                    .foregroundStyle(.white.opacity(0.6))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                ScrollView {
-                    // 复用短视频池页同款卡片（竖版封面 + 标题），高度常量钉死
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 108), spacing: 12)], spacing: 14) {
-                        ForEach(items) { v in
-                            ShortCard(video: v, client: client,
-                                      coverHeight: 150, titleHeight: 34,
-                                      cardHeight: 184) {
-                                pick(v)
+            // 顶栏与网格改成上下分区：以前顶栏是浮在网格上的 ZStack 层，
+            // 网格只留 6pt 上边距，第一行卡片会被「X / 标题」直接压住。
+            VStack(spacing: 0) {
+                headerBar
+                    .padding(.horizontal, edgePadding)
+                    .padding(.top, 8)
+                    .padding(.bottom, 12)
+
+                Group {
+                    if isLoading {
+                        ProgressView().controlSize(.large).tint(.white)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                    } else if let errorText {
+                        VStack(spacing: 14) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.system(size: 26))
+                                .foregroundStyle(.orange)
+                            Text(errorText)
+                                .font(.subheadline)
+                                .foregroundStyle(.white.opacity(0.85))
+                                .multilineTextAlignment(.center)
+                            Button("重试") { Task { await load() } }
+                                .buttonStyle(.plain)
+                                .font(.subheadline.weight(.semibold))
+                                .padding(.horizontal, 20)
+                                .padding(.vertical, 8)
+                                .background(Capsule().fill(Color.white.opacity(0.2)))
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .padding(24)
+                    } else if items.isEmpty {
+                        Text("这个文件夹里没有其他视频")
+                            .font(.subheadline)
+                            .foregroundStyle(.white.opacity(0.6))
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else {
+                        ScrollView {
+                            // 直接复用池内视频墙的 ShortCard，参数与 PoolVideosView 完全一致
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 160, maximum: 220),
+                                                          spacing: gridSpacing)],
+                                      spacing: gridSpacing) {
+                                ForEach(items) { v in
+                                    ShortCard(video: v, client: client,
+                                              coverHeight: coverHeight,
+                                              titleHeight: titleHeight,
+                                              cardHeight: coverHeight + titleHeight) {
+                                        pick(v)
+                                    }
+                                }
                             }
+                            .padding(.horizontal, edgePadding)
+                            .padding(.bottom, 24)
                         }
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 6)
-                    .padding(.bottom, 24)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-
-            // 顶部固定：关闭 + 「同文件夹 · N 个视频」+ 文件夹路径。
-            // 路径用 .head 截断：保住最深的目录名，砍掉前面冗长的盘符/父级
-            HStack(spacing: 12) {
-                Button { dismiss() } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 38, height: 38)
-                        .background(Circle().fill(Color.black.opacity(0.45)))
-                }
-                .buttonStyle(.plain)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("同文件夹 · \(items.count) 个视频")
-                        .font(.headline)
-                        .foregroundStyle(.white)
-                    if !folder.isEmpty {
-                        Text(folder)
-                            .font(.caption2)
-                            .foregroundStyle(.white.opacity(0.55))
-                            .lineLimit(1)
-                            .truncationMode(.head)
-                    }
-                }
-            }
-            .padding(.leading, 16)
-            .padding(.trailing, 16)
         }
         .task { await load() }
         .fullScreenCover(item: $playing) { v in
             ShortRelatedPlayer(video: v, client: client)
         }
+    }
+
+    /// 顶部固定：关闭 + 「同文件夹 · N 个视频」+ 文件夹路径。
+    /// 路径用 .head 截断：保住最深的目录名，砍掉前面冗长的盘符/父级
+    private var headerBar: some View {
+        HStack(spacing: 12) {
+            Button { dismiss() } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 38, height: 38)
+                    .background(Circle().fill(Color.black.opacity(0.45)))
+            }
+            .buttonStyle(.plain)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("同文件夹 · \(items.count) 个视频")
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                if !folder.isEmpty {
+                    Text(folder)
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.55))
+                        .lineLimit(1)
+                        .truncationMode(.head)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func pick(_ v: ShortVideo) {
