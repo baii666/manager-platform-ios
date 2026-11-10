@@ -542,25 +542,11 @@ struct ShortFeedView: View {
             guard let engine = engineHandle.engine else { return }
             if relatedVideo == nil { engine.play() } else { engine.pause() }
         }
-        // 标题点击 → 同文件夹关联视频页。点列表里已在刷流队列中的视频 →
-        // 跳回刷流并定位到那条；不在队列 → 关联页自己起播放器。
+        // 标题点击 → 同文件夹关联视频页。页内点卡片一律直接起播放器：
+        // 以前还分「命中刷流队列就关页 + scrollTo 回跳」一支，关 cover 时
+        // 滚动常被吞掉，看起来像点了没反应；现在两条路统一。
         .fullScreenCover(item: $relatedVideo) { v in
-            ShortRelatedView(video: v, client: viewModel.client) { picked in
-                guard items.contains(where: { $0.id == picked.id }) else { return false }
-                relatedVideo = nil
-                if let proxy = scrollProxy {
-                    withAnimation(.easeInOut(duration: 0.3)) { proxy.scrollTo(picked.id, anchor: .top) }
-                    // 兜底同 advance(from:)：paging 下 scrollTo 偶发首次不落地，
-                    // 0.35s 后还没到位就直接写 scrollPosition（用户手动滑走则不抢）
-                    let target = picked.id
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                        if self.currentID != target { self.currentID = target }
-                    }
-                } else {
-                    currentID = picked.id
-                }
-                return true
-            }
+            ShortRelatedView(video: v, client: viewModel.client)
         }
     }
 
@@ -1092,8 +1078,6 @@ func resolveShortPlayback(_ video: ShortVideo, path: String, client: APIClient) 
 private struct ShortRelatedView: View {
     let video: ShortVideo
     let client: APIClient?
-    /// 点某条视频：返回 true = 刷流层已接手（已跳转并关闭本页）；false = 本页自己起播放器
-    let onPick: (ShortVideo) -> Bool
 
     /// 卡片规格与 PoolVideosView（池内视频墙）逐项对齐：关联页以前用
     /// 108 宽 / 150 封面的小卡，看起来跟外面是两套样式。
@@ -1160,7 +1144,7 @@ private struct ShortRelatedView: View {
                                               coverHeight: coverHeight,
                                               titleHeight: titleHeight,
                                               cardHeight: coverHeight + titleHeight) {
-                                        pick(v)
+                                        playing = v
                                     }
                                 }
                             }
@@ -1171,11 +1155,17 @@ private struct ShortRelatedView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+
+            // 播放器用同层覆盖，不再嵌套 fullScreenCover：关联页本身已被
+            // .fullScreenCover 呈现，里面再 present 一层在 iOS 上会被系统忽略，
+            // 表现就是点卡片毫无反应。关闭只撤掉这一层，回到关联列表。
+            if let v = playing {
+                ShortRelatedPlayer(video: v, client: client) { self.playing = nil }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .zIndex(1)
+            }
         }
         .task { await load() }
-        .fullScreenCover(item: $playing) { v in
-            ShortRelatedPlayer(video: v, client: client)
-        }
     }
 
     /// 顶部固定：关闭 + 「同文件夹 · N 个视频」+ 文件夹路径。
@@ -1206,11 +1196,6 @@ private struct ShortRelatedView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func pick(_ v: ShortVideo) {
-        if onPick(v) { return } // 刷流层已接手（跳转 + 关闭本页）
-        playing = v
-    }
-
     @MainActor
     private func load() async {
         isLoading = true
@@ -1231,15 +1216,17 @@ private struct ShortRelatedView: View {
     }
 }
 
-// MARK: - 关联页的独立播放器（fullScreenCover）
+// MARK: - 关联页的独立播放器（同层覆盖，不是嵌套 fullScreenCover）
 // 复用 VideoPlayerView，地址解析走 resolveShortPlayback。关闭按钮自己画——
 // 不依赖 VideoPlayerView 的 showsCloseButton 关闭行为（刷流页同样自己画）。
 // ⚠️ VideoPlayerView 实参顺序必须与声明顺序一致。
 private struct ShortRelatedPlayer: View {
     let video: ShortVideo
     let client: APIClient?
+    /// 只撤掉播放器这一层，回到关联列表；不能用 @Environment(\.dismiss)，
+    /// 那会把外层关联页一起关掉、直接退回刷流。
+    let onClose: () -> Void
 
-    @Environment(\.dismiss) private var dismiss
     @State private var target: PlaybackTarget?
     @State private var error: String?
     @State private var attempt = 0
@@ -1269,7 +1256,7 @@ private struct ShortRelatedPlayer: View {
                 placeholder
             }
 
-            Button { dismiss() } label: {
+            Button { onClose() } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(.white)
