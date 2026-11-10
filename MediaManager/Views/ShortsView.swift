@@ -229,7 +229,6 @@ struct ShortsView: View {
                             .padding(.horizontal, 14)
                             .padding(.vertical, 10)
                             .background(.ultraThinMaterial, in: Capsule())
-                            .overlay(Capsule().stroke(.white.opacity(0.35), lineWidth: 0.6))
                     }
                 }
                 .buttonStyle(.plain)
@@ -239,9 +238,8 @@ struct ShortsView: View {
         }
         .frame(maxWidth: .infinity, minHeight: heroHeight, maxHeight: heroHeight)
         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous)
-            .stroke(.white.opacity(0.18), lineWidth: 0.8))
-        .shadow(color: .black.opacity(0.30), radius: 22, y: 10)
+        // 不描边：照片本身已经有明暗边界，再压一圈白线会变成「相框」
+        .shadow(color: .black.opacity(0.18), radius: 14, y: 6)
     }
 
     @ViewBuilder
@@ -401,26 +399,30 @@ enum PoolRoute: Identifiable, Hashable {
 // 只剩中间一条，所以「方块」既不好看也丢信息。
 // - iPhone 单列：横向合集行，左侧 2:3 竖版小海报，右侧分类 / 池名 / 数量 / 箭头
 // - iPad 多列：2:3 竖版海报墙，封面比例顺着内容，池名落在板内独立信息区
-// 两种形态都保留实体底板 + 留白相框 + 描边 + 投影 + 按压反馈；
-// 高度都由常量钉死（宽条 156 / 海报 240 + 信息区），LazyVGrid 不会重排。
+// 两种形态都保留按压反馈，高度由常量钉死（宽条 156 / 海报 240 + 信息区），
+// LazyVGrid 不会重排。
+//
+// ⚠️ 2026-11-11 去掉「留白相框」：原先封面四周先垫 9pt 实体底板，再叠
+// 0.6pt 描边 + 14pt 投影，三层叠出来是一圈很重的框，比封面本身还抢眼。
+// 现在封面直接贴卡片边缘，圆角由整卡一次 clipShape 完成；底板只留在文字区，
+// 描边全去掉，投影压到几乎看不见。
 private struct PoolCoverCard: View {
     let title: String
     let count: Int
     let coverURL: URL?
     let wide: Bool
 
-    private let inset: CGFloat = 9
-    private let radius: CGFloat = 20
-    private var innerRadius: CGFloat { radius - inset + 1 }
+    private let radius: CGFloat = 16
 
     var body: some View {
         Group {
             if wide { wideLayout } else { posterLayout }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .appSurface(in: RoundedRectangle(cornerRadius: radius, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous)
-            .stroke(Color.primary.opacity(0.13), lineWidth: 0.6))
-        .shadow(color: .black.opacity(0.20), radius: 14, y: 7)
+        // 整卡一次裁切：封面自己不再 clipShape，边缘自然跟外圆角吻合
+        .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+        .shadow(color: .black.opacity(0.10), radius: 8, y: 3)
     }
 
     private var coverImage: some View {
@@ -443,11 +445,10 @@ private struct PoolCoverCard: View {
         }
     }
 
-    // MARK: iPhone：横向合集行（92×138 ≈ 2:3，竖版封面几乎不裁）
+    // MARK: iPhone：横向合集行（104×156 ≈ 2:3，封面贴左边缘，不再留一圈底板）
     private var wideLayout: some View {
-        HStack(alignment: .center, spacing: 13) {
-            cover(width: 92, height: 138)
-                .clipShape(RoundedRectangle(cornerRadius: innerRadius, style: .continuous))
+        HStack(alignment: .center, spacing: 0) {
+            cover(width: 104, height: 156)
 
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 5) {
@@ -474,9 +475,9 @@ private struct PoolCoverCard: View {
                         .foregroundStyle(Color.secondary.opacity(0.55))
                 }
             }
+            .padding(.horizontal, 14)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(inset)
         .frame(height: 156, alignment: .leading)
     }
 
@@ -493,14 +494,12 @@ private struct PoolCoverCard: View {
                 countBadge
                     .padding(9)
             }
-            .clipShape(RoundedRectangle(cornerRadius: innerRadius, style: .continuous))
 
             infoRow
                 .padding(.horizontal, 12)
                 .padding(.top, 10)
                 .padding(.bottom, 11)
         }
-        .padding(inset)
     }
 
     /// 数量只在这里出现一次（旧版右下角又数一遍，被嫌弃过）
@@ -514,8 +513,7 @@ private struct PoolCoverCard: View {
         .foregroundStyle(.white)
         .padding(.horizontal, 9)
         .padding(.vertical, 5)
-        .background(.black.opacity(0.45), in: Capsule())
-        .overlay(Capsule().stroke(.white.opacity(0.24), lineWidth: 0.5))
+        .background(.black.opacity(0.42), in: Capsule())
     }
 
     private var infoRow: some View {
@@ -749,9 +747,11 @@ struct ShortCard: View {
             // 整卡高度也钉死：LazyVGrid 行高是「首帧测出来就固定」的，
             // 只要高度有任何变化（图片加载完成、列宽重算）都不会重排 → 卡片压在一起
             .frame(height: cardHeight, alignment: .top)
-            .clipped()
-            .appSurface(in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(.separator))
+            .appSurface(in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            // ⚠️ 用 clipShape 而不是 clipped()：clipped() 裁成直角矩形，
+            // 封面四角会盖过圆角底板，看起来像又套了一层方框。
+            // 同时去掉原来那圈 .stroke(.separator)（1pt 系统分隔线最像「厚边框」）。
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
         .buttonStyle(.plain)
     }
