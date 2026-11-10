@@ -821,14 +821,14 @@ private struct FeedBottomBar: View {
             HStack(spacing: 12) {
                 inlineButton(icon: isFavorite ? "heart.fill" : "heart",
                              text: isFavorite ? "已收藏" : "收藏",
-                             tint: isFavorite ? .red : .white) {
+                             active: isFavorite) {
                     Task { await controls.toggleFavorite(id: video.id, client: client) }
                 }
                 .disabled(controls.favoriteBusy)
 
                 inlineButton(icon: "arrow.triangle.2.circlepath",
-                             text: "连播",
-                             tint: controls.autoAdvance ? Theme.brand : .white) {
+                             text: controls.autoAdvance ? "连播" : "单曲",
+                             active: controls.autoAdvance) {
                     controls.setAutoAdvance(!controls.autoAdvance)
                 }
 
@@ -845,8 +845,9 @@ private struct FeedBottomBar: View {
         .background(Color.black.opacity(0.55).allowsHitTesting(false))
     }
 
-    /// 「图标在左、文字在右」横排按钮，无圆形底；激活态用 tint 变色表达
-    private func inlineButton(icon: String, text: String, tint: Color,
+    /// 「图标在左、文字在右」横排按钮，无圆形底。
+    /// 开/关只用同一套白阶亮度表达，不引入红色（收藏）或品牌蓝（连播）等强调色。
+    private func inlineButton(icon: String, text: String, active: Bool,
                               action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 5) {
@@ -857,10 +858,17 @@ private struct FeedBottomBar: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
             }
-            .foregroundStyle(tint)
+            .foregroundStyle(controlTint(active))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+
+    /// 底栏三件套（收藏 / 连播 / 倍速）共用：开=纯白，关=72% 白，无任何彩色高亮。
+    /// 状态同时由图标与文字表达（heart.fill / 已收藏、连播 / 单曲、1x / 2x），
+    /// 因此不依赖颜色也能分辨，按钮整体保持朴素。
+    private func controlTint(_ active: Bool) -> Color {
+        active ? Color.white : Color.white.opacity(0.72)
     }
 
     private var rateButton: some View {
@@ -885,7 +893,7 @@ private struct FeedBottomBar: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
             }
-            .foregroundStyle(abs(controls.rate - 1.0) < 0.01 ? Color.white : Theme.brand)
+            .foregroundStyle(controlTint(abs(controls.rate - 1.0) >= 0.01))
             .contentShape(Rectangle())
         }
     }
