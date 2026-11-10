@@ -684,7 +684,9 @@ private struct FeedTitleBlock: View {
     private var descText: String? {
         guard let t = video.title, !t.isEmpty,
               t != video.fileName, !video.fileName.isEmpty else { return nil }
-        return video.fileName
+        // 只展示剥掉站点水印的那截；剥完和标题一样就别重复显示副标题
+        let clean = ShortVideo.displayName(video.fileName)
+        return clean == video.titleText ? nil : clean
     }
 
     var body: some View {

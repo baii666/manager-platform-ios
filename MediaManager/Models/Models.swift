@@ -1023,7 +1023,15 @@ struct ShortVideo: Identifiable, Codable, Sendable, Hashable {
     var hasPoster: Bool = false
     var hasPreview: Bool = false
 
-    var titleText: String { title?.isEmpty == false ? title! : fileName }
+    /// 展示层统一剥掉「站点@」水印（`WWW.98T.LA@…`、`www.98t.la@…` 都命中）：
+    /// 复用已有的 `String.strippingSitePrefix`（规则见 ShootDetailView.swift，
+    /// 与影片 / 拍摄集标题同一套），不另写一套判据。
+    /// ⚠️ fileName / filePath 保留原值：播放路径、related 同目录匹配、搜索都依赖它们。
+    static func displayName(_ raw: String) -> String { raw.strippingSitePrefix }
+
+    var titleText: String {
+        Self.displayName(title?.isEmpty == false ? title! : fileName)
+    }
 
     var durationText: String? {
         guard let d = duration, d > 0 else { return nil }
