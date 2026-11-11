@@ -16,6 +16,13 @@ struct ActorSearchRoute: Hashable {
     let name: String
 }
 
+/// 「打开整个演员库」路由（影视列表工具栏的「演员」chip）。
+/// ⚠️ 列表页原来用 `navigationDestination(isPresented: $showActors)` 推演员库，
+/// 那是绑定型、不写 NavigationPath；同栈里后面任何 value 型 append（例如详情页
+/// 点演员推 ActorRoute）都会让系统重算栈，把绑定层重新压回栈顶 →
+/// 「跳到演员又跳回电影详情」。统一改成 path 驱动的价值类型。
+struct ActorLibraryRoute: Hashable {}
+
 // MARK: - 演员库
 // 对齐网页端 ActorsPage：演员网格（头像 + 姓名 + 作品数）+ 搜索。
 // 入口：电影/剧集列表页工具栏「演员」chip；演员详情里也可继续跳关联演员。

@@ -186,11 +186,13 @@ struct MediaListView: View {
     let type: String
     let library: Library?
 
+    /// 🔴 影视列表必须走 path 驱动（与首页 HomeView 一致）：
+    /// 绑定型 `navigationDestination(item:)` 不写 NavigationPath，详情页里
+    /// value 型 append（点演员 → ActorRoute）会让系统重算整个栈、把绑定层
+    /// 重新压回栈顶，表现就是「跳到演员又跳回电影详情」。
+    @Binding var path: NavigationPath
     @StateObject private var viewModel: MediaListViewModel
     @StateObject private var layout: CardLayoutController
-    @State private var selected: MediaItem?
-    /// 工具栏「演员」chip → 演员库页（按演员找片，电影/剧集共用）
-    @State private var showActors = false
     /// 捏合手势起始宽度（MagnificationGesture 的 scale 相对手势开始，需记下起始值）
     @State private var pinchStartWidth: CGFloat = 0
     /// 窄屏（iPhone）下隐藏滑块与计数 —— 一行塞不下时优先让出冗余信息（捏合也能缩放）
@@ -210,9 +212,10 @@ struct MediaListView: View {
         return (cols, itemW)
     }
 
-    init(type: String, library: Library? = nil) {
+    init(type: String, library: Library? = nil, path: Binding<NavigationPath>) {
         self.type = type
         self.library = library
+        self._path = path
         _viewModel = StateObject(wrappedValue: MediaListViewModel(type: type, library: library))
         _layout = StateObject(wrappedValue: CardLayoutController(
             baseKey: "mediaList", libID: library?.id,
@@ -232,7 +235,7 @@ struct MediaListView: View {
                         let cover = AppSession.shared.client?.mediaCoverURL(item, landscape: layout.landscape)
                         MediaCard(item: item, coverURL: cover, width: grid.itemWidth, landscape: layout.landscape,
                                   showInfo: layout.cardWidth >= CardLayoutController.compactThreshold) {
-                            selected = item
+                            path.append(item)
                         }
                         .task {
                             if item.id == viewModel.items.last?.id {
@@ -273,7 +276,7 @@ struct MediaListView: View {
                 sortMenu
                 // 演员库入口：按演员找片（对齐网页端左侧「演员」导航项）
                 ToolChip(label: "演员", icon: "person.2.fill") {
-                    showActors = true
+                    path.append(ActorLibraryRoute())
                 }
                 // 只留图标：图标本身够直观，省下的宽度留给搜索框
                 ToolChip(label: layout.landscape ? "横版" : "竖版",
@@ -325,12 +328,9 @@ struct MediaListView: View {
             }
         }
         .task { await viewModel.loadLibraries() }
-        .navigationDestination(item: $selected) { item in
-            MediaDetailView(media: item)
-        }
-        .navigationDestination(isPresented: $showActors) {
-            ActorsView()
-        }
+        // 🔴 不在这里注册 destination：影视列表是 `Library` 的 destination，
+        // MediaItem / ActorLibraryRoute 的路由统一挂在 tab 根 LibraryHomeView 上，
+        // 与 `for: Library.self` 并列声明一次，避免绑定型与 value 型混用。
     }
 
     /// 排序选择（对齐网页版列表页顶部状态栏）

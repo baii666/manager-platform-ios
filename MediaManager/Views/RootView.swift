@@ -65,7 +65,7 @@ struct RootView: View {
                 .opacity(tab == .home ? 1 : 0)
                 .allowsHitTesting(tab == .home)
 
-            NavigationStack(path: $libraryPath) { LibraryHomeView(category: $libraryCategory) }
+            NavigationStack(path: $libraryPath) { LibraryHomeView(category: $libraryCategory, path: $libraryPath) }
                 .opacity(tab == .library ? 1 : 0)
                 .allowsHitTesting(tab == .library)
 
@@ -300,6 +300,10 @@ struct LibraryHomeView: View {
 
     /// 当前二级分类：由根视图持有（binding），首页「拍摄集」卡跨 tab 落准分类用
     @Binding var category: Category
+    /// 本 tab 的导航路径：列表页点卡片 / 演员 chip 都往里 append value。
+    /// ⚠️ 不能让列表页自己用绑定型 destination —— 不写 path 会和详情页的
+    /// value 型跳转（点演员）打架，把栈重建回电影详情页。
+    @Binding var path: NavigationPath
 
     var body: some View {
         VStack(spacing: 0) {
@@ -350,10 +354,19 @@ struct LibraryHomeView: View {
         // 会互相冲突 → NavigationLink push 失效（卡片点了没反应）。这里只声明一次。
         .navigationDestination(for: Library.self) { lib in
             switch category {
-            case .movie: MediaListView(type: "movie", library: lib)
+            case .movie: MediaListView(type: "movie", library: lib, path: $path)
             case .photo: AlbumListView(library: lib)
             case .shoot: ShootListView(library: lib)
             }
+        }
+        // 影视卡片 / 工具栏「演员」chip 的路由，与 Library 并列只声明一次。
+        // 挂 tab 根（不在 TabView 的 page 里，也不在被 push 的列表页里）：
+        // 详情页点演员推 ActorRoute 时，这层注册始终有效，栈不会被重算。
+        .navigationDestination(for: MediaItem.self) { item in
+            MediaDetailView(media: item)
+        }
+        .navigationDestination(for: ActorLibraryRoute.self) { _ in
+            ActorsView()
         }
         // ⚠️ TabView(.page) 底层是 UIPageViewController，它自带不透明底色，
         // 只靠 App 根的那层背景透不出来 —— 本页必须自己垫一层

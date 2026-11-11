@@ -83,11 +83,22 @@ struct SearchView: View {
     @FocusState private var fieldFocused: Bool
     @Environment(\.horizontalSizeClass) private var hSizeClass
 
-    // 导航目标
-    @State private var movieTarget: MediaItem?
-    @State private var albumTarget: Album?
-    @State private var albumLibID: Int = 0
-    @State private var shootTarget: Shoot?
+    // 🔴 导航目标统一走 path 驱动的价值类型（与首页 / 媒体库 tab 一致）。
+    // 绑定型 `navigationDestination(item:)` 不写 NavigationPath，详情页里
+    // value 型 append（点演员 → ActorRoute）会让系统重算栈、把绑定层压回栈顶，
+    // 表现就是「跳到演员又跳回电影详情」。
+    @Binding var path: NavigationPath
+
+    init(initialQuery: String = "", path: Binding<NavigationPath>) {
+        self.initialQuery = initialQuery
+        self._path = path
+    }
+
+    enum SearchResultRoute: Hashable {
+        case movie(MediaItem)
+        case album(Album, Int)
+        case shoot(Shoot)
+    }
 
     private var client: APIClient? { AppSession.shared.client }
 
@@ -216,9 +227,13 @@ struct SearchView: View {
         // ⚠️ 每个 tab / 每个 push 进来的页面都要自己垫一层背景：
         // NavigationStack 只渲染栈顶那一层，App 根的背景透不进来
         .appBackground()
-        .navigationDestination(item: $movieTarget) { MediaDetailView(media: $0) }
-        .navigationDestination(item: $albumTarget) { AlbumPhotosView(album: $0, libID: albumLibID) }
-        .navigationDestination(item: $shootTarget) { ShootDetailView(shoot: $0) }
+        .navigationDestination(for: SearchResultRoute.self) { route in
+            switch route {
+            case .movie(let item): MediaDetailView(media: item)
+            case .album(let album, let libID): AlbumPhotosView(album: album, libID: libID)
+            case .shoot(let shoot): ShootDetailView(shoot: shoot)
+            }
+        }
     }
 
     /// 当前结果区是不是**自己撑满全屏的滚动容器**（瀑布流）。
@@ -1048,10 +1063,9 @@ struct SearchView: View {
         // 卡片和详情拿到的模型完全一致，不会出现「卡片和详情对不上」
         switch item.type {
         case "movie", "series", "tv":
-            movieTarget = item.asMediaItem()
+            path.append(SearchResultRoute.movie(item.asMediaItem()))
         case "album":
-            albumLibID = item.libraryId ?? 0
-            albumTarget = item.asAlbum()
+            path.append(SearchResultRoute.album(item.asAlbum(), item.libraryId ?? 0))
         case "photo":
             // 搜索结果里的照片整批交给看图器，可以左右翻，而不是只能看孤立的一张。
             // ⚠️ 走全局 overlay（PhotoViewerPresenter）：本页是 push 进来的全屏页，
@@ -1059,7 +1073,7 @@ struct SearchView: View {
             // 用 fullScreenCover 的话底层页面会被移出窗口层级 → 退出闪白屏。
             openViewer(photos: viewerPhotos, id: item.id)
         case "shoot":
-            shootTarget = item.asShoot()
+            path.append(SearchResultRoute.shoot(item.asShoot()))
         default:
             break
         }

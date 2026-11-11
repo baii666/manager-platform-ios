@@ -10,6 +10,14 @@ enum HomeRoute: Hashable {
     case search(initialQuery: String)
 }
 
+/// 「最近入库」卡片的路由值。原来用 `navigationDestination(item: $selectedRecent)`
+/// 推详情，那是绑定型、不写 path；详情页里 value 型 append（点演员 → ActorRoute）
+/// 会让系统重算栈、把绑定层重新压回栈顶 → 「跳到演员又跳回电影详情」。
+/// 与 HomeRoute 一样改成 path 驱动的价值类型。
+struct HomeRecentRoute: Hashable {
+    let item: RecentItem
+}
+
 // MARK: - 首页
 // 信息架构对齐现有 Web 端 HomePageV3 的消费视角：搜索 + 统计 → 最近入库 → 发现。
 // ⚠️「继续观看 / 我的收藏 / 观看记录」已挪到「我的」tab（MineView），首页只管找内容。
@@ -22,7 +30,6 @@ struct HomeView: View {
     @Environment(\.horizontalSizeClass) private var hSizeClass
 
     @State private var showingAlbums = false
-    @State private var selectedRecent: RecentItem?
 
     var body: some View {
         ScrollView {
@@ -64,7 +71,7 @@ struct HomeView: View {
             case .photoBrowser:
                 PhotoBrowserView()
             case .search(let q):
-                SearchView(initialQuery: q)
+                SearchView(initialQuery: q, path: $path)
             }
         }
         .sheet(isPresented: $showingAlbums) {
@@ -79,7 +86,8 @@ struct HomeView: View {
             }
         }
         // 最近入库卡片 → 详情页（电影/剧集 → 影视详情；相册 → 相册照片页）
-        .navigationDestination(item: $selectedRecent) { item in
+        .navigationDestination(for: HomeRecentRoute.self) { route in
+            let item = route.item
             switch item.kind {
             case .movie, .series:
                 MediaDetailView(media: MediaItem(
@@ -180,7 +188,7 @@ struct HomeView: View {
             horizontalRow {
                 ForEach(viewModel.recent) { item in
                     RecentPosterCard(item: item) {
-                        selectedRecent = item
+                        path.append(HomeRecentRoute(item: item))
                     }
                 }
             }
