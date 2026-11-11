@@ -41,8 +41,7 @@ struct PeopleHubView: View {
 
             // 分段可左右滑动切换（顶栏点击与滑动双向同步），
             // 与媒体库 tab「电影/相册/拍摄集」同一套 TabView(.page) 实现。
-            // ⚠️ 两个页面会同时挂载：各自的 navigationDestination 类型不同
-            //    （Person / ActorRoute），不像媒体库三页那样会互相顶掉。
+            // ⚠️ 两个页面会同时挂载（UIPageViewController 特性）。
             TabView(selection: segmentSelection) {
                 PersonsView(embedded: true)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -52,6 +51,17 @@ struct PeopleHubView: View {
                     .tag(Segment.actors)
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
+        }
+        // 🔴 navigationDestination 必须挂在这里（TabView 外层），不能留在两个 page 内部。
+        // TabView(.page) 底层是 UIPageViewController，page 里声明的 destination 不会
+        // 注册到外层 NavigationStack —— 表现就是「点头像/卡片完全没反应」。
+        // 媒体库 tab（LibraryHomeView）踩过同一个坑，注释也写在那儿。
+        // 因此 PersonsView / ActorsView 在 embedded 时都不再自己声明（见各自文件）。
+        .navigationDestination(for: Person.self) { person in
+            PersonPhotosView(person: person)
+        }
+        .navigationDestination(for: ActorRoute.self) { route in
+            ActorDetailView(actorId: route.id)
         }
         // 顶栏交给分段胶囊：不要标题栏，也不留一条空的导航栏横条
         .navigationTitle("")

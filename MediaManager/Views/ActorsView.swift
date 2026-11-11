@@ -92,7 +92,11 @@ struct ActorsView: View {
             }
         }
         .task { await viewModel.loadInitial() }
-        .navigationDestination(for: ActorRoute.self) { route in
+        // 🔴 embedded（人物 tab 的 TabView(.page) 分页）时不能自己注册：
+        // page 内部的 destination 不会进外层 NavigationStack，点头像会完全没反应。
+        // 那种情况由 PeopleHubView 在分页外层统一注册 ActorRoute。
+        // 独立进来（电影列表 / 影视详情）时仍由本页自己注册。
+        .navigationDestinationIf(!embedded, for: ActorRoute.self) { route in
             ActorDetailView(actorId: route.id)
         }
     }
@@ -496,5 +500,21 @@ final class ActorDetailViewModel: ObservableObject {
 
     private func describe(_ error: Error) -> String {
         (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+    }
+}
+
+// MARK: - 条件路由注册
+// TabView(.page)（UIPageViewController）的 page 内部声明的 navigationDestination
+// 不会注册到外层 NavigationStack，NavigationLink 点了完全没反应 —— 媒体库 tab 和
+// 人物 tab 都踩过。分页里的页面因此把路由交给宿主统一注册，独立使用时才自己注册。
+private extension View {
+    @ViewBuilder
+    func navigationDestinationIf<D: Hashable, C: View>(_ enabled: Bool, for type: D.Type,
+                                                       @ViewBuilder destination: @escaping (D) -> C) -> some View {
+        if enabled {
+            navigationDestination(for: type, destination: destination)
+        } else {
+            self
+        }
     }
 }

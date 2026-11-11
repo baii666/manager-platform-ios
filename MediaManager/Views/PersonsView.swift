@@ -46,9 +46,10 @@ struct PersonsView: View {
             }
         }
         .task { await viewModel.loadInitial() }
-        .navigationDestination(for: Person.self) { person in
-            PersonPhotosView(person: person)
-        }
+        // 🔴 这里不注册 navigationDestination：本页只作为「人物」tab 的
+        // TabView(.page) 分页使用，page 内部注册的路由不会生效（点了没反应），
+        // Person 的路由统一由外层 PeopleHubView 注册。若将来要独立使用本页，
+        // 记得在调用方的 NavigationStack 里补 for: Person.self。
     }
 }
 
