@@ -11,8 +11,8 @@ struct MediaDetailView: View {
     @State private var isLoading = true
     @State private var errorMessage: String?
     @State private var overviewExpanded = false
-    /// 点海报看大图（第一下就弹）
-    @State private var showPoster = false
+    /// 点竖版海报 / 点顶部横版封面，各自弹自己的原图大图
+    @State private var fullImage: FullImageRoute?
     @State private var playRequest: PlaybackRequest?
     @State private var playError: String?
     @State private var isFavorite = false
@@ -185,6 +185,15 @@ struct MediaDetailView: View {
         ]) ?? d.posterURL
     }
 
+    /// 横版封面(fanart)原图：同样不带 size。没有 fanart 时背景本来就是海报打底，
+    /// 点背景就退回竖版海报原图，不弹空图。
+    private func backdropFullURL(_ d: MediaDetail) -> URL? {
+        guard let imageId = d.fanartImageId else { return posterFullURL(d) }
+        return client?.makeURL("/media-image", queryItems: [
+            URLQueryItem(name: "id", value: "\(imageId)"),
+        ]) ?? d.backdropURL
+    }
+
     // MARK: 内容
     @ViewBuilder
     private func content(_ d: MediaDetail) -> some View {
@@ -210,12 +219,7 @@ struct MediaDetailView: View {
                             .stroke(.white.opacity(0.12), lineWidth: 1))
                         .shadow(color: .black.opacity(0.45), radius: 16, y: 8)
                         .contentShape(RoundedRectangle(cornerRadius: posterRadius, style: .continuous))
-                        .onTapGesture { showPoster = true }
-                        .fullScreenCover(isPresented: $showPoster) {
-                            PosterFullScreenView(url: posterFullURL(d), title: d.title) {
-                                showPoster = false
-                            }
-                        }
+                        .onTapGesture { fullImage = FullImageRoute(url: posterFullURL(d), title: d.title) }
 
                     // 信息列（封面区，白字）——整体沉到分界线上方，不贴顶：
                     // Spacer 吃掉上方空白，把内容压到列底（网页版 items-end 同款观感）
@@ -324,6 +328,9 @@ struct MediaDetailView: View {
                 .padding(.horizontal, heroPad)
                 .padding(.top, posterTopPad)
                 .frame(height: coverHeight, alignment: .top)
+                // 点 Hero 空白处 = 看横版封面(fanart)大图；海报自己有 tap，优先命中
+                .contentShape(Rectangle())
+                .onTapGesture { fullImage = FullImageRoute(url: backdropFullURL(d), title: d.title) }
                 // ① 背景层：必须用 .background 垫在内容**下面**——不占布局空间。
                 // ⚠️ 之前写成 VStack 里的兄弟块，它自己吃掉 coverHeight 那段高度，
                 // 海报与信息列被整块挤到封面图下方（背景上面空一大块，穿越/白字
@@ -381,6 +388,11 @@ struct MediaDetailView: View {
             lowerContent(d)
         }
         .appBackground()
+        // 大图统一挂 content 层（海报与 Hero 背景都是它的子视图），
+        // 不和 body 根上的播放器 fullScreenCover(item:) 挤同一层
+        .fullScreenCover(item: $fullImage) { route in
+            FullImageView(url: route.url, title: route.title) { fullImage = nil }
+        }
     }
 
     /// 类型标签：去空白 + 去重（保序）。见调用处的 id 说明。
@@ -878,8 +890,15 @@ private struct FlowLayout: Layout {
     }
 }
 
-// MARK: - 封面大图（详情页点海报弹出，原图完整显示）
-private struct PosterFullScreenView: View {
+// MARK: - 图片大图（海报 / 横版封面共用，各自带自己的原图 URL）
+/// fullScreenCover(item:) 的路由值：区分「点的是竖版海报」还是「点的是横版封面」
+private struct FullImageRoute: Identifiable {
+    let id = UUID()
+    let url: URL?
+    let title: String
+}
+
+private struct FullImageView: View {
     let url: URL?
     let title: String
     let onClose: () -> Void
