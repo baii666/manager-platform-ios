@@ -30,19 +30,28 @@ struct PeopleHubView: View {
 
     private var segment: Segment { Segment(rawValue: segmentRaw) ?? .people }
 
+    /// 顶栏胶囊与左右滑动共用的选中值（点击胶囊和滑动都写回 AppStorage）
+    private var segmentSelection: Binding<Segment> {
+        Binding(get: { segment }, set: { segmentRaw = $0.rawValue })
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             headerBar
 
-            switch segment {
-            case .people:
+            // 分段可左右滑动切换（顶栏点击与滑动双向同步），
+            // 与媒体库 tab「电影/相册/拍摄集」同一套 TabView(.page) 实现。
+            // ⚠️ 两个页面会同时挂载：各自的 navigationDestination 类型不同
+            //    （Person / ActorRoute），不像媒体库三页那样会互相顶掉。
+            TabView(selection: segmentSelection) {
                 PersonsView(embedded: true)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-            case .actors:
-                // 导航栏被收掉，演员页的搜索/排序要一起搬到内容区
+                    .tag(Segment.people)
                 ActorsView(embedded: true, inlineControls: true)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .tag(Segment.actors)
             }
+            .tabViewStyle(.page(indexDisplayMode: .never))
         }
         // 顶栏交给分段胶囊：不要标题栏，也不留一条空的导航栏横条
         .navigationTitle("")
