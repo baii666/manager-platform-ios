@@ -706,6 +706,147 @@ struct Person: Identifiable, Codable, Sendable, Hashable {
     }
 }
 
+// MARK: - 人物档案（thenude 匹配结果）
+// 对应 GET /api/person-profiles/:id。24,471 个聚类人物里约 933 个匹配到了外部档案，
+// 其余人物也返回 200，但 meta 为空对象 —— 用 hasDetails 判断有没有可展示的资料。
+// meta 是后端把 meta_json 解析后的对象，字段值混合字符串与数字，见 PersonMetaValue。
+struct PersonProfile: Codable, Sendable, Hashable {
+    let id: Int
+    var name: String = ""
+    var faceCount: Int = 0
+    var representativeFaceId: Int?
+    var thenudeId: Int?
+    var thenudeName: String = ""
+    var thenudeSim: Double = 0
+    var profileURL: String = ""
+    var avatarURL: String = ""
+    var meta: [String: PersonMetaValue] = [:]
+    var updatedAt: String = ""
+
+    var displayName: String {
+        let n = thenudeName.isEmpty ? name : thenudeName
+        return n.isEmpty ? "未命名" : n
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, meta
+        case faceCount = "face_count"
+        case representativeFaceId = "representative_face_id"
+        case thenudeId = "thenude_id"
+        case thenudeName = "thenude_name"
+        case thenudeSim = "thenude_sim"
+        case profileURL = "profile_url"
+        case avatarURL = "avatar_url"
+        case updatedAt = "updated_at"
+    }
+}
+
+/// meta_json 的值有字符串也有数字（thenude_id / face_sim），统一收成字符串，
+/// 展示层只读 text，不用再判断原始类型；null / 空值统一成 ""。
+struct PersonMetaValue: Codable, Sendable, Hashable {
+    let text: String
+
+    init(_ text: String) { self.text = text }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        if let s = try? c.decode(String.self) {
+            text = s
+        } else if let i = try? c.decode(Int.self) {
+            text = "\(i)"
+        } else if let d = try? c.decode(Double.self) {
+            text = String(format: "%g", d)
+        } else if let b = try? c.decode(Bool.self) {
+            text = b ? "true" : "false"
+        } else {
+            text = ""
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(text)
+    }
+}
+
+extension PersonProfile {
+    /// 取一段非空文本；脏串里的空字段按「没有」处理
+    func metaText(_ key: String) -> String? {
+        guard let raw = meta[key]?.text.trimmingCharacters(in: .whitespacesAndNewlines),
+              !raw.isEmpty else { return nil }
+        return raw
+    }
+
+    /// thenude 抓下来的字段常写成「主值 | 备选 / 又一个」，取第一段够用且不撑爆一行
+    private func firstSegment(_ key: String) -> String? {
+        guard let raw = metaText(key) else { return nil }
+        return raw.split(whereSeparator: { "|/".contains($0) })
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .first { !$0.isEmpty }
+    }
+
+    /// 别名：去掉与本人同名/重复项，最多 4 个，多了补个总数
+    var aliasesText: String? {
+        guard let raw = metaText("aka") else { return nil }
+        let me = displayName.lowercased()
+        var seen = Set<String>()
+        let list = raw.split(separator: ",").compactMap { part -> String? in
+            let v = String(part).trimmingCharacters(in: .whitespaces)
+            guard !v.isEmpty, v.lowercased() != me,
+                  seen.insert(v.lowercased()).inserted else { return nil }
+            return v
+        }
+        guard !list.isEmpty else { return nil }
+        let head = list.prefix(4).joined(separator: "、")
+        return list.count > 4 ? "\(head) 等 \(list.count) 个" : head
+    }
+
+    /// "??-07-1997 | July, 1997 / Country: Ukraine" → "July, 1997"
+    var bornText: String? {
+        guard let raw = metaText("born") else { return nil }
+        let parts = raw.split(whereSeparator: { "|/".contains($0) })
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        return parts.first { !$0.contains("?") && $0.contains(where: { $0.isNumber }) }
+            ?? parts.first
+    }
+
+    var birthplaceText: String? { metaText("birthplace") ?? metaText("country") }
+
+    /// "177 cm, 5 ft 10 in | 1.78 m" → "177 cm"
+    var heightText: String? {
+        guard let seg = firstSegment("height") else { return nil }
+        return seg.split(separator: ",").first.map { String($0).trimmingCharacters(in: .whitespaces) } ?? seg
+    }
+
+    var weightText: String? { firstSegment("weight") }
+
+    /// "34C-24-36 / 88-60-92 | 86-61-91" → "34C-24-36"
+    var measurementsText: String? { firstSegment("measurements") }
+
+    var appearanceText: String? {
+        join([metaText("hair_colour"), metaText("eye_colour").map { "\($0) eyes" }])
+    }
+
+    var bodyTypeText: String? {
+        join([metaText("body_type"), metaText("ethnicity")])
+    }
+
+    var sourceURL: URL? { profileURL.isEmpty ? nil : URL(string: profileURL) }
+
+    /// 有可展示的结构化资料才给「资料」入口，避免空档案点开一片空白
+    var hasDetails: Bool {
+        aliasesText != nil || bornText != nil || birthplaceText != nil
+            || heightText != nil || weightText != nil || measurementsText != nil
+            || appearanceText != nil || bodyTypeText != nil
+    }
+
+    private func join(_ parts: [String?]) -> String? {
+        let vals = parts.compactMap { $0 }
+        return vals.isEmpty ? nil : vals.joined(separator: " · ")
+    }
+}
+
 // MARK: - 演员库条目
 // 对应 GET /api/actors 列表项。⚠️ 与上面内嵌的 Actor 区分：那个是影片详情里的
 // {name, role, thumb}（ historically 没有 id），这个是演员库条目，必有 id。

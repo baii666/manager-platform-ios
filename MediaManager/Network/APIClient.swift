@@ -404,6 +404,15 @@ final class APIClient: DataProviding, @unchecked Sendable {
         return (resp.photos.map { resolvePhoto($0) }, resp.total)
     }
 
+    /// 人物档案（thenude 匹配结果）。GET /api/person-profiles/:id
+    /// ⚠️ 没匹配到档案的人物同样返回 200，只是 meta 为空对象；
+    ///    展示前用 PersonProfile.hasDetails 判断，别把空档案当成有资料。
+    func fetchPersonProfile(personId: Int, threshold: Double = 0.40) async throws -> PersonProfile {
+        try await request("/api/person-profiles/\(personId)", queryItems: [
+            URLQueryItem(name: "threshold", value: String(format: "%.2f", threshold)),
+        ])
+    }
+
     // MARK: - 演员
 
     /// 演员库列表。GET /api/actors?page&size&sort&q

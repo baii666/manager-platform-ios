@@ -85,10 +85,16 @@ private struct PersonCard: View {
 // 下面的瀑布流就是「这个人物的作品」，两者用一条细分隔线隔开。
 private struct PersonPhotosHeader: View {
     let person: Person
+    /// 外部档案：约 96% 的聚类人物没匹配到（接口 200 但 meta 为空），
+    /// 这种人物顶部保持原来的一行信息，不出现「资料」入口
+    let profile: PersonProfile?
     /// 后端返回的作品总数
     let total: Int
     /// 已加载条数（首批还没回来时用它兜底）
     let loaded: Int
+
+    /// 资料默认收起：展开后字段多，会把下面的瀑布流挤掉一半
+    @State private var expanded = false
 
     /// 头像优先级：聚类代表脸 → 代表照片 → 占位图标
     private var avatarURL: URL? {
@@ -112,31 +118,59 @@ private struct PersonPhotosHeader: View {
         return "作品加载中…"
     }
 
-    var body: some View {
-        HStack(spacing: 14) {
-            RemoteImage(url: avatarURL, fallbackIcon: "person.fill",
-                        fallbackColors: Theme.placeholderGradient(for: .photo))
-                .imageFilled()
-                .frame(width: 68, height: 68)
-                .clipShape(Circle())
+    private var displayName: String {
+        profile?.displayName ?? person.displayName
+    }
 
-            VStack(alignment: .leading, spacing: 6) {
-                Text(person.displayName)
-                    .font(.title3.weight(.semibold))
+    /// 收起时的一行摘要；展开后资料区已写同样内容，不重复
+    private var summaryLine: String? {
+        guard let p = profile else { return nil }
+        let parts = [p.bornText, p.heightText, p.measurementsText].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 14) {
+                RemoteImage(url: avatarURL, fallbackIcon: "person.fill",
+                            fallbackColors: Theme.placeholderGradient(for: .photo))
+                    .imageFilled()
+                    .frame(width: 68, height: 68)
+                    .clipShape(Circle())
+
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(displayName)
+                        .font(.title3.weight(.semibold))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    HStack(spacing: 6) {
+                        Text(worksText)
+                        if person.faceCount > 0 {
+                            Text("·")
+                            Text("\(person.faceCount) 张人脸")
+                        }
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                     .lineLimit(1)
-                    .truncationMode(.tail)
-                HStack(spacing: 6) {
-                    Text(worksText)
-                    if person.faceCount > 0 {
-                        Text("·")
-                        Text("\(person.faceCount) 张人脸")
+                    if !expanded, let summaryLine {
+                        Text(summaryLine)
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
                     }
                 }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
+                Spacer(minLength: 0)
+                if let profile, profile.hasDetails {
+                    toggleButton
+                }
             }
-            Spacer(minLength: 0)
+
+            if expanded, let profile, profile.hasDetails {
+                details(profile)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
@@ -144,6 +178,76 @@ private struct PersonPhotosHeader: View {
         .overlay(alignment: .bottom) {
             Divider().frame(maxWidth: .infinity).opacity(0.6)
         }
+    }
+
+    private var toggleButton: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.18)) { expanded.toggle() }
+        } label: {
+            HStack(spacing: 3) {
+                Text(expanded ? "收起" : "资料")
+                    .font(.caption.weight(.medium))
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+                    .rotationEffect(.degrees(expanded ? 180 : 0))
+            }
+            .foregroundStyle(.secondary)
+            .padding(.leading, 8)
+            .padding(.vertical, 6)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// 展开后的结构化资料。没有的字段直接不出现，不留「—」占位
+    private func details(_ p: PersonProfile) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            if let aka = p.aliasesText { detailRow("别名", aka, lines: 2) }
+            if let born = combine(p.bornText, p.birthplaceText) { detailRow("出生", born) }
+            if let size = combine(p.heightText, p.weightText) { detailRow("身材", size) }
+            if let m = p.measurementsText { detailRow("三围", m) }
+            if let look = p.appearanceText { detailRow("外貌", look) }
+            if let body = p.bodyTypeText { detailRow("体型", body) }
+            if let url = p.sourceURL {
+                Link(destination: url) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        detailLabel("来源")
+                        HStack(spacing: 3) {
+                            Text("thenude.com")
+                                .font(.caption)
+                                .underline()
+                            Image(systemName: "arrow.up.right")
+                                .font(.system(size: 9, weight: .semibold))
+                        }
+                        .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+        .padding(.top, 2)
+    }
+
+    private func detailRow(_ label: String, _ value: String, lines: Int = 1) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            detailLabel(label)
+            Text(value)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(lines)
+                .truncationMode(.tail)
+        }
+    }
+
+    private func detailLabel(_ text: String) -> some View {
+        Text(text)
+            .font(.caption2)
+            .foregroundStyle(.tertiary)
+            .frame(width: 34, alignment: .leading)
+    }
+
+    private func combine(_ a: String?, _ b: String?) -> String? {
+        let vals = [a, b].compactMap { $0 }
+        return vals.isEmpty ? nil : vals.joined(separator: " · ")
     }
 }
 
@@ -162,11 +266,16 @@ struct PersonPhotosView: View {
     @State private var errorMessage: String?
     /// 后端给的作品总数（不是已加载条数）：顶部信息区显示它，翻页时不跳动
     @State private var total = 0
+    /// 外部人物档案（thenude）。多数人物没有（meta 为空），顶部退回原来的一行信息
+    @State private var profile: PersonProfile?
+    /// 只请求一次：.task 在页面重新出现时可能重跑，避免重复请求
+    @State private var profileLoaded = false
 
     var body: some View {
         VStack(spacing: 0) {
             // 人物信息区固定在最上方，不随下面的瀑布流滚走
-            PersonPhotosHeader(person: person, total: total, loaded: photos.count)
+            PersonPhotosHeader(person: person, profile: profile,
+                               total: total, loaded: photos.count)
 
             PhotoGrid(
                 photos: photos,
@@ -201,8 +310,18 @@ struct PersonPhotosView: View {
         .navigationTitle("人物")
         .navigationBarTitleDisplayMode(.inline)
         // 名字/数量已在顶部信息区，导航栏不再重复一遍标题和计数
+        // 两个 task 并发：资料很轻，先回来也不会拖慢照片首屏
+        .task { await loadProfile() }
         .task { await loadMore() }
         .appBackground()
+    }
+
+    /// 资料是可选增强：没有档案的人物返回 200 + 空 meta，网络失败也静默忽略
+    @MainActor
+    private func loadProfile() async {
+        guard !profileLoaded, let client = AppSession.shared.client else { return }
+        profileLoaded = true
+        profile = try? await client.fetchPersonProfile(personId: person.id)
     }
 
     @MainActor
