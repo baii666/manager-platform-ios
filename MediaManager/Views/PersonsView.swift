@@ -1,5 +1,19 @@
 import SwiftUI
 
+// MARK: - 取消类错误（列表加载通用）
+/// URLSession 的 async 请求在所属 Task 被取消时抛 URLError(.cancelled)，
+/// localizedDescription 正是 "cancelled"。SwiftUI 的 .task / .refreshable 会随
+/// cell 复用、列表重绘、页面切走、下拉中途松手取消 Task —— 这是正常生命周期事件，
+/// 不能写进 errorMessage：旧实现下拉刷新先清空列表，取消后整页就只剩
+/// 「加载失败 · cancelled」。
+private func isExpectedCancellation(_ error: Error) -> Bool {
+    if error is CancellationError { return true }
+    if let urlError = error as? URLError, urlError.code == .cancelled { return true }
+    let nsError = error as NSError
+    if nsError.domain == NSURLErrorDomain, nsError.code == NSURLErrorCancelled { return true }
+    return Task.isCancelled
+}
+
 // MARK: - 人物页（人脸聚类）
 // 对齐网页端 PersonsPage：人物网格（代表脸头像 + 姓名 + 照片数），点进看该人物的全部照片。
 // 入口：相册列表页顶部「人物」行、首页发现区「人物」卡。
@@ -18,8 +32,14 @@ struct PersonsView: View {
                         PersonCard(person: person)
                     }
                     .buttonStyle(.plain)
-                    .task {
-                        if person.id == viewModel.items.last?.id { await viewModel.loadMore() }
+                    // ⚠️ 别用 .task：SwiftUI 会在 cell 复用 / items 重绘时取消它，
+                    // 连带取消正在跑的 URLSession 请求（URLError.cancelled），
+                    // 于是滑到底那一页静默丢掉、还写一条 cancelled 错误。
+                    // 改 onAppear + 非结构化 Task，去重交给 VM 的 isLoading。
+                    .onAppear {
+                        if person.id == viewModel.items.last?.id {
+                            Task { await viewModel.loadMore() }
+                        }
                     }
                 }
             }
@@ -333,11 +353,15 @@ struct PersonPhotosView: View {
         defer { isLoading = false }
         do {
             let (batch, totalCount) = try await client.fetchPersonPhotos(personId: person.id, page: page)
+            // 页面已切走 / 任务已取消时别再改 UI，也别把取消写成失败
+            guard !Task.isCancelled else { return }
             photos.append(contentsOf: batch)
             total = totalCount
             page += 1
             hasMore = !batch.isEmpty
+            errorMessage = nil
         } catch {
+            guard !isExpectedCancellation(error) else { return }
             errorMessage = "加载照片失败 · \(((error as? LocalizedError)?.errorDescription) ?? error.localizedDescription)"
         }
     }
@@ -353,6 +377,8 @@ final class PersonsViewModel: ObservableObject {
     private var page = 1
     private let pageSize = 60
     private var hasMore = true
+    /// 刷新代际：下拉刷新成功后 +1，让刷新前发出的分页请求结果作废，避免旧页混进新列表
+    private var generation = 0
 
     private var client: APIClient? { AppSession.shared.client }
 
@@ -365,24 +391,43 @@ final class PersonsViewModel: ObservableObject {
 
     @MainActor
     func reload() async {
-        items = []
-        page = 1
-        hasMore = true
-        await loadMore()
+        // ⚠️ 不要在请求前清空 items：.refreshable 的 Task 会被系统取消
+        //（下拉中途松手 / 切 tab / 页面重绘），URLSession 抛 URLError.cancelled。
+        // 旧实现清空后整页只剩「加载失败 · cancelled」。改成拿回数据再整体替换，
+        // 取消或真失败时都保留原列表。
+        await loadMore(replacing: true)
     }
 
     @MainActor
-    func loadMore() async {
-        guard let client, !isLoading, hasMore else { return }
+    func loadMore(replacing: Bool = false) async {
+        guard let client, !isLoading, (replacing || hasMore) else { return }
+        if replacing {
+            page = 1
+            hasMore = true
+            errorMessage = nil
+        }
+        let gen = generation
+        // 请求发起时的页码快照：刷新换代后旧请求回来也不能把 page 改回旧值
+        let requestedPage = page
         isLoading = true
         defer { isLoading = false }
         do {
-            let (batch, total) = try await client.fetchPersons(page: page, size: pageSize)
+            let (batch, total) = try await client.fetchPersons(page: requestedPage, size: pageSize)
+            // 刷新已换代的旧分页结果、以及已被取消的任务，都不要再改 UI
+            guard gen == generation, !Task.isCancelled else { return }
+            if replacing {
+                generation += 1   // 作废刷新前发出的分页请求
+                items = batch
+            } else {
+                items.append(contentsOf: batch)
+            }
             totalCount = total
-            items.append(contentsOf: batch)
-            page += 1
+            page = requestedPage + 1
             hasMore = !batch.isEmpty && items.count < total
+            errorMessage = nil
         } catch {
+            // 取消是正常生命周期事件，不是加载失败；真失败才提示
+            guard !isExpectedCancellation(error) else { return }
             errorMessage = "加载失败 · \(describe(error))"
         }
     }
