@@ -51,18 +51,16 @@ struct PeopleHubView: View {
     }
 
     // MARK: 顶栏（只放分段）
-    // 这条就是页面的顶 bar：分段左对齐 + 底部 0.5pt 分隔线，
-    // 与底栏「上方一条细线」的语言一致，滚动内容在它下面独立滚。
+    // 与媒体库 tab 的顶 bar（`LibraryHomeView` 里电影/相册/拍摄集那一排）逐项对齐：
+    // 居中、上 12 下 8、左右 24、不画分隔线 —— 五个 tab 的顶栏观感必须一致。
     private var headerBar: some View {
         segmentTabs
+            .frame(maxWidth: .infinity)
             .padding(.horizontal, 24)
             .padding(.top, 12)
-            .padding(.bottom, 10)
-            .overlay(alignment: .bottom) {
-                Rectangle()
-                    .fill(Color(uiColor: .separator).opacity(0.5))
-                    .frame(height: 0.5)
-            }
+            .padding(.bottom, 8)
+            // 只给胶囊上色加动画，不包 segment 赋值
+            .animation(.easeInOut(duration: 0.18), value: segment)
     }
 
     // MARK: 顶部分段
@@ -94,7 +92,6 @@ struct PeopleHubView: View {
                 }
                 .buttonStyle(.plain)
             }
-            Spacer(minLength: 0)
         }
     }
 }
