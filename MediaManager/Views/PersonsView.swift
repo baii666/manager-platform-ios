@@ -106,6 +106,76 @@ private struct PersonCard: View {
 // MARK: - 人物页顶部信息区
 // 固定在瀑布流上方（不随滚动）：头像 + 名字 + 作品数 / 人脸数。
 // 下面的瀑布流就是「这个人物的作品」，两者用一条细分隔线隔开。
+// MARK: - 人物资料共用组件（iPhone 顶部条 / iPad 左栏共用）
+private func personAvatarURL(_ person: Person) -> URL? {
+    let client = AppSession.shared.client
+    if let faceId = person.representativeFaceId { return client?.faceThumbURL(faceId) }
+    if let photoId = person.representativePhotoId {
+        return client?.makeURL("/photo", queryItems: [
+            URLQueryItem(name: "id", value: "\(photoId)"),
+            URLQueryItem(name: "size", value: "600"),
+        ])
+    }
+    return nil
+}
+
+/// 展开后的结构化资料。没有的字段直接不出现，不留「—」占位
+private func personDetails(_ p: PersonProfile) -> some View {
+    VStack(alignment: .leading, spacing: 5) {
+        if let aka = p.aliasesText { personDetailRow("别名", aka, lines: 2) }
+        if let born = personCombine(p.bornText, p.birthplaceText) { personDetailRow("出生", born) }
+        if let size = personCombine(p.heightText, p.weightText) { personDetailRow("身材", size) }
+        if let m = p.measurementsText { personDetailRow("三围", m) }
+        if let look = p.appearanceText { personDetailRow("外貌", look) }
+        if let body = p.bodyTypeText { personDetailRow("体型", body) }
+        if let url = p.sourceURL {
+            Link(destination: url) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    personDetailLabel("来源")
+                    HStack(spacing: 3) {
+                        Text("thenude.com").font(.caption).underline()
+                        Image(systemName: "arrow.up.right")
+                            .font(.system(size: 9, weight: .semibold))
+                    }
+                    .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+    .padding(.top, 2)
+}
+
+private func personDetailRow(_ label: String, _ value: String, lines: Int = 1) -> some View {
+    HStack(alignment: .firstTextBaseline, spacing: 8) {
+        personDetailLabel(label)
+        Text(value)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .lineLimit(lines)
+            .truncationMode(.tail)
+    }
+}
+
+private func personDetailLabel(_ text: String) -> some View {
+    Text(text)
+        .font(.caption2)
+        .foregroundStyle(.tertiary)
+        .frame(width: 34, alignment: .leading)
+}
+
+private func personCombine(_ a: String?, _ b: String?) -> String? {
+    let vals = [a, b].compactMap { $0 }
+    return vals.isEmpty ? nil : vals.joined(separator: " · ")
+}
+
+/// 人物照片页的排序（Photo 没有拍摄时间，能排的只有文件名与后端默认顺序）
+private enum PersonPhotoSort: String, CaseIterable, Identifiable {
+    case original = "默认顺序"
+    case nameAsc = "文件名 ↑"
+    case nameDesc = "文件名 ↓"
+    var id: String { rawValue }
+}
+
 private struct PersonPhotosHeader: View {
     let person: Person
     /// 外部档案：约 96% 的聚类人物没匹配到（接口 200 但 meta 为空），
@@ -120,19 +190,7 @@ private struct PersonPhotosHeader: View {
     @State private var expanded = false
 
     /// 头像优先级：聚类代表脸 → 代表照片 → 占位图标
-    private var avatarURL: URL? {
-        let client = AppSession.shared.client
-        if let faceId = person.representativeFaceId {
-            return client?.faceThumbURL(faceId)
-        }
-        if let photoId = person.representativePhotoId {
-            return client?.makeURL("/photo", queryItems: [
-                URLQueryItem(name: "id", value: "\(photoId)"),
-                URLQueryItem(name: "size", value: "600"),
-            ])
-        }
-        return nil
-    }
+    private var avatarURL: URL? { personAvatarURL(person) }
 
     /// 首批还没回来时别闪一个「0 张作品」
     private var worksText: String {
@@ -191,7 +249,7 @@ private struct PersonPhotosHeader: View {
             }
 
             if expanded, let profile, profile.hasDetails {
-                details(profile)
+                personDetails(profile)
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
@@ -222,55 +280,81 @@ private struct PersonPhotosHeader: View {
         .buttonStyle(.plain)
     }
 
-    /// 展开后的结构化资料。没有的字段直接不出现，不留「—」占位
-    private func details(_ p: PersonProfile) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            if let aka = p.aliasesText { detailRow("别名", aka, lines: 2) }
-            if let born = combine(p.bornText, p.birthplaceText) { detailRow("出生", born) }
-            if let size = combine(p.heightText, p.weightText) { detailRow("身材", size) }
-            if let m = p.measurementsText { detailRow("三围", m) }
-            if let look = p.appearanceText { detailRow("外貌", look) }
-            if let body = p.bodyTypeText { detailRow("体型", body) }
-            if let url = p.sourceURL {
-                Link(destination: url) {
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        detailLabel("来源")
-                        HStack(spacing: 3) {
-                            Text("thenude.com")
-                                .font(.caption)
-                                .underline()
-                            Image(systemName: "arrow.up.right")
-                                .font(.system(size: 9, weight: .semibold))
-                        }
+}
+
+// MARK: - iPad 人物详情左资料栏（与演员详情页 profileColumn 同构，280pt）
+private struct PersonSidebar: View {
+    let person: Person
+    let profile: PersonProfile?
+    let total: Int
+    let loaded: Int
+
+    /// 资料默认收起，需要时点「资料」展开
+    @State private var expanded = false
+
+    private var displayName: String { profile?.displayName ?? person.displayName }
+    private var worksText: String {
+        if total > 0 { return "\(total) 张作品" }
+        if loaded > 0 { return "\(loaded) 张作品" }
+        return "作品加载中…"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            avatar.frame(maxWidth: .infinity, alignment: .center)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text(displayName)
+                    .font(.title.weight(.semibold))
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(worksText).font(.caption).foregroundStyle(.secondary)
+                if person.faceCount > 0 {
+                    Text("\(person.faceCount) 张人脸")
+                        .font(.caption)
                         .foregroundStyle(.secondary)
-                    }
                 }
             }
+
+            if let profile, profile.hasDetails {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.18)) { expanded.toggle() }
+                } label: {
+                    HStack(spacing: 3) {
+                        Text(expanded ? "收起资料" : "资料")
+                            .font(.caption.weight(.medium))
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 9, weight: .semibold))
+                            .rotationEffect(.degrees(expanded ? 180 : 0))
+                    }
+                    .foregroundStyle(.secondary)
+                    .padding(.vertical, 6)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                if expanded { personDetails(profile) }
+            }
         }
-        .padding(.top, 2)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func detailRow(_ label: String, _ value: String, lines: Int = 1) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            detailLabel(label)
-            Text(value)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(lines)
-                .truncationMode(.tail)
+    @ViewBuilder
+    private var avatar: some View {
+        if let url = personAvatarURL(person) {
+            RemoteImage(url: url, fallbackIcon: "person.fill",
+                        fallbackColors: Theme.placeholderGradient(for: .photo))
+                .imageFilled()
+                .frame(width: 160, height: 160)
+                .clipShape(Circle())
+        } else {
+            Circle()
+                .fill(Theme.brand.opacity(0.16))
+                .frame(width: 160, height: 160)
+                .overlay {
+                    Text(String(displayName.prefix(1)).uppercased())
+                        .font(.system(size: 60, weight: .medium))
+                        .foregroundStyle(Theme.brand)
+                }
         }
-    }
-
-    private func detailLabel(_ text: String) -> some View {
-        Text(text)
-            .font(.caption2)
-            .foregroundStyle(.tertiary)
-            .frame(width: 34, alignment: .leading)
-    }
-
-    private func combine(_ a: String?, _ b: String?) -> String? {
-        let vals = [a, b].compactMap { $0 }
-        return vals.isEmpty ? nil : vals.joined(separator: " · ")
     }
 }
 
@@ -293,45 +377,25 @@ struct PersonPhotosView: View {
     @State private var profile: PersonProfile?
     /// 只请求一次：.task 在页面重新出现时可能重跑，避免重复请求
     @State private var profileLoaded = false
+    /// 右栏顶端固定工具行：排序（Photo 无拍摄时间，只排文件名 / 默认顺序）
+    @State private var photoSort: PersonPhotoSort = .original
+
+    @Environment(\.horizontalSizeClass) private var hSizeClass
+    private var isWide: Bool { hSizeClass == .regular }
+    /// 与演员详情页同一套分栏宽度 / 内边距，两页视觉一致
+    private var sidebarWidth: CGFloat { 280 }
+    private var panePadding: CGFloat { isWide ? 20 : 16 }
 
     var body: some View {
-        VStack(spacing: 0) {
-            // 人物信息区固定在最上方，不随下面的瀑布流滚走
-            PersonPhotosHeader(person: person, profile: profile,
-                               total: total, loaded: photos.count)
-
-            PhotoGrid(
-                photos: photos,
-                columns: columns,
-                onColumnsChange: { columns = $0; PhotoGridPrefs.save("personPhotos", $0) },
-                onSelect: { photo in
-                    guard let i = photos.firstIndex(where: { $0.id == photo.id }) else { return }
-                    PhotoViewerPresenter.shared.show(photos, index: i, hasMore: hasMore, onLoadMore: {
-                        Task {
-                            await loadMore()
-                            PhotoViewerPresenter.shared.updatePhotos(photos)
-                        }
-                    })
-                },
-                onReachEnd: { Task { await loadMore() } }
-            )
-            // UICollectionView 在 VStack 里需要明确拿到剩余空间，否则会塌成 0 高
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            // 加载/错误提示只盖住瀑布流区域，顶部人物信息始终可见
-            .overlay {
-                if photos.isEmpty {
-                    if let errorMessage {
-                        ContentUnavailableView(errorMessage, systemImage: "exclamationmark.triangle")
-                    } else {
-                        ProgressView("加载照片…")
-                    }
-                }
-            }
+        Group {
+            if isWide { wideContent } else { narrowContent }
         }
-        .ignoresSafeArea(edges: .bottom)
-        // 标题留空：人物姓名与数量已经在下面的置顶信息区，导航栏只负责返回
+        // 标题留空：姓名在左栏 / 顶部资料条，导航栏只负责返回
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
+        // 顶 bar 保持实心：左栏与固定工具行都不许盖到导航栏
+        .toolbarBackground(.visible, for: .navigationBar)
+        .ignoresSafeArea(edges: .bottom)
         // 两个 task 并发：资料很轻，先回来也不会拖慢照片首屏
         .task { await loadProfile() }
         .task { await loadMore() }
@@ -363,6 +427,147 @@ struct PersonPhotosView: View {
         } catch {
             guard !isExpectedCancellation(error) else { return }
             errorMessage = "加载照片失败 · \(((error as? LocalizedError)?.errorDescription) ?? error.localizedDescription)"
+        }
+    }
+
+    /// 排序只改显示顺序，不动 photos 本体（分页追加 / 去重逻辑保持原样）
+    private var displayPhotos: [Photo] {
+        switch photoSort {
+        case .original: return photos
+        case .nameAsc:
+            return photos.sorted {
+                ($0.fileName ?? "").localizedStandardCompare($1.fileName ?? "") == .orderedAscending
+            }
+        case .nameDesc:
+            return photos.sorted {
+                ($0.fileName ?? "").localizedStandardCompare($1.fileName ?? "") == .orderedDescending
+            }
+        }
+    }
+
+    /// 右侧固定显示「已加载数/总数」，分页时左值递增
+    private var countText: String {
+        let t = total > 0 ? "\(total)" : (photos.count > 0 ? "\(photos.count)" : "—")
+        return "\(photos.count)/\(t)"
+    }
+
+    // MARK: iPad 双栏（与演员详情页一致：左 280pt 资料栏 + 右照片网格）
+    private var wideContent: some View {
+        HStack(spacing: 0) {
+            ScrollView {
+                PersonSidebar(person: person, profile: profile, total: total, loaded: photos.count)
+                    .padding(panePadding)
+                    .bottomBarClearance()
+            }
+            .frame(width: sidebarWidth)
+            .background(Color.primary.opacity(0.04))
+            // 左栏只在顶 bar 之下滚动，不越到导航栏区域
+            .clipped()
+
+            Rectangle()
+                .fill(Color.primary.opacity(0.15))
+                .frame(width: 0.5)
+
+            VStack(spacing: 0) {
+                pinnedToolBar
+                photoGrid
+                    // UICollectionView 在 VStack 里需要明确拿到剩余空间，否则会塌成 0 高
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    // MARK: iPhone 单栏（顶部资料条 + 固定工具行 + 网格）
+    private var narrowContent: some View {
+        VStack(spacing: 0) {
+            PersonPhotosHeader(person: person, profile: profile,
+                               total: total, loaded: photos.count)
+            pinnedToolBar
+            photoGrid
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    /// 固定在顶端的一行：排序 / 列数放同一行，最右显示 已加载/总数
+    private var pinnedToolBar: some View {
+        HStack(spacing: 8) {
+            Menu {
+                ForEach(PersonPhotoSort.allCases) { s in
+                    Button {
+                        photoSort = s
+                    } label: {
+                        if photoSort == s { Label(s.rawValue, systemImage: "checkmark") }
+                        else { Text(s.rawValue) }
+                    }
+                }
+            } label: {
+                toolLabel(photoSort.rawValue)
+            }
+            .tint(Color.secondary)
+
+            Menu {
+                ForEach([2, 3, 4, 5, 6], id: \.self) { n in
+                    Button("\(n) 列") {
+                        columns = n
+                        PhotoGridPrefs.save("personPhotos", n)
+                    }
+                }
+            } label: {
+                toolLabel("\(columns) 列")
+            }
+            .tint(Color.secondary)
+
+            Spacer(minLength: 0)
+            Text(countText)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+        }
+        .padding(.horizontal, panePadding)
+        .padding(.vertical, 10)
+        .background(.regularMaterial)
+        .overlay(alignment: .bottom) { Divider().opacity(0.6) }
+    }
+
+    private func toolLabel(_ text: String) -> some View {
+        HStack(spacing: 4) {
+            Text(text).font(.caption.weight(.medium))
+            Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
+        }
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Color.primary.opacity(0.06), in: Capsule())
+    }
+
+    private var photoGrid: some View {
+        PhotoGrid(
+            photos: displayPhotos,
+            columns: columns,
+            onColumnsChange: { columns = $0; PhotoGridPrefs.save("personPhotos", $0) },
+            onSelect: { photo in
+                let list = self.displayPhotos
+                guard let i = list.firstIndex(where: { $0.id == photo.id }) else { return }
+                PhotoViewerPresenter.shared.show(list, index: i, hasMore: hasMore, onLoadMore: {
+                    Task {
+                        await self.loadMore()
+                        PhotoViewerPresenter.shared.updatePhotos(self.displayPhotos)
+                    }
+                })
+            },
+            onReachEnd: { Task { await self.loadMore() } }
+        )
+        // 加载/错误提示只盖住网格区域，左栏资料与顶端工具行始终可见
+        .overlay {
+            if photos.isEmpty {
+                if let errorMessage {
+                    ContentUnavailableView(errorMessage, systemImage: "exclamationmark.triangle")
+                } else {
+                    ProgressView("加载照片…")
+                }
+            }
         }
     }
 }

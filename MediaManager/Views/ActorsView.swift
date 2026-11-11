@@ -225,6 +225,8 @@ struct ActorDetailView: View {
     let actorId: Int
     @StateObject private var viewModel: ActorDetailViewModel
     @State private var overviewExpanded = false
+    /// 左栏资料默认收起，点「资料」才展开；与人物详情页一致
+    @State private var profileExpanded = false
     @State private var yearFilter: Int? = nil
     @State private var minRating: Double = 0
     @State private var workSort: ActorWorkSort = .yearDesc
@@ -258,6 +260,8 @@ struct ActorDetailView: View {
         }
         .navigationTitle(viewModel.profile?.title ?? "演员")
         .navigationBarTitleDisplayMode(.inline)
+        // 顶 bar 保持实心：左右两栏的内容都不能滚到导航栏底下透出来
+        .toolbarBackground(.visible, for: .navigationBar)
         .appBackground()
         .task { await viewModel.load() }
         // ⚠️ destination 挂 body 根（Group）上，不能放进条件分支 / ScrollView 内部：
@@ -283,16 +287,31 @@ struct ActorDetailView: View {
                 }
                 .frame(width: sidebarWidth)
                 .background(Color.primary.opacity(0.04))
+                // 资料栏只在顶 bar 之下滚动，不越到导航栏区域
+                .clipped()
 
                 Rectangle()
                     .fill(Color(uiColor: .separator).opacity(0.6))
                     .frame(width: 0.5)
 
-                worksPane(containerWidth: geo.size.width - sidebarWidth - 0.5)
-                    .frame(maxWidth: .infinity)
+                VStack(spacing: 0) {
+                    // 筛选 / 排序 / 数量固定在顶端一行，不随作品网格滚走
+                    pinnedFilterBar
+                    worksPane(containerWidth: geo.size.width - sidebarWidth - 0.5)
+                }
+                .frame(maxWidth: .infinity)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
+    }
+
+    /// 右栏顶端常驻工具行（两页同款：一行放完筛选排序，右侧 已加载/总数）
+    private var pinnedFilterBar: some View {
+        filterBar
+            .padding(.horizontal, panePadding)
+            .padding(.vertical, 10)
+            .background(.regularMaterial)
+            .overlay(alignment: .bottom) { Divider().opacity(0.6) }
     }
 
     /// 左侧常驻资料栏：头像放大到 160pt，资料 / 简介 / 关联演员竖向排布。
@@ -321,19 +340,39 @@ struct ActorDetailView: View {
                     .foregroundStyle(.secondary)
             }
 
-            if !profile.aliases.isEmpty { aliasesBlock(profile.aliases) }
-            if let bio = profile.biography, !bio.isEmpty { bioBlock(bio) }
-            if !profile.linkedActors.isEmpty { linkedGrid(profile.linkedActors) }
+            profileToggle
+            // 资料需要时点开，默认收起；与人物详情页的「资料」按钮同款
+            if profileExpanded {
+                if !profile.aliases.isEmpty { aliasesBlock(profile.aliases) }
+                if let bio = profile.biography, !bio.isEmpty { bioBlock(bio) }
+                if !profile.linkedActors.isEmpty { linkedGrid(profile.linkedActors) }
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var profileToggle: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.18)) { profileExpanded.toggle() }
+        } label: {
+            HStack(spacing: 3) {
+                Text(profileExpanded ? "收起资料" : "资料")
+                    .font(.caption.weight(.medium))
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+                    .rotationEffect(.degrees(profileExpanded ? 180 : 0))
+            }
+            .foregroundStyle(.secondary)
+            .padding(.vertical, 6)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     /// 右侧作品区：顶部筛选条 + 自适应网格。容器宽由外层 GeometryReader 量得。
     private func worksPane(containerWidth: CGFloat) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                Text("作品").font(.title3.weight(.semibold))
-                filterBar
                 worksGrid(works: filteredWorks, type: "movie", containerWidth: containerWidth)
                 // series 目前恒为空（media 表没有 tv 类型），有数据时才追加，不留空标题
                 if !viewModel.series.isEmpty {
@@ -344,26 +383,33 @@ struct ActorDetailView: View {
             .padding(panePadding)
             .bottomBarClearance()
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // MARK: iPhone 单栏
 
     private func narrowContent(_ profile: ActorProfile) -> some View {
         GeometryReader { geo in
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    header(profile)
-                    if let bio = profile.biography, !bio.isEmpty { bioBlock(bio) }
-                    if !profile.linkedActors.isEmpty { linkedStrip(profile.linkedActors) }
-                    filterBar
-                    worksGrid(works: filteredWorks, type: "movie", containerWidth: geo.size.width)
-                    if !viewModel.series.isEmpty {
-                        Text("剧集").font(.headline)
-                        worksGrid(works: viewModel.series, type: "tv", containerWidth: geo.size.width)
+            VStack(spacing: 0) {
+                pinnedFilterBar
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 20) {
+                        header(profile)
+                        profileToggle
+                        if profileExpanded {
+                            if let bio = profile.biography, !bio.isEmpty { bioBlock(bio) }
+                            if !profile.linkedActors.isEmpty { linkedStrip(profile.linkedActors) }
+                        }
+                        worksGrid(works: filteredWorks, type: "movie", containerWidth: geo.size.width)
+                        if !viewModel.series.isEmpty {
+                            Text("剧集").font(.headline)
+                            worksGrid(works: viewModel.series, type: "tv", containerWidth: geo.size.width)
+                        }
                     }
+                    .padding(panePadding)
+                    .bottomBarClearance()
                 }
-                .padding(panePadding)
-                .bottomBarClearance()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
     }
@@ -615,7 +661,8 @@ struct ActorDetailView: View {
             .tint(Color.secondary)
 
             Spacer(minLength: 0)
-            Text("\(filteredWorks.count) 部")
+            // 右侧固定显示「当前数/总数」，不随网格滚动
+            Text("\(filteredWorks.count)/\(viewModel.movies.count) 部")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .monospacedDigit()
