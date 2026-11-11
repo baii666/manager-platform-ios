@@ -11,6 +11,8 @@ struct MediaDetailView: View {
     @State private var isLoading = true
     @State private var errorMessage: String?
     @State private var overviewExpanded = false
+    /// 点海报看大图（第一下就弹）
+    @State private var showPoster = false
     @State private var playRequest: PlaybackRequest?
     @State private var playError: String?
     @State private var isFavorite = false
@@ -174,6 +176,15 @@ struct MediaDetailView: View {
         // 剧照看图器走全局 overlay（PhotoViewerPresenter），不再用 fullScreenCover
     }
 
+    /// 海报原图：/media-image?id=<id> 不带 size 时后端直接返回原图；
+    /// 老数据没有 imageId 就退回详情页那张 600。
+    private func posterFullURL(_ d: MediaDetail) -> URL? {
+        guard let imageId = d.posterImageId else { return d.posterURL }
+        return client?.makeURL("/media-image", queryItems: [
+            URLQueryItem(name: "id", value: "\(imageId)"),
+        ]) ?? d.posterURL
+    }
+
     // MARK: 内容
     @ViewBuilder
     private func content(_ d: MediaDetail) -> some View {
@@ -198,6 +209,13 @@ struct MediaDetailView: View {
                         .overlay(RoundedRectangle(cornerRadius: posterRadius, style: .continuous)
                             .stroke(.white.opacity(0.12), lineWidth: 1))
                         .shadow(color: .black.opacity(0.45), radius: 16, y: 8)
+                        .contentShape(RoundedRectangle(cornerRadius: posterRadius, style: .continuous))
+                        .onTapGesture { showPoster = true }
+                        .fullScreenCover(isPresented: $showPoster) {
+                            PosterFullScreenView(url: posterFullURL(d), title: d.title) {
+                                showPoster = false
+                            }
+                        }
 
                     // 信息列（封面区，白字）——整体沉到分界线上方，不贴顶：
                     // Spacer 吃掉上方空白，把内容压到列底（网页版 items-end 同款观感）
@@ -856,6 +874,67 @@ private struct FlowLayout: Layout {
                                   proposal: ProposedViewSize(width: size.width, height: size.height))
             x += size.width + spacing
             rowHeight = max(rowHeight, size.height)
+        }
+    }
+}
+
+// MARK: - 封面大图（详情页点海报弹出，原图完整显示）
+private struct PosterFullScreenView: View {
+    let url: URL?
+    let title: String
+    let onClose: () -> Void
+
+    @State private var image: UIImage?
+    @State private var failed = false
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack {
+                Color.black
+                if let image {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: geo.size.width, height: geo.size.height)
+                } else if failed {
+                    VStack(spacing: 10) {
+                        Image(systemName: "photo").font(.largeTitle)
+                        Text("封面加载失败").font(.subheadline)
+                    }
+                    .foregroundStyle(.white.opacity(0.65))
+                } else {
+                    ProgressView().tint(.white)
+                }
+            }
+            .frame(width: geo.size.width, height: geo.size.height)
+            .contentShape(Rectangle())
+            .onTapGesture { onClose() }
+            .overlay(alignment: .topTrailing) {
+                Button { onClose() } label: {
+                    Image(systemName: "xmark")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(10)
+                        .background(Color.black.opacity(0.55), in: Circle())
+                }
+                .padding(20)
+            }
+            .overlay(alignment: .bottom) {
+                Text(title)
+                    .font(.footnote)
+                    .foregroundStyle(.white.opacity(0.55))
+                    .lineLimit(1)
+                    .padding(.bottom, 22)
+            }
+        }
+        .ignoresSafeArea()
+        .task {
+            guard let url else { failed = true; return }
+            if let img = await ImageCache.shared.load(from: url) {
+                image = img
+            } else {
+                failed = true
+            }
         }
     }
 }
