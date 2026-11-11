@@ -7,7 +7,6 @@ import UIKit
 // append 会把这些页面顶掉 → 返回直接回主页。统一改成 for: 类型 + path 驱动。
 enum HomeRoute: Hashable {
     case photoBrowser
-    case persons
     case search(initialQuery: String)
 }
 
@@ -64,9 +63,6 @@ struct HomeView: View {
             switch route {
             case .photoBrowser:
                 PhotoBrowserView()
-            case .persons:
-                // 「以人找内容」统一入口：照片人脸聚类 + 影视演员分段切换
-                PeopleHubView()
             case .search(let q):
                 SearchView(initialQuery: q)
             }
@@ -210,7 +206,9 @@ struct HomeView: View {
                     path.append(HomeRoute.photoBrowser)
                 }
                 DiscoverCard(icon: "person.2.fill", title: "人物", subtitle: "照片人物与影视演员", tint: .cyan) {
-                    path.append(HomeRoute.persons)
+                    // 人物已是底栏第 5 个 tab（有自己的导航栈），这里切 tab 而不是
+                    // 再 push 一份 —— 与「我的收藏」卡同一套行为
+                    tab = .people
                 }
                 DiscoverCard(icon: "heart.fill", title: "我的收藏", subtitle: "收藏的内容都在这", tint: .pink) {
                     tab = .mine

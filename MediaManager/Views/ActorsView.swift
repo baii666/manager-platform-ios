@@ -23,40 +23,35 @@ struct ActorsView: View {
     /// 嵌进「人物」聚合页（PeopleHubView）时由外层统一提供标题与背景。
     /// 独立从电影列表「演员」chip 进来时仍是完整的演员页。
     var embedded: Bool = false
+    /// 搜索与排序改到内容区（见 init 注释），导航栏被收掉时用
+    var inlineControls: Bool = false
     @StateObject private var viewModel: ActorsViewModel
 
     /// `initialSearch`：从影视详情的无 id 演员卡片进来时预填的搜索词。
     /// ⚠️ @StateObject 只能在第一次创建时带初值，所以放到自定义 init 里传，
     ///    不能等 onAppear 再改 viewModel.searchText（人物页里的 VM 是常驻的）。
-    init(embedded: Bool = false, initialSearch: String? = nil) {
+    ///
+    /// `inlineControls`：宿主把导航栏收掉时（人物 tab 的顶栏只放分段）为 true。
+    /// `.searchable` 和排序胶囊都挂在导航栏上，栏一收就一起看不见了 ——
+    /// 这时改在内容区顶部自己画一行「搜索 + 排序」，功能不丢。
+    init(embedded: Bool = false, initialSearch: String? = nil, inlineControls: Bool = false) {
         self.embedded = embedded
+        self.inlineControls = inlineControls
         _viewModel = StateObject(wrappedValue: ActorsViewModel(initialSearch: initialSearch))
     }
 
     var body: some View {
-        ScrollView {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), spacing: 14)], spacing: 14) {
-                ForEach(viewModel.items) { actor in
-                    NavigationLink(value: ActorRoute(id: actor.id)) {
-                        ActorCard(actor: actor)
-                    }
-                    .buttonStyle(.plain)
-                    .task {
-                        if actor.id == viewModel.items.last?.id { await viewModel.loadMore() }
-                    }
-                }
-            }
-            .padding(16)
-            .bottomBarClearance()
-            if viewModel.isLoading {
-                ProgressView().frame(maxWidth: .infinity).padding()
+        Group {
+            if inlineControls {
+                content
+            } else {
+                content.searchable(text: $viewModel.searchText, prompt: "搜索演员…")
             }
         }
-        .navigationTitle(embedded ? "人物" : "演员")
+        .navigationTitle(embedded ? "" : "演员")
         .navigationBarTitleDisplayMode(.inline)
         // 嵌进「人物」聚合页时由外层统一铺背景，避免背景图模式下压暗两次
         .background { if !embedded { AppBackgroundView() } }
-        .searchable(text: $viewModel.searchText, prompt: "搜索演员…")
         .refreshing { await viewModel.reload() }
         .toolbar {
             // 排序字段（与电影/相册/拍摄集/短视频列表同一套 ToolMenuChip 胶囊样式）
@@ -100,6 +95,80 @@ struct ActorsView: View {
         .navigationDestination(for: ActorRoute.self) { route in
             ActorDetailView(actorId: route.id)
         }
+    }
+
+    // MARK: 网格（+ 可选的内容区控制行）
+    private var content: some View {
+        VStack(spacing: 0) {
+            if inlineControls { inlineControlBar }
+
+            ScrollView {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), spacing: 14)], spacing: 14) {
+                    ForEach(viewModel.items) { actor in
+                        NavigationLink(value: ActorRoute(id: actor.id)) {
+                            ActorCard(actor: actor)
+                        }
+                        .buttonStyle(.plain)
+                        .task {
+                            if actor.id == viewModel.items.last?.id { await viewModel.loadMore() }
+                        }
+                    }
+                }
+                .padding(16)
+                .bottomBarClearance()
+                if viewModel.isLoading {
+                    ProgressView().frame(maxWidth: .infinity).padding()
+                }
+            }
+        }
+    }
+
+    /// 导航栏被收掉时的等价物：搜索框在左、排序 + 升降序胶囊在右。
+    /// 胶囊本身沿用导航栏里的「不画底」样式；只有搜索框补一层淡底 ——
+    /// 那原本是系统搜索框的样子，搬进内容区得自己给个边界。
+    private var inlineControlBar: some View {
+        HStack(spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                TextField("搜索演员…", text: $viewModel.searchText)
+                    .textFieldStyle(.plain)
+                    .font(.subheadline)
+                    .autocorrectionDisabled()
+                    .submitLabel(.search)
+                if !viewModel.searchText.isEmpty {
+                    Button {
+                        viewModel.searchText = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 13))
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 32)
+            .background(Capsule().fill(Color.primary.opacity(0.06)))
+
+            ToolMenuChip(label: viewModel.sort.label) {
+                ForEach(ActorsViewModel.Sort.allCases, id: \.self) { s in
+                    Button {
+                        Task { await viewModel.setSort(s) }
+                    } label: {
+                        if viewModel.sort == s { Label(s.label, systemImage: "checkmark") }
+                        else { Text(s.label) }
+                    }
+                }
+            }
+            ToolChip(label: "降序", icon: viewModel.descending ? "arrow.down" : "arrow.up",
+                     highlighted: viewModel.descending, iconOnly: true) {
+                Task { await viewModel.toggleDirection() }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 8)
     }
 }
 

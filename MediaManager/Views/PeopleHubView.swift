@@ -6,10 +6,11 @@ import SwiftUI
 //   · 影视演员 = 演员库（/api/actors），点进去看简介 / 别名 / 参演作品
 // 后端已有 /api/persons/match-actors 与 link-actor 把聚类人物按名字对上演员，
 // 所以收在同一个「人物」入口下用分段切换，而不是各开一个入口：
-//   · 不加第 5 个 tab：4 个 tab 已覆盖消费路径，人物是「找内容」的次级维度
+//   · 早期判断「不单开 tab」，后按用户明确要求改回**底栏第 5 个 tab**（人物）。
+//     所以本页只作为 tab 根页存在：没有标题顶栏，顶栏只放分段；
+//     首页发现区的「人物」卡改成切 tab（不再 push），避免出现两份页面。
 //   · 不放媒体库 tab：人物是跨库的，挂在任何单个库下面都不对
-//   · 首页发现区「人物」卡是聚合入口；电影/剧集列表的「演员」chip 保留，
-//     那是「正在挑片时按演员找片」的场景快捷方式，不算重复入口
+//   · 电影/剧集列表的「演员」chip 保留，那是「正在挑片时按演员找片」的场景快捷方式
 struct PeopleHubView: View {
     enum Segment: String, CaseIterable, Identifiable {
         case people = "照片人物"
@@ -22,13 +23,6 @@ struct PeopleHubView: View {
             case .actors: return "film.fill"
             }
         }
-
-        var hint: String {
-            switch self {
-            case .people: return "人脸聚类结果 · 点开看同一个人的全部照片"
-            case .actors: return "演员库 · 点开看简介、别名与参演作品"
-            }
-        }
     }
 
     /// 记住上次停留的分段，切 tab 回来不用每次重选
@@ -38,31 +32,37 @@ struct PeopleHubView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            segmentTabs
-                .padding(.horizontal, 24)
-                .padding(.top, 20)
-
-            // 两类「人」不是同一份数据，一句话说清当前在看什么。
-            // 压到 caption2 + tertiary：不跟上面的切换控件抢视觉重量。
-            Text(segment.hint)
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-                .padding(.horizontal, 24)
-                .padding(.top, 8)
-                .padding(.bottom, 2)
+            headerBar
 
             switch segment {
             case .people:
                 PersonsView(embedded: true)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             case .actors:
-                ActorsView(embedded: true)
+                // 导航栏被收掉，演员页的搜索/排序要一起搬到内容区
+                ActorsView(embedded: true, inlineControls: true)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .navigationTitle("人物")
-        .navigationBarTitleDisplayMode(.inline)
+        // 顶栏交给分段胶囊：不要标题栏，也不留一条空的导航栏横条
+        .navigationTitle("")
+        .toolbar(.hidden, for: .navigationBar)
         .appBackground()
+    }
+
+    // MARK: 顶栏（只放分段）
+    // 这条就是页面的顶 bar：分段左对齐 + 底部 0.5pt 分隔线，
+    // 与底栏「上方一条细线」的语言一致，滚动内容在它下面独立滚。
+    private var headerBar: some View {
+        segmentTabs
+            .padding(.horizontal, 24)
+            .padding(.top, 12)
+            .padding(.bottom, 10)
+            .overlay(alignment: .bottom) {
+                Rectangle()
+                    .fill(Color(uiColor: .separator).opacity(0.5))
+                    .frame(height: 0.5)
+            }
     }
 
     // MARK: 顶部分段

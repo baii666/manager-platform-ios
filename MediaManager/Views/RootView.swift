@@ -10,7 +10,7 @@ final class FullscreenOverlay: ObservableObject {
 
 // MARK: - 根 tab（底 bar）
 enum RootTab: String, CaseIterable, Identifiable {
-    case home, library, short, mine
+    case home, library, short, people, mine
 
     var id: String { rawValue }
 
@@ -19,6 +19,7 @@ enum RootTab: String, CaseIterable, Identifiable {
         case .home: return "首页"
         case .library: return "媒体库"
         case .short: return "短视频"
+        case .people: return "人物"
         case .mine: return "我的"
         }
     }
@@ -28,14 +29,16 @@ enum RootTab: String, CaseIterable, Identifiable {
         case .home: return "house.fill"
         case .library: return "square.grid.2x2.fill"
         case .short: return "play.rectangle.fill"
+        // 「我的」已占 person.fill，这里用双人图标区分：一个是「找人的内容」，一个是账号
+        case .people: return "person.2.fill"
         case .mine: return "person.fill"
         }
     }
 }
 
-// MARK: - 根视图：底 bar 四 tab 骨架
+// MARK: - 根视图：底 bar 五 tab 骨架
 // 改版：去掉侧边栏（NavigationSplitView），改常驻底 bar ——
-// 首页 / 媒体库 / 短视频 / 我的。每个 tab 各自持有一个 NavigationStack，
+// 首页 / 媒体库 / 短视频 / 人物 / 我的。每个 tab 各自持有一个 NavigationStack，
 // 用 opacity + allowsHitTesting 切换，保留各 tab 的导航栈状态。
 // 「我的」tab 是 iOS 端唯一的账户入口（服务器信息 + 退出登录），
 // 之前想换账号只能杀 App 重进。
@@ -70,6 +73,11 @@ struct RootView: View {
             NavigationStack { ShortsView() }
                 .opacity(tab == .short ? 1 : 0)
                 .allowsHitTesting(tab == .short)
+
+            // 人物：照片人脸聚类 + 影视演员。页面没有标题顶栏，顶栏只放分段。
+            NavigationStack { PeopleHubView() }
+                .opacity(tab == .people ? 1 : 0)
+                .allowsHitTesting(tab == .people)
 
             // 与首页共用同一份 viewModel：收藏 / 观看记录只拉一次，两边都能用
             NavigationStack { MineView(viewModel: viewModel) }
@@ -172,7 +180,7 @@ struct RootView: View {
         // 背后页面随之重排 —— 无论把恢复时机提前到动画开始还是等 close，
         // 用户都能看到那一下「闪」。所以刷流期间状态栏一直在，退出时零变化。
         // 切页面时通知「切走即清空」的列表页（当前只有相册搜索词订阅）。
-        // ⚠️ 不能靠页面自己的 onDisappear：这里四个 tab 是 ZStack + opacity 常驻，
+        // ⚠️ 不能靠页面自己的 onDisappear：这里五个 tab 是 ZStack + opacity 常驻，
         // 切 tab 与导航栈 push/pop 都不会让列表页卸载，ViewModel 也不会重建。
         .onChange(of: tab) { _, _ in
             NotificationCenter.default.post(name: .listPageShouldResetSearch, object: nil)
@@ -190,9 +198,9 @@ struct RootView: View {
 struct BottomTabBar: View {
     @Binding var selection: RootTab
 
-    /// 底 bar 内容的宽度上限（四个 tab 在这条宽度里均分）。
+    /// 底 bar 内容的宽度上限（五个 tab 在这条宽度里均分）。
     /// iPad 横屏有 1000+pt，均分铺满的话图标相距 250pt 以上，视线来回跑；
-    /// 收到 360（每格 90）居中，既聚拢又不至于挤到「短视频」这种三字标签。
+    /// 收到 360（每格 72）居中，既聚拢又不至于挤到「短视频」这种三字标签。
     private static let maxContentWidth: CGFloat = 360
 
     /// 底栏高度。页面滚动内容的底部净空（bottomBarClearance）引用它，
@@ -200,8 +208,9 @@ struct BottomTabBar: View {
     static let height: CGFloat = 52
 
     var body: some View {
-        // ⚠️ 别写死 spacing：三个 tab 时 44 还够，四个 tab 在窄屏（iPhone）上
+        // ⚠️ 别写死 spacing：三个 tab 时 44 还够，四个以上在窄屏（iPhone）上
         // 会挤出屏幕外。改成每格 maxWidth:.infinity 均分，tab 增减都不用调数字。
+        // 现在五个 tab：iPhone 375 宽每格 75，三字标签（短视频）也还放得下。
         HStack(spacing: 0) {
             ForEach(RootTab.allCases) { tab in
                 Button {
@@ -222,7 +231,7 @@ struct BottomTabBar: View {
                 .buttonStyle(.plain)
             }
         }
-        // 内容不铺满整屏：四个 tab 均分到 iPad 的宽屏上会散得很开，
+        // 内容不铺满整屏：五个 tab 均分到 iPad 的宽屏上会散得很开，
         // 限一个宽度上限并居中，让图标往中间聚拢。
         // ⚠️ 用 maxWidth 而不是 width：屏幕比它更窄时（小屏 iPhone）自动退回铺满，
         //    不会因为撑不下而溢出去。要再紧一点就把这个数字调小。

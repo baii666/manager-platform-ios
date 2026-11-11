@@ -138,7 +138,7 @@ struct ServerSwitchView: View {
 }
 
 // MARK: - 「我的」里的完整列表路由
-// 四个 tab 各自一个 NavigationStack，push 目标只能声明在自己的栈里，
+// 每个 tab 各自一个 NavigationStack，push 目标只能声明在自己的栈里，
 // 所以用一个 Hashable 路由值 + navigationDestination，而不是全局路径。
 enum MineListRoute: Hashable {
     case history

@@ -29,7 +29,9 @@ struct PersonsView: View {
                 ProgressView().frame(maxWidth: .infinity).padding()
             }
         }
-        .navigationTitle("人物")
+        // 嵌进「人物」聚合页时不写标题：顶栏交给外层那段「照片人物 / 影视演员」分段，
+        // 独立从相册页 push 进来时才需要「人物」标题
+        .navigationTitle(embedded ? "" : "人物")
         .navigationBarTitleDisplayMode(.inline)
         // ⚠️ 每个 push 进来的页面都要自己垫一层背景：NavigationStack 只渲染栈顶那一层。
         // 嵌进「人物」聚合页时由外层统一铺，否则背景图模式会压暗两次。
@@ -306,10 +308,9 @@ struct PersonPhotosView: View {
             }
         }
         .ignoresSafeArea(edges: .bottom)
-        // 通用标题让导航栏一定有系统返回按钮；具体人物信息在下面的置顶信息区
-        .navigationTitle("人物")
+        // 标题留空：人物姓名与数量已经在下面的置顶信息区，导航栏只负责返回
+        .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
-        // 名字/数量已在顶部信息区，导航栏不再重复一遍标题和计数
         // 两个 task 并发：资料很轻，先回来也不会拖慢照片首屏
         .task { await loadProfile() }
         .task { await loadMore() }
