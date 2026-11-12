@@ -487,8 +487,8 @@ struct PersonPhotosView: View {
         Group {
             if isWide { wideContent } else { narrowContent }
         }
-        // 标题留空：姓名在左栏 / 顶部资料条，导航栏只负责返回
-        .navigationTitle("")
+        // 顶 bar 显示人名；其下左栏放信息、右栏放数据
+        .navigationTitle(profile?.displayName ?? person.displayName)
         .navigationBarTitleDisplayMode(.inline)
         // 顶 bar 保持实心：左栏与固定工具行都不许盖到导航栏
         .toolbarBackground(.visible, for: .navigationBar)
@@ -548,28 +548,29 @@ struct PersonPhotosView: View {
         return "\(photos.count)/\(t)"
     }
 
-    // MARK: iPad 双栏（左 280pt 资料栏 + 右照片网格，共用同一条顶 bar）
+    // MARK: iPad 双栏：顶 bar（人名）之下，左栏信息 / 右栏数据（含自己的工具行）
     private var wideContent: some View {
-        VStack(spacing: 0) {
-            // 一条横跨两栏的顶 bar，贴在导航栏正下方；两栏内容从同一条线开始
-            pinnedToolBar
-            HStack(spacing: 0) {
-                ScrollView {
-                    PersonSidebar(person: person, profile: profile, total: total, loaded: photos.count)
-                        .padding(panePadding)
-                        .bottomBarClearance()
-                }
-                .frame(width: sidebarWidth)
-                .background(Color.primary.opacity(0.04))
+        HStack(spacing: 0) {
+            ScrollView {
+                PersonSidebar(person: person, profile: profile, total: total, loaded: photos.count)
+                    .padding(panePadding)
+                    .bottomBarClearance()
+            }
+            .frame(width: sidebarWidth)
+            .background(Color.primary.opacity(0.04))
 
-                Rectangle()
-                    .fill(Color.primary.opacity(0.15))
-                    .frame(width: 0.5)
+            Rectangle()
+                .fill(Color.primary.opacity(0.15))
+                .frame(width: 0.5)
 
+            // 排序 / 列数 / 数量属于右侧数据区，只占右栏顶部一行
+            VStack(spacing: 0) {
+                pinnedToolBar
                 photoGrid
-                    // UICollectionView 在 HStack 里需要明确拿到剩余空间，否则会塌成 0 高
+                    // UICollectionView 在 VStack 里需要明确拿到剩余空间，否则会塌成 0 高
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }

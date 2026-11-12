@@ -292,25 +292,26 @@ struct ActorDetailView: View {
 
     private func wideContent(_ profile: ActorProfile) -> some View {
         GeometryReader { geo in
-            VStack(spacing: 0) {
-                // 一条横跨两栏的顶 bar，贴在导航栏正下方；两栏内容从同一条线开始
-                pinnedFilterBar
-                HStack(spacing: 0) {
-                    ScrollView {
-                        profileColumn(profile)
-                            .padding(panePadding)
-                            .bottomBarClearance()
-                    }
-                    .frame(width: sidebarWidth)
-                    .background(Color.primary.opacity(0.04))
-
-                    Rectangle()
-                        .fill(Color(uiColor: .separator).opacity(0.6))
-                        .frame(width: 0.5)
-
-                    worksPane(containerWidth: geo.size.width - sidebarWidth - 0.5)
-                        .frame(maxWidth: .infinity)
+            HStack(spacing: 0) {
+                ScrollView {
+                    profileColumn(profile)
+                        .padding(panePadding)
+                        .bottomBarClearance()
                 }
+                .frame(width: sidebarWidth)
+                .background(Color.primary.opacity(0.04))
+
+                Rectangle()
+                    .fill(Color(uiColor: .separator).opacity(0.6))
+                    .frame(width: 0.5)
+
+                // 筛选 / 排序 / 数量属于右侧数据区，只占右栏顶部一行
+                VStack(spacing: 0) {
+                    pinnedFilterBar
+                    worksPane(containerWidth: geo.size.width - sidebarWidth - 0.5)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
