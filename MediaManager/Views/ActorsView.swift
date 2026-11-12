@@ -233,7 +233,10 @@ private struct ActorCard: View {
 //    iPad 上每列约 330pt、海报被拉到近 500pt 高，分屏 / Split View 下宽度还会算错。
 // biography 是「【姓名】…\n【生日】…」结构化脏串（含 HTML 链接），解析成属性表；
 // 纯文本简介（日文维基那种）没有【】时回退到可展开原文，不丢信息。
-// /api/actors/:id 的 movies 一次返回几百条不分页，年份 / 评分筛选与排序全在本地做。
+// /api/actors/:id 的 movies 一次返回几百条不分页，年份 / 评分筛选与排序全在本地做
+//（筛选必须基于全集，否则「2020 年」只会筛到已加载的那一页）。
+// 但网格不再一次性铺开全部作品：首屏只显示一批，滚到底再追加下一批，
+// 与其他列表页的滚动加载体验一致；数据仍在内存里，追加不发网络请求。
 struct ActorDetailView: View {
     let actorId: Int
     @StateObject private var viewModel: ActorDetailViewModel
@@ -243,6 +246,11 @@ struct ActorDetailView: View {
     @State private var yearFilter: Int? = nil
     @State private var minRating: Double = 0
     @State private var workSort: ActorWorkSort = .yearDesc
+    /// 作品网格每批显示的数量（滚动到底追加下一批）
+    private static let pageStep = 60
+    @State private var visibleCount = ActorDetailView.pageStep
+    /// 尾卡去重：一次追加只触发一回，避免视图重算时连着把全部批次铺开
+    @State private var isAppending = false
 
     @Environment(\.horizontalSizeClass) private var hSizeClass
 
@@ -283,6 +291,10 @@ struct ActorDetailView: View {
         .toolbarBackground(topBarColor, for: .navigationBar)
         .appBackground()
         .task { await viewModel.load() }
+        // 换筛选 / 排序后回到第一批：新结果集从头看，别停在旧批次的位置
+        .onChange(of: yearFilter) { resetPaging() }
+        .onChange(of: minRating) { resetPaging() }
+        .onChange(of: workSort) { resetPaging() }
         // ⚠️ destination 挂 body 根（Group）上，不能放进条件分支 / ScrollView 内部：
         //    那一层会随加载状态与滚动重建，点击瞬间可能丢掉注册 → 「点了没反应」。
         //    关联演员 / 作品都走 ActorRoute / MediaItem 两种 value 继续 push。
@@ -399,7 +411,8 @@ struct ActorDetailView: View {
     private func worksPane(containerWidth: CGFloat) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                worksGrid(works: filteredWorks, type: "movie", containerWidth: containerWidth)
+                worksGrid(works: visibleWorks, type: "movie", containerWidth: containerWidth,
+                          remaining: filteredWorks.count - visibleWorks.count) { appendWorks() }
                 // series 目前恒为空（media 表没有 tv 类型），有数据时才追加，不留空标题
                 if !viewModel.series.isEmpty {
                     Text("剧集").font(.title3.weight(.semibold))
@@ -424,7 +437,8 @@ struct ActorDetailView: View {
                         if let bio = profile.biography, !bio.isEmpty { bioBlock(bio) }
                         if !profile.linkedActors.isEmpty { linkedStrip(profile.linkedActors) }
                     }
-                    worksGrid(works: filteredWorks, type: "movie", containerWidth: geo.size.width)
+                    worksGrid(works: visibleWorks, type: "movie", containerWidth: geo.size.width,
+                              remaining: filteredWorks.count - visibleWorks.count) { appendWorks() }
                     if !viewModel.series.isEmpty {
                         Text("剧集").font(.headline)
                         worksGrid(works: viewModel.series, type: "tv", containerWidth: geo.size.width)
@@ -650,6 +664,26 @@ struct ActorDetailView: View {
         return list
     }
 
+    /// 筛选 / 排序作用于全集，但网格只铺开前 visibleCount 部，滚到底再追加
+    private var visibleWorks: [ActorWork] { Array(filteredWorks.prefix(visibleCount)) }
+    private var hasMoreWorks: Bool { filteredWorks.count > visibleCount }
+
+    private func appendWorks() {
+        guard hasMoreWorks, !isAppending else { return }
+        isAppending = true
+        // 放到下一帧再改 @State：onAppear 正处在布局阶段，同步改会触发
+        // 「Modifying state during view update」并可能让同一批连着触发多次
+        Task { @MainActor in
+            visibleCount += Self.pageStep
+            isAppending = false
+        }
+    }
+
+    private func resetPaging() {
+        visibleCount = Self.pageStep
+        isAppending = false
+    }
+
     private var filterBar: some View {
         HStack(spacing: 8) {
             Menu {
@@ -687,8 +721,8 @@ struct ActorDetailView: View {
             .tint(Color.secondary)
 
             Spacer(minLength: 0)
-            // 右侧固定显示「当前数/总数」，不随网格滚动
-            Text("\(filteredWorks.count)/\(viewModel.movies.count) 部")
+            // 右侧固定显示「已加载/总数」，不随网格滚动；滚动分批后数字会跟着涨
+            Text("\(visibleWorks.count)/\(viewModel.movies.count) 部")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .monospacedDigit()
@@ -712,7 +746,8 @@ struct ActorDetailView: View {
     /// 按容器宽算列数与卡片宽（对齐 MediaListView.gridLayout）：
     /// iPad 满宽右栏约 740pt → 4 列（卡片 ~165pt），12.9 寸可到 6 列；iPhone 仍约 3 列。
     /// 用普通函数 + AnyView（与本文件旧版 worksSection 同构），不依赖 result builder 内的局部变量声明。
-    private func worksGrid(works: [ActorWork], type: String, containerWidth: CGFloat) -> some View {
+    private func worksGrid(works: [ActorWork], type: String, containerWidth: CGFloat,
+                           remaining: Int = 0, loadMore: @escaping () -> Void = {}) -> some View {
         guard !works.isEmpty else {
             return AnyView(
                 ContentUnavailableView("没有符合条件的作品", systemImage: "film")
@@ -726,19 +761,39 @@ struct ActorDetailView: View {
         let itemW = max(60, (gridW - spacing * CGFloat(n - 1)) / CGFloat(n))
         let columns = Array(repeating: GridItem(.flexible(), spacing: spacing), count: n)
         return AnyView(
-            LazyVGrid(columns: columns, spacing: spacing) {
-                ForEach(works) { work in
-                    // 作品 → MediaItem，复用列表页同一张 MediaCard + 同一个影视详情页
-                    let item = MediaItem(id: work.id, title: work.title, year: work.year,
-                                         type: type, libraryId: work.libraryId, rating: work.rating)
-                    NavigationLink(value: item) {
-                        MediaCard(item: item, coverURL: work.posterURL, width: itemW,
-                                  useOwnTap: false)
+            VStack(spacing: spacing) {
+                LazyVGrid(columns: columns, spacing: spacing) {
+                    ForEach(works) { work in
+                        // 作品 → MediaItem，复用列表页同一张 MediaCard + 同一个影视详情页
+                        let item = MediaItem(id: work.id, title: work.title, year: work.year,
+                                             type: type, libraryId: work.libraryId, rating: work.rating)
+                        NavigationLink(value: item) {
+                            MediaCard(item: item, coverURL: work.posterURL, width: itemW,
+                                      useOwnTap: false)
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
+                }
+                .animation(.spring(response: 0.28, dampingFraction: 0.85), value: n)
+
+                // 触底哨兵：滚到这里才追加下一批，不在首屏一次铺开全部作品。
+                // 自动触发为主，按钮只是兜底（极端情况下哨兵残留时也能继续加载）
+                if remaining > 0 {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.down.circle")
+                        Text("加载更多 · 还有 \(remaining) 部")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .contentShape(Rectangle())
+                    .onTapGesture(perform: loadMore)
+                    // 固定 id：追加后 remaining 变化也不重建哨兵，onAppear 不会连着重跑
+                    .id("actorWorksLoadMore")
+                    .onAppear { loadMore() }
                 }
             }
-            .animation(.spring(response: 0.28, dampingFraction: 0.85), value: n)
         )
     }
 }
