@@ -404,6 +404,8 @@ struct MediaCard: View {
     /// 是否显示下方标题区（卡片够大时）。由外层按 cardWidth 判断传入，而非列宽。
     var showInfo: Bool = true
     var onTap: () -> Void = {}
+    /// 外层用 NavigationLink(value:) 包裹时设 false：卡内 onTapGesture 会抢走点击，导致链接不响应
+    var useOwnTap: Bool = true
 
     private var coverHeight: CGFloat { width * (landscape ? 9.0 / 16.0 : 3.0 / 2.0) }
 
@@ -493,6 +495,18 @@ struct MediaCard: View {
         }
         .shadow(color: .black.opacity(0.10), radius: 8, x: 0, y: 3)
         .contentShape(Rectangle())
-        .onTapGesture(perform: onTap)
+        .onTapIf(useOwnTap, onTap)
+    }
+}
+
+private extension View {
+    /// 条件挂载点击手势：NavigationLink 包裹时必须关掉，否则空闭包会吞掉链接点击
+    @ViewBuilder
+    func onTapIf(_ enabled: Bool, _ action: @escaping () -> Void) -> some View {
+        if enabled {
+            self.onTapGesture(perform: action)
+        } else {
+            self
+        }
     }
 }

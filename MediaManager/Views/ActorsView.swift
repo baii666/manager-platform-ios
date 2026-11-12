@@ -471,18 +471,19 @@ struct ActorDetailView: View {
 
     // MARK: 共用组件
 
+    /// 演员缩略图是 2:3 竖版（实测 0.65~0.78），头像按原比例显示，不做 1:1 方裁
     @ViewBuilder
     private func avatar(_ profile: ActorProfile, size: CGFloat) -> some View {
         if let url = profile.thumbURL {
             RemoteImage(url: url, fallbackIcon: "person.fill",
                         fallbackColors: [Color.gray.opacity(0.3), Color.gray.opacity(0.1)])
                 .imageFilled(alignment: .top)
-                .frame(width: size, height: size)
+                .frame(width: size, height: size * 1.5)
                 .clipShape(RoundedRectangle(cornerRadius: size * 0.09, style: .continuous))
         } else {
             RoundedRectangle(cornerRadius: size * 0.09, style: .continuous)
                 .fill(Theme.brand.opacity(0.16))
-                .frame(width: size, height: size)
+                .frame(width: size, height: size * 1.5)
                 .overlay {
                     Text(String(profile.title.prefix(1)).uppercased())
                         .font(.system(size: size * 0.38, weight: .medium))
@@ -589,7 +590,7 @@ struct ActorDetailView: View {
                             RemoteImage(url: actor.thumbURL, fallbackIcon: "person.fill",
                                         fallbackColors: [Color.gray.opacity(0.3), Color.gray.opacity(0.1)])
                                 .imageFilled(alignment: .top)
-                                .frame(width: 44, height: 44)
+                                .frame(width: 44, height: 66)
                                 .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                             Text(actor.title)
                                 .font(.caption2)
@@ -614,7 +615,7 @@ struct ActorDetailView: View {
                                 RemoteImage(url: actor.thumbURL, fallbackIcon: "person.fill",
                                             fallbackColors: [Color.gray.opacity(0.3), Color.gray.opacity(0.1)])
                                     .imageFilled(alignment: .top)
-                                    .frame(width: 56, height: 56)
+                                    .frame(width: 56, height: 84)
                                     .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
                                 Text(actor.title)
                                     .font(.caption2)
@@ -731,7 +732,8 @@ struct ActorDetailView: View {
                     let item = MediaItem(id: work.id, title: work.title, year: work.year,
                                          type: type, libraryId: work.libraryId, rating: work.rating)
                     NavigationLink(value: item) {
-                        MediaCard(item: item, coverURL: work.posterURL, width: itemW)
+                        MediaCard(item: item, coverURL: work.posterURL, width: itemW,
+                                  useOwnTap: false)
                     }
                     .buttonStyle(.plain)
                 }
