@@ -559,11 +559,11 @@ struct PersonPhotosView: View {
         return "\(photos.count)/\(t)"
     }
 
-    // MARK: iPad 双栏：整页一条顶 bar，bar 之下左栏信息 / 右栏数据
+    // MARK: iPad 双栏：系统导航栏是唯一横跨整页的顶 bar；
+    // bar 之下左栏信息 / 右栏数据，排序/数量只在右栏顶部，不跨到资料区上方
     private var wideContent: some View {
         VStack(spacing: 0) {
-            // 横跨左右两栏的一整条：左半边信息、右半边排序/列数/数量，无竖线切断
-            wideTopBar
+            // 顶 bar 的下边界，属于系统导航栏那一条，不属于数据区
             barDivider
 
             HStack(spacing: 0) {
@@ -579,35 +579,18 @@ struct PersonPhotosView: View {
                     .fill(Color.primary.opacity(0.15))
                     .frame(width: 0.5)
 
-                photoGrid
-                    // UICollectionView 在 HStack 里需要明确拿到剩余空间，否则会塌成 0 高
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // 排序 / 列数 / 数量属于右侧数据区，只占右栏顶部一行
+                VStack(spacing: 0) {
+                    pinnedToolBar
+                    photoGrid
+                        // UICollectionView 在 VStack 里需要明确拿到剩余空间，否则会塌成 0 高
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-    }
-
-    /// 一整条顶 bar：左右同底色、同高度，视觉上是一个整体，不随左右分栏切开
-    private var wideTopBar: some View {
-        HStack(spacing: 0) {
-            HStack(spacing: 6) {
-                Image(systemName: "person.crop.rectangle")
-                    .font(.caption)
-                Text("\(person.faceCount.formatted()) 张人脸")
-                    .font(.caption)
-                    .lineLimit(1)
-            }
-            .foregroundStyle(.secondary)
-            .frame(width: sidebarWidth, alignment: .leading)
-            .padding(.leading, panePadding)
-
-            toolBarContent
-                .padding(.horizontal, panePadding)
-                .frame(maxWidth: .infinity)
-        }
-        .frame(height: 44)
-        .background(topBarColor)
     }
 
     // MARK: iPhone 单栏（顶部资料条 + 固定工具行 + 网格）
@@ -659,12 +642,11 @@ struct PersonPhotosView: View {
         }
     }
 
-    /// iPhone 单栏用：工具行自带顶 bar 底色与底部分隔线，与下面的网格区分
+    /// 右栏顶部工具行：不铺底色（资料区与数据区同底），只用一条底部分隔线区分网格
     private var pinnedToolBar: some View {
         toolBarContent
             .padding(.horizontal, panePadding)
             .padding(.vertical, 10)
-            .background(topBarColor)
             .overlay(alignment: .bottom) { barDivider }
     }
 

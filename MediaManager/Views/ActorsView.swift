@@ -296,12 +296,12 @@ struct ActorDetailView: View {
 
     // MARK: iPad 双栏
 
-    // MARK: iPad 双栏：整页一条顶 bar，bar 之下左栏信息 / 右栏数据
+    // MARK: iPad 双栏：系统导航栏是唯一横跨整页的顶 bar；
+    // bar 之下左栏信息 / 右栏数据，筛选排序只在右栏顶部，不跨到资料区上方
     private func wideContent(_ profile: ActorProfile) -> some View {
         GeometryReader { geo in
             VStack(spacing: 0) {
-                // 横跨左右两栏的一整条：左半边信息、右半边筛选/排序/数量，无竖线切断
-                wideTopBar
+                // 顶 bar 的下边界，属于系统导航栏那一条，不属于数据区
                 barDivider
 
                 HStack(spacing: 0) {
@@ -317,8 +317,13 @@ struct ActorDetailView: View {
                         .fill(Color(uiColor: .separator).opacity(0.6))
                         .frame(width: 0.5)
 
-                    worksPane(containerWidth: geo.size.width - sidebarWidth - 0.5)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    // 筛选 / 排序 / 数量属于右侧数据区，只占右栏顶部一行
+                    VStack(spacing: 0) {
+                        pinnedFilterBar
+                        worksPane(containerWidth: geo.size.width - sidebarWidth - 0.5)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
@@ -326,34 +331,11 @@ struct ActorDetailView: View {
         }
     }
 
-    /// 一整条顶 bar：左右同底色、同高度，视觉上是一个整体
-    private var wideTopBar: some View {
-        HStack(spacing: 0) {
-            HStack(spacing: 6) {
-                Image(systemName: "film")
-                    .font(.caption)
-                Text("电影 \(viewModel.movies.count) 部")
-                    .font(.caption)
-                    .lineLimit(1)
-            }
-            .foregroundStyle(.secondary)
-            .frame(width: sidebarWidth, alignment: .leading)
-            .padding(.leading, panePadding)
-
-            filterBar
-                .padding(.horizontal, panePadding)
-                .frame(maxWidth: .infinity)
-        }
-        .frame(height: 44)
-        .background(topBarColor)
-    }
-
-    /// iPhone 单栏用：工具行自带顶 bar 底色与底部分隔线，与下面的网格区分
+    /// 右栏顶部工具行：不铺底色（资料区与数据区同底），只用一条底部分隔线区分网格
     private var pinnedFilterBar: some View {
         filterBar
             .padding(.horizontal, panePadding)
             .padding(.vertical, 10)
-            .background(topBarColor)
             .overlay(alignment: .bottom) { barDivider }
     }
 
@@ -413,7 +395,7 @@ struct ActorDetailView: View {
     }
 
     /// 右侧作品区：自适应网格。容器宽由外层 GeometryReader 量得；
-    /// 筛选 / 排序工具行已上移为整页一条顶 bar，这里只放数据。
+    /// 筛选 / 排序工具行在右栏 VStack 顶端，这里只放数据。
     private func worksPane(containerWidth: CGFloat) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
