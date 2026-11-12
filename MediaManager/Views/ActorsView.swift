@@ -294,12 +294,9 @@ struct ActorDetailView: View {
                     .fill(Color(uiColor: .separator).opacity(0.6))
                     .frame(width: 0.5)
 
-                VStack(spacing: 0) {
-                    // 筛选 / 排序 / 数量固定在顶端一行，不随作品网格滚走
-                    pinnedFilterBar
-                    worksPane(containerWidth: geo.size.width - sidebarWidth - 0.5)
-                }
-                .frame(maxWidth: .infinity)
+                // 工具行由 worksPane 的 safeAreaInset 自己顶到导航栏正下方
+                worksPane(containerWidth: geo.size.width - sidebarWidth - 0.5)
+                    .frame(maxWidth: .infinity)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
@@ -370,6 +367,8 @@ struct ActorDetailView: View {
     }
 
     /// 右侧作品区：顶部筛选条 + 自适应网格。容器宽由外层 GeometryReader 量得。
+    /// 右侧作品区：工具行用 safeAreaInset 顶在导航栏正下方（与左栏顶部对齐），
+    /// 网格内容自动避开；容器宽由外层 GeometryReader 量得。
     private func worksPane(containerWidth: CGFloat) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
@@ -384,33 +383,33 @@ struct ActorDetailView: View {
             .bottomBarClearance()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .safeAreaInset(edge: .top, spacing: 0) { pinnedFilterBar }
     }
 
     // MARK: iPhone 单栏
 
     private func narrowContent(_ profile: ActorProfile) -> some View {
         GeometryReader { geo in
-            VStack(spacing: 0) {
-                pinnedFilterBar
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 20) {
-                        header(profile)
-                        profileToggle
-                        if profileExpanded {
-                            if let bio = profile.biography, !bio.isEmpty { bioBlock(bio) }
-                            if !profile.linkedActors.isEmpty { linkedStrip(profile.linkedActors) }
-                        }
-                        worksGrid(works: filteredWorks, type: "movie", containerWidth: geo.size.width)
-                        if !viewModel.series.isEmpty {
-                            Text("剧集").font(.headline)
-                            worksGrid(works: viewModel.series, type: "tv", containerWidth: geo.size.width)
-                        }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    header(profile)
+                    profileToggle
+                    if profileExpanded {
+                        if let bio = profile.biography, !bio.isEmpty { bioBlock(bio) }
+                        if !profile.linkedActors.isEmpty { linkedStrip(profile.linkedActors) }
                     }
-                    .padding(panePadding)
-                    .bottomBarClearance()
+                    worksGrid(works: filteredWorks, type: "movie", containerWidth: geo.size.width)
+                    if !viewModel.series.isEmpty {
+                        Text("剧集").font(.headline)
+                        worksGrid(works: viewModel.series, type: "tv", containerWidth: geo.size.width)
+                    }
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(panePadding)
+                .bottomBarClearance()
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // iPhone 同款：工具行顶在导航栏正下方，不随内容滚走
+            .safeAreaInset(edge: .top, spacing: 0) { pinnedFilterBar }
         }
     }
 

@@ -477,13 +477,12 @@ struct PersonPhotosView: View {
                 .fill(Color.primary.opacity(0.15))
                 .frame(width: 0.5)
 
-            VStack(spacing: 0) {
-                pinnedToolBar
-                photoGrid
-                    // UICollectionView 在 VStack 里需要明确拿到剩余空间，否则会塌成 0 高
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-            .frame(maxWidth: .infinity)
+            photoGrid
+                // UICollectionView 在 HStack 里需要明确拿到剩余空间，否则会塌成 0 高
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // 工具行由 safeAreaInset 顶到导航栏正下方，与左栏顶部对齐
+                .safeAreaInset(edge: .top, spacing: 0) { pinnedToolBar }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
@@ -493,9 +492,10 @@ struct PersonPhotosView: View {
         VStack(spacing: 0) {
             PersonPhotosHeader(person: person, profile: profile,
                                total: total, loaded: photos.count)
-            pinnedToolBar
             photoGrid
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // 工具行顶在资料条正下方，不随网格滚走
+                .safeAreaInset(edge: .top, spacing: 0) { pinnedToolBar }
         }
     }
 
