@@ -190,9 +190,9 @@ private struct ActorCard: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // 图区：与卡片同宽的正方形（对齐人物卡 / 网页版，无底板无边框）
+            // 图区：2:3 竖版（对齐网页版 ActorsPage 卡片），clear 撑比例、图填满
             Color.clear
-                .aspectRatio(1, contentMode: .fit)
+                .aspectRatio(2 / 3, contentMode: .fit)
                 .overlay {
                     RemoteImage(url: actor.thumbURL, fallbackIcon: "person.fill",
                                 fallbackColors: [Color.gray.opacity(0.3), Color.gray.opacity(0.1)])
@@ -210,10 +210,17 @@ private struct ActorCard: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
-            .padding(10)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .appSurface(in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        // 边界只是一条细线，不是厚边框
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.5)
+        }
     }
 }
 

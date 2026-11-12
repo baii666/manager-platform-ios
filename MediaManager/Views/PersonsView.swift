@@ -74,8 +74,8 @@ struct PersonsView: View {
 }
 
 // MARK: - 人物卡
-// 对齐网页版 PersonGrid 卡片：大图占满卡片宽（1:1、object-top 保留头部），
-// 下方名字 + 人脸数；没有面板底板、没有描边。
+// 对齐网页版卡片：封面按原生 3:4（离线流水线产出 675×900）完整显示不裁切，
+// 底部名字 + 人脸数；卡片只给一层薄底板 + 0.5pt 细描边做边界，不是厚面板。
 private struct PersonCard: View {
     let person: Person
 
@@ -87,9 +87,9 @@ private struct PersonCard: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // 图区：与卡片同宽的正方形（clear 撑比例，图 overlay 填满）
+            // 图区：封面原生 3:4，clear 撑比例、图 overlay 填满（object-top）
             Color.clear
-                .aspectRatio(1, contentMode: .fit)
+                .aspectRatio(3 / 4, contentMode: .fit)
                 .overlay {
                     RemoteImage(url: coverURL, fallbackURL: personFaceURL(person),
                                 fallbackIcon: "person.fill",
@@ -106,10 +106,17 @@ private struct PersonCard: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
-            .padding(10)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .appSurface(in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        // 边界只是一条细线，不是厚边框
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.5)
+        }
     }
 }
 
