@@ -414,6 +414,21 @@ final class APIClient: DataProviding, @unchecked Sendable {
         return (resp.photos.map { resolvePhoto($0) }, resp.total)
     }
 
+    /// 人物档案列表。GET /api/person-profiles?page&size
+    /// 列表项 JSON 与 /person-profiles/:id 完全同构，直接解成 PersonProfile。
+    /// 只有挂了档案的人物会返回（约 976 条）；其余人物走 /persons，没有这些字段。
+    func fetchPersonProfiles(page: Int = 1, size: Int = 300) async throws -> (items: [PersonProfile], total: Int) {
+        struct Resp: Codable {
+            let profiles: [PersonProfile]
+            let total: Int
+        }
+        let resp: Resp = try await request("/api/person-profiles", queryItems: [
+            URLQueryItem(name: "page", value: "\(page)"),
+            URLQueryItem(name: "size", value: "\(size)"),
+        ])
+        return (resp.profiles, resp.total)
+    }
+
     /// 人物档案（thenude 匹配结果）。GET /api/person-profiles/:id
     /// ⚠️ 没匹配到档案的人物同样返回 200，只是 meta 为空对象；
     ///    展示前用 PersonProfile.hasDetails 判断，别把空档案当成有资料。

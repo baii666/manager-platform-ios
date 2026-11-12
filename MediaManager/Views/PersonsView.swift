@@ -24,12 +24,15 @@ struct PersonsView: View {
     var embedded: Bool = false
     @StateObject private var viewModel = PersonsViewModel()
 
+    /// iPad 卡片更大（对齐网页版人物资料页的大卡观感）
+    @Environment(\.horizontalSizeClass) private var hSizeClass
+
     var body: some View {
         ScrollView {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), spacing: 14)], spacing: 14) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: hSizeClass == .regular ? 210 : 150), spacing: 14)], spacing: 14) {
                 ForEach(viewModel.items) { person in
                     NavigationLink(value: person) {
-                        PersonCard(person: person)
+                        PersonCard(person: person, profile: viewModel.profileFacts[person.id])
                     }
                     .buttonStyle(.plain)
                     // ⚠️ 别用 .task：SwiftUI 会在 cell 复用 / items 重绘时取消它，
@@ -66,6 +69,8 @@ struct PersonsView: View {
             }
         }
         .task { await viewModel.loadInitial() }
+        // 档案资料独立拉一次，失败不影响列表
+        .task { await viewModel.loadFacts() }
         // 🔴 这里不注册 navigationDestination：本页只作为「人物」tab 的
         // TabView(.page) 分页使用，page 内部注册的路由不会生效（点了没反应），
         // Person 的路由统一由外层 PeopleHubView 注册。若将来要独立使用本页，
@@ -74,15 +79,31 @@ struct PersonsView: View {
 }
 
 // MARK: - 人物卡
-// 对齐网页版卡片：封面按原生 3:4（离线流水线产出 675×900）完整显示不裁切，
-// 底部名字 + 人脸数；卡片只给一层薄底板 + 0.5pt 细描边做边界，不是厚面板。
+// 对齐网页版人物资料页 ProfileCard：封面原生 3:4 完整显示，
+// 图上左上「N 脸」黑胶囊、右上相似度胶囊；图下名字 + 出生/身高/出生地最多两行。
+// 卡片边界只是一条 0.5pt 细描边 + 薄底板，不是厚边框。
 private struct PersonCard: View {
     let person: Person
+    /// 已挂档案的资料（无档案传 nil，卡片就不显示资料行 / 相似度）
+    var profile: PersonProfile? = nil
 
-    /// 封面优先（/person-cover 的上半身标准肖像，按簇 id）；
-    /// 该簇没产出封面（404）时由 RemoteImage 退回代表脸
-    private var coverURL: URL? {
-        AppSession.shared.client?.personCoverURL(person.id)
+    private var displayName: String { profile?.displayName ?? person.displayName }
+
+    /// 与网页版同款三事实：出生 → 身高 → 出生地，最多展示 2 行
+    private var facts: [(icon: String, text: String)] {
+        guard let p = profile else { return [] }
+        var list: [(String, String)] = []
+        if let born = p.bornText { list.append(("birthday.cake", born)) }
+        if let height = p.heightText { list.append(("ruler", height)) }
+        if let birth = p.birthplaceText { list.append(("mappin.and.ellipse", birth)) }
+        return list.prefix(2).map { ($0.0, $0.1) }
+    }
+
+    /// 相似度胶囊底色：≥0.75 绿、≥0.62 琥珀、其余黑（网页版同规则）
+    private func simColor(_ sim: Double) -> Color {
+        sim >= 0.75 ? Color.green.opacity(0.75)
+            : sim >= 0.62 ? Color.orange.opacity(0.75)
+            : Color.black.opacity(0.55)
     }
 
     var body: some View {
@@ -91,20 +112,41 @@ private struct PersonCard: View {
             Color.clear
                 .aspectRatio(3 / 4, contentMode: .fit)
                 .overlay {
-                    RemoteImage(url: coverURL, fallbackURL: personFaceURL(person),
+                    RemoteImage(url: personCoverURL(person), fallbackURL: personFaceURL(person),
                                 fallbackIcon: "person.fill",
                                 fallbackColors: Theme.placeholderGradient(for: .photo))
                         .imageFilled(alignment: .top)
                 }
+                .overlay(alignment: .topLeading) {
+                    if person.faceCount > 0 {
+                        imageCapsule("\(person.faceCount.formatted()) 脸")
+                            .padding(6)
+                    }
+                }
+                .overlay(alignment: .topTrailing) {
+                    if let sim = profile?.thenudeSim, sim > 0 {
+                        imageCapsule("\(Int((sim * 100).rounded()))%")
+                            .background(simColor(sim), in: Capsule())
+                            .padding(6)
+                    }
+                }
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(person.displayName)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(displayName)
                     .font(.subheadline.weight(.medium))
                     .lineLimit(1)
-                Text("\(person.faceCount) 张人脸")
-                    .font(.caption)
+                ForEach(facts.indices, id: \.self) { i in
+                    HStack(spacing: 4) {
+                        Image(systemName: facts[i].icon)
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(.tertiary)
+                        Text(facts[i].text)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                    .font(.caption2)
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                }
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
@@ -117,6 +159,17 @@ private struct PersonCard: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.5)
         }
+    }
+
+    /// 图上的小胶囊：黑底白字 11 号
+    private func imageCapsule(_ text: String) -> some View {
+        Text(text)
+            .font(.caption2.weight(.medium))
+            .monospacedDigit()
+            .foregroundStyle(.white)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(Color.black.opacity(0.55), in: Capsule())
     }
 }
 
@@ -605,14 +658,46 @@ final class PersonsViewModel: ObservableObject {
     @Published var totalCount = 0
     @Published var isLoading = false
     @Published var errorMessage: String?
+    /// 已挂档案人物的资料（出生/身高/出生地/相似度），按簇 id 索引。
+    /// 卡片用它显示网页版人物资料页同款的数据行；没挂档案的人物卡片少两行小字。
+    @Published var profileFacts: [Int: PersonProfile] = [:]
 
     private var page = 1
     private let pageSize = 60
     private var hasMore = true
     /// 刷新代际：下拉刷新成功后 +1，让刷新前发出的分页请求结果作废，避免旧页混进新列表
     private var generation = 0
+    /// 档案列表只拉一次（数据不随分页变化）
+    private var factsLoaded = false
 
     private var client: APIClient? { AppSession.shared.client }
+
+    /// 一次拉全档案列表（约 976 条，接口 size 上限 300 → 最多 4 页并发）。
+    /// 失败静默：档案只是卡片上的增强数据，不该拖垮列表本身。
+    @MainActor
+    func loadFacts() async {
+        guard !factsLoaded, let client else { return }
+        factsLoaded = true
+        do {
+            let (_, total) = try await client.fetchPersonProfiles(page: 1)
+            let pages = max(1, Int(ceil(Double(total) / 300.0)))
+            var dict: [Int: PersonProfile] = [:]
+            try await withThrowingTaskGroup(of: [PersonProfile].self) { group in
+                for p in 1...pages {
+                    group.addTask {
+                        try await client.fetchPersonProfiles(page: p, size: 300).items
+                    }
+                }
+                for try await batch in group {
+                    for profile in batch { dict[profile.id] = profile }
+                }
+            }
+            profileFacts = dict
+        } catch {
+            // 取消 / 失败都允许下次进页面重试
+            factsLoaded = false
+        }
+    }
 
     @MainActor
     func loadInitial() async {
