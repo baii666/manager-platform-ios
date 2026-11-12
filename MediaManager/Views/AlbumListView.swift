@@ -518,15 +518,22 @@ private struct AlbumPersonsRow: View {
         .task { await viewModel.loadInitial() }
     }
 
-    /// 代表脸头像（/face-thumb）；没有代表脸时 RemoteImage 走占位图标
+    /// 封面优先（/person-cover 的上半身标准肖像）；该簇没产出封面时退回代表脸
     private func avatar(_ person: Person) -> some View {
-        RemoteImage(url: avatarURL(person), fallbackIcon: "person.fill",
+        RemoteImage(url: coverURL(person), fallbackURL: avatarURL(person),
+                    fallbackIcon: "person.fill",
                     fallbackColors: Theme.placeholderGradient(for: .photo))
-            .imageFilled()
+            .imageFilled(alignment: .top)
             .frame(width: 64, height: 64)
             .clipShape(Circle())
     }
 
+    /// 人物封面，参数是簇 id
+    private func coverURL(_ person: Person) -> URL? {
+        AppSession.shared.client?.personCoverURL(person.id)
+    }
+
+    /// 回退用的代表脸头像（/face-thumb）
     private func avatarURL(_ person: Person) -> URL? {
         guard let faceId = person.representativeFaceId else { return nil }
         return AppSession.shared.client?.faceThumbURL(faceId)

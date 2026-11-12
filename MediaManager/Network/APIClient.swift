@@ -347,6 +347,16 @@ final class APIClient: DataProviding, @unchecked Sendable {
         ])
     }
 
+    /// 人物封面（上半身标准肖像）。参数是**簇 id**，不是人脸 id。
+    ///
+    /// 由离线打分流程（portrait 取景 + 站姿/正面判据）按簇产出，只有达标簇才有图，
+    /// 其余簇返回 404 → 调用方回退到 `faceThumbURL` 的人脸裁剪图。
+    func personCoverURL(_ clusterId: Int) -> URL? {
+        makeURL("/person-cover", queryItems: [
+            URLQueryItem(name: "id", value: "\(clusterId)"),
+        ])
+    }
+
     func search(query: String) async throws -> [UnifiedAsset] {
         // ⚠️ 别再请求 type=all：后端 all 分支返回的是分组 map
         //（{movie:[...], tv:[...], album:[...], shoot:[...], library:[...]}），

@@ -77,17 +77,18 @@ struct PersonsView: View {
 private struct PersonCard: View {
     let person: Person
 
-    /// 代表脸头像（/face-thumb）。没有代表脸时 RemoteImage 走占位图标
-    private var avatarURL: URL? {
-        guard let faceId = person.representativeFaceId else { return nil }
-        return AppSession.shared.client?.faceThumbURL(faceId)
+    /// 封面优先（/person-cover 的上半身标准肖像，按簇 id）；
+    /// 该簇没产出封面（404）时由 RemoteImage 退回代表脸
+    private var coverURL: URL? {
+        AppSession.shared.client?.personCoverURL(person.id)
     }
 
     var body: some View {
         VStack(spacing: 8) {
-            RemoteImage(url: avatarURL, fallbackIcon: "person.fill",
+            RemoteImage(url: coverURL, fallbackURL: personFaceURL(person),
+                        fallbackIcon: "person.fill",
                         fallbackColors: Theme.placeholderGradient(for: .photo))
-                .imageFilled()
+                .imageFilled(alignment: .top)
                 .frame(width: 84, height: 84)
                 .clipShape(Circle())
             Text(person.displayName)
@@ -107,7 +108,13 @@ private struct PersonCard: View {
 // 固定在瀑布流上方（不随滚动）：头像 + 名字 + 作品数 / 人脸数。
 // 下面的瀑布流就是「这个人物的作品」，两者用一条细分隔线隔开。
 // MARK: - 人物资料共用组件（iPhone 顶部条 / iPad 左栏共用）
-private func personAvatarURL(_ person: Person) -> URL? {
+/// 人物封面（/person-cover），参数是簇 id —— 离线打分流程按簇产出的上半身标准肖像
+private func personCoverURL(_ person: Person) -> URL? {
+    AppSession.shared.client?.personCoverURL(person.id)
+}
+
+/// 封面缺失时的回退图：代表脸（/face-thumb）→ 代表照片
+private func personFaceURL(_ person: Person) -> URL? {
     let client = AppSession.shared.client
     if let faceId = person.representativeFaceId { return client?.faceThumbURL(faceId) }
     if let photoId = person.representativePhotoId {
@@ -189,8 +196,8 @@ private struct PersonPhotosHeader: View {
     /// 资料默认收起：展开后字段多，会把下面的瀑布流挤掉一半
     @State private var expanded = false
 
-    /// 头像优先级：聚类代表脸 → 代表照片 → 占位图标
-    private var avatarURL: URL? { personAvatarURL(person) }
+    /// 头像优先级：封面 → 聚类代表脸 → 代表照片 → 占位图标
+    private var coverURL: URL? { personCoverURL(person) }
 
     /// 首批还没回来时别闪一个「0 张作品」
     private var worksText: String {
@@ -213,9 +220,10 @@ private struct PersonPhotosHeader: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 14) {
-                RemoteImage(url: avatarURL, fallbackIcon: "person.fill",
+                RemoteImage(url: coverURL, fallbackURL: personFaceURL(person),
+                            fallbackIcon: "person.fill",
                             fallbackColors: Theme.placeholderGradient(for: .photo))
-                    .imageFilled()
+                    .imageFilled(alignment: .top)
                     .frame(width: 68, height: 68)
                     .clipShape(Circle())
 
@@ -339,10 +347,11 @@ private struct PersonSidebar: View {
 
     @ViewBuilder
     private var avatar: some View {
-        if let url = personAvatarURL(person) {
-            RemoteImage(url: url, fallbackIcon: "person.fill",
+        if let url = personCoverURL(person) {
+            RemoteImage(url: url, fallbackURL: personFaceURL(person),
+                        fallbackIcon: "person.fill",
                         fallbackColors: Theme.placeholderGradient(for: .photo))
-                .imageFilled()
+                .imageFilled(alignment: .top)
                 .frame(width: 160, height: 160)
                 .clipShape(Circle())
         } else {
