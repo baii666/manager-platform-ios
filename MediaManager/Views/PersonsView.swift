@@ -125,25 +125,27 @@ private struct PersonCard: View {
                 }
                 .overlay(alignment: .topTrailing) {
                     if let sim = profile?.thenudeSim, sim > 0 {
-                        imageCapsule("\(Int((sim * 100).rounded()))%")
-                            .background(simColor(sim), in: Capsule())
+                        imageCapsule("\(Int((sim * 100).rounded()))%", color: simColor(sim))
                             .padding(6)
                     }
                 }
 
-            VStack(alignment: .leading, spacing: 4) {
+            // 文字区整块固定高度：名字一行 + 资料两行。
+            // 用显式 VStack 容器固定，不能把 .frame 加在 Group 上（Group 会把 frame
+            // 传给每个子行，两行资料的卡就比一行/无资料的卡高，整页网格对不齐）。
+            VStack(alignment: .leading, spacing: 3) {
                 Text(displayName)
                     .font(.subheadline.weight(.medium))
                     .lineLimit(1)
-                // 资料区固定两行高：有档案 → 出生/身高（+出生地）；没档案 → 人脸数补位。
-                // 不固定的话同排卡片高矮不一，整页网格对不齐。
-                Group {
+                    .frame(height: 19)
+
+                VStack(alignment: .leading, spacing: 2) {
                     if facts.isEmpty {
                         HStack(spacing: 4) {
-                            Image(systemName: "photo.on.rectangle.angled")
+                            Image(systemName: "person.crop.rectangle")
                                 .font(.system(size: 9, weight: .medium))
                                 .foregroundStyle(.tertiary)
-                            Text("\(person.faceCount.formatted()) 张照片")
+                            Text("\(person.faceCount.formatted()) 张人脸")
                                 .lineLimit(1)
                         }
                         .font(.caption2)
@@ -163,11 +165,11 @@ private struct PersonCard: View {
                         }
                     }
                 }
-                .frame(height: 32, alignment: .topLeading)
+                .frame(height: 30, maxWidth: .infinity, alignment: .topLeading)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(height: 74, maxWidth: .infinity, alignment: .topLeading)
         }
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .appSurface(in: RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -178,15 +180,16 @@ private struct PersonCard: View {
         }
     }
 
-    /// 图上的小胶囊：黑底白字 11 号
-    private func imageCapsule(_ text: String) -> some View {
+    /// 图上的小胶囊：默认黑底白字 11 号；相似度传自定义底色
+    private func imageCapsule(_ text: String,
+                              color: Color = Color.black.opacity(0.55)) -> some View {
         Text(text)
             .font(.caption2.weight(.medium))
             .monospacedDigit()
             .foregroundStyle(.white)
             .padding(.horizontal, 7)
             .padding(.vertical, 3)
-            .background(Color.black.opacity(0.55), in: Capsule())
+            .background(color, in: Capsule())
     }
 }
 
