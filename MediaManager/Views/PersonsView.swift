@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // MARK: - 取消类错误（列表加载通用）
 /// URLSession 的 async 请求在所属 Task 被取消时抛 URLError(.cancelled)，
@@ -486,6 +487,11 @@ struct PersonPhotosView: View {
     /// 与演员详情页同一套分栏宽度 / 内边距，两页视觉一致
     private var sidebarWidth: CGFloat { 280 }
     private var panePadding: CGFloat { isWide ? 20 : 16 }
+    /// 顶 bar 统一底色：系统导航栏与整宽工具行同色，和下面内容区分开
+    private var topBarColor: Color { Color(uiColor: .systemGray6) }
+    private var barDivider: some View {
+        Rectangle().fill(Color.primary.opacity(0.12)).frame(height: 0.5)
+    }
 
     var body: some View {
         Group {
@@ -494,8 +500,9 @@ struct PersonPhotosView: View {
         // 顶 bar 显示人名；其下左栏放信息、右栏放数据
         .navigationTitle(profile?.displayName ?? person.displayName)
         .navigationBarTitleDisplayMode(.inline)
-        // 顶 bar 保持实心：左栏与固定工具行都不许盖到导航栏
+        // 顶 bar 保持实心并与下面那条整宽工具行同色：连成一个整体 bar
         .toolbarBackground(.visible, for: .navigationBar)
+        .toolbarBackground(topBarColor, for: .navigationBar)
         .ignoresSafeArea(edges: .bottom)
         // 两个 task 并发：资料很轻，先回来也不会拖慢照片首屏
         .task { await loadProfile() }
@@ -552,31 +559,55 @@ struct PersonPhotosView: View {
         return "\(photos.count)/\(t)"
     }
 
-    // MARK: iPad 双栏：顶 bar（人名）之下，左栏信息 / 右栏数据（含自己的工具行）
+    // MARK: iPad 双栏：整页一条顶 bar，bar 之下左栏信息 / 右栏数据
     private var wideContent: some View {
-        HStack(spacing: 0) {
-            ScrollView {
-                PersonSidebar(person: person, profile: profile, total: total, loaded: photos.count)
-                    .padding(panePadding)
-                    .bottomBarClearance()
-            }
-            .frame(width: sidebarWidth)
-            .background(Color.primary.opacity(0.04))
+        VStack(spacing: 0) {
+            // 横跨左右两栏的一整条：左半边信息、右半边排序/列数/数量，无竖线切断
+            wideTopBar
+            barDivider
 
-            Rectangle()
-                .fill(Color.primary.opacity(0.15))
-                .frame(width: 0.5)
+            HStack(spacing: 0) {
+                ScrollView {
+                    PersonSidebar(person: person, profile: profile, total: total, loaded: photos.count)
+                        .padding(panePadding)
+                        .bottomBarClearance()
+                }
+                .frame(width: sidebarWidth)
+                .clipped()
 
-            // 排序 / 列数 / 数量属于右侧数据区，只占右栏顶部一行
-            VStack(spacing: 0) {
-                pinnedToolBar
+                Rectangle()
+                    .fill(Color.primary.opacity(0.15))
+                    .frame(width: 0.5)
+
                 photoGrid
-                    // UICollectionView 在 VStack 里需要明确拿到剩余空间，否则会塌成 0 高
+                    // UICollectionView 在 HStack 里需要明确拿到剩余空间，否则会塌成 0 高
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    /// 一整条顶 bar：左右同底色、同高度，视觉上是一个整体，不随左右分栏切开
+    private var wideTopBar: some View {
+        HStack(spacing: 0) {
+            HStack(spacing: 6) {
+                Image(systemName: "person.crop.rectangle")
+                    .font(.caption)
+                Text("\(person.faceCount.formatted()) 张人脸")
+                    .font(.caption)
+                    .lineLimit(1)
+            }
+            .foregroundStyle(.secondary)
+            .frame(width: sidebarWidth, alignment: .leading)
+            .padding(.leading, panePadding)
+
+            toolBarContent
+                .padding(.horizontal, panePadding)
+                .frame(maxWidth: .infinity)
+        }
+        .frame(height: 44)
+        .background(topBarColor)
     }
 
     // MARK: iPhone 单栏（顶部资料条 + 固定工具行 + 网格）
@@ -591,8 +622,8 @@ struct PersonPhotosView: View {
         }
     }
 
-    /// 固定在顶端的一行：排序 / 列数放同一行，最右显示 已加载/总数
-    private var pinnedToolBar: some View {
+    /// 排序 / 列数 / 已加载数：iPad 整宽顶 bar 与 iPhone 单栏共用
+    private var toolBarContent: some View {
         HStack(spacing: 8) {
             Menu {
                 ForEach(PersonPhotoSort.allCases) { s in
@@ -626,11 +657,15 @@ struct PersonPhotosView: View {
                 .foregroundStyle(.secondary)
                 .monospacedDigit()
         }
-        .padding(.horizontal, panePadding)
-        .padding(.vertical, 10)
-        // 与左栏同一层浅底色，整条 bar 融为页面一部分（regularMaterial 在灰底上发灰）
-        .background(Color.primary.opacity(0.04))
-        .overlay(alignment: .bottom) { Divider().opacity(0.6) }
+    }
+
+    /// iPhone 单栏用：工具行自带顶 bar 底色与底部分隔线，与下面的网格区分
+    private var pinnedToolBar: some View {
+        toolBarContent
+            .padding(.horizontal, panePadding)
+            .padding(.vertical, 10)
+            .background(topBarColor)
+            .overlay(alignment: .bottom) { barDivider }
     }
 
     private func toolLabel(_ text: String) -> some View {
