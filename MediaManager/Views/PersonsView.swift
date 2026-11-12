@@ -135,18 +135,35 @@ private struct PersonCard: View {
                 Text(displayName)
                     .font(.subheadline.weight(.medium))
                     .lineLimit(1)
-                ForEach(facts.indices, id: \.self) { i in
-                    HStack(spacing: 4) {
-                        Image(systemName: facts[i].icon)
-                            .font(.system(size: 9, weight: .medium))
-                            .foregroundStyle(.tertiary)
-                        Text(facts[i].text)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
+                // 资料区固定两行高：有档案 → 出生/身高（+出生地）；没档案 → 人脸数补位。
+                // 不固定的话同排卡片高矮不一，整页网格对不齐。
+                Group {
+                    if facts.isEmpty {
+                        HStack(spacing: 4) {
+                            Image(systemName: "photo.on.rectangle.angled")
+                                .font(.system(size: 9, weight: .medium))
+                                .foregroundStyle(.tertiary)
+                            Text("\(person.faceCount.formatted()) 张照片")
+                                .lineLimit(1)
+                        }
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(facts.indices, id: \.self) { i in
+                            HStack(spacing: 4) {
+                                Image(systemName: facts[i].icon)
+                                    .font(.system(size: 9, weight: .medium))
+                                    .foregroundStyle(.tertiary)
+                                Text(facts[i].text)
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
+                            }
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        }
                     }
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
                 }
+                .frame(height: 32, alignment: .topLeading)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
