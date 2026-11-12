@@ -165,11 +165,11 @@ private struct PersonCard: View {
                         }
                     }
                 }
-                .frame(height: 30, maxWidth: .infinity, alignment: .topLeading)
+                .frame(maxWidth: .infinity, minHeight: 30, maxHeight: 30, alignment: .topLeading)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
-            .frame(height: 74, maxWidth: .infinity, alignment: .topLeading)
+            .frame(maxWidth: .infinity, minHeight: 74, maxHeight: 74, alignment: .topLeading)
         }
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .appSurface(in: RoundedRectangle(cornerRadius: 12, style: .continuous))
