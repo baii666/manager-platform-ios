@@ -292,24 +292,25 @@ struct ActorDetailView: View {
 
     private func wideContent(_ profile: ActorProfile) -> some View {
         GeometryReader { geo in
-            HStack(spacing: 0) {
-                ScrollView {
-                    profileColumn(profile)
-                        .padding(panePadding)
-                        .bottomBarClearance()
+            VStack(spacing: 0) {
+                // 一条横跨两栏的顶 bar，贴在导航栏正下方；两栏内容从同一条线开始
+                pinnedFilterBar
+                HStack(spacing: 0) {
+                    ScrollView {
+                        profileColumn(profile)
+                            .padding(panePadding)
+                            .bottomBarClearance()
+                    }
+                    .frame(width: sidebarWidth)
+                    .background(Color.primary.opacity(0.04))
+
+                    Rectangle()
+                        .fill(Color(uiColor: .separator).opacity(0.6))
+                        .frame(width: 0.5)
+
+                    worksPane(containerWidth: geo.size.width - sidebarWidth - 0.5)
+                        .frame(maxWidth: .infinity)
                 }
-                .frame(width: sidebarWidth)
-                .background(Color.primary.opacity(0.04))
-                // 资料栏只在顶 bar 之下滚动，不越到导航栏区域
-                .clipped()
-
-                Rectangle()
-                    .fill(Color(uiColor: .separator).opacity(0.6))
-                    .frame(width: 0.5)
-
-                // 工具行由 worksPane 的 safeAreaInset 自己顶到导航栏正下方
-                worksPane(containerWidth: geo.size.width - sidebarWidth - 0.5)
-                    .frame(maxWidth: .infinity)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
@@ -320,7 +321,8 @@ struct ActorDetailView: View {
         filterBar
             .padding(.horizontal, panePadding)
             .padding(.vertical, 10)
-            .background(.regularMaterial)
+            // 与左栏同一层浅底色，整条 bar 融为页面一部分（regularMaterial 在灰底上发灰）
+            .background(Color.primary.opacity(0.04))
             .overlay(alignment: .bottom) { Divider().opacity(0.6) }
     }
 
@@ -379,9 +381,8 @@ struct ActorDetailView: View {
         .buttonStyle(.plain)
     }
 
-    /// 右侧作品区：顶部筛选条 + 自适应网格。容器宽由外层 GeometryReader 量得。
-    /// 右侧作品区：工具行用 safeAreaInset 顶在导航栏正下方（与左栏顶部对齐），
-    /// 网格内容自动避开；容器宽由外层 GeometryReader 量得。
+    /// 右侧作品区：自适应网格。容器宽由外层 GeometryReader 量得；
+    /// 工具行已上移为整页一条顶 bar（wideContent 的 VStack 顶端）。
     private func worksPane(containerWidth: CGFloat) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
@@ -396,7 +397,6 @@ struct ActorDetailView: View {
             .bottomBarClearance()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .safeAreaInset(edge: .top, spacing: 0) { pinnedFilterBar }
     }
 
     // MARK: iPhone 单栏

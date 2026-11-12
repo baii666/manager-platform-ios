@@ -478,29 +478,28 @@ struct PersonPhotosView: View {
         return "\(photos.count)/\(t)"
     }
 
-    // MARK: iPad 双栏（与演员详情页一致：左 280pt 资料栏 + 右照片网格）
+    // MARK: iPad 双栏（左 280pt 资料栏 + 右照片网格，共用同一条顶 bar）
     private var wideContent: some View {
-        HStack(spacing: 0) {
-            ScrollView {
-                PersonSidebar(person: person, profile: profile, total: total, loaded: photos.count)
-                    .padding(panePadding)
-                    .bottomBarClearance()
+        VStack(spacing: 0) {
+            // 一条横跨两栏的顶 bar，贴在导航栏正下方；两栏内容从同一条线开始
+            pinnedToolBar
+            HStack(spacing: 0) {
+                ScrollView {
+                    PersonSidebar(person: person, profile: profile, total: total, loaded: photos.count)
+                        .padding(panePadding)
+                        .bottomBarClearance()
+                }
+                .frame(width: sidebarWidth)
+                .background(Color.primary.opacity(0.04))
+
+                Rectangle()
+                    .fill(Color.primary.opacity(0.15))
+                    .frame(width: 0.5)
+
+                photoGrid
+                    // UICollectionView 在 HStack 里需要明确拿到剩余空间，否则会塌成 0 高
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .frame(width: sidebarWidth)
-            .background(Color.primary.opacity(0.04))
-            // 左栏只在顶 bar 之下滚动，不越到导航栏区域
-            .clipped()
-
-            Rectangle()
-                .fill(Color.primary.opacity(0.15))
-                .frame(width: 0.5)
-
-            photoGrid
-                // UICollectionView 在 HStack 里需要明确拿到剩余空间，否则会塌成 0 高
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                // 工具行由 safeAreaInset 顶到导航栏正下方，与左栏顶部对齐
-                .safeAreaInset(edge: .top, spacing: 0) { pinnedToolBar }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
@@ -554,7 +553,8 @@ struct PersonPhotosView: View {
         }
         .padding(.horizontal, panePadding)
         .padding(.vertical, 10)
-        .background(.regularMaterial)
+        // 与左栏同一层浅底色，整条 bar 融为页面一部分（regularMaterial 在灰底上发灰）
+        .background(Color.primary.opacity(0.04))
         .overlay(alignment: .bottom) { Divider().opacity(0.6) }
     }
 
