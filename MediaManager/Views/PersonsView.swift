@@ -90,7 +90,7 @@ private struct PersonCard: View {
                         fallbackColors: Theme.placeholderGradient(for: .photo))
                 .imageFilled(alignment: .top)
                 .frame(width: 84, height: 84)
-                .clipShape(Circle())
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             Text(person.displayName)
                 .font(.subheadline.weight(.medium))
                 .lineLimit(1)
@@ -199,11 +199,17 @@ private struct PersonPhotosHeader: View {
     /// 头像优先级：封面 → 聚类代表脸 → 代表照片 → 占位图标
     private var coverURL: URL? { personCoverURL(person) }
 
-    /// 首批还没回来时别闪一个「0 张作品」
-    private var worksText: String {
-        if total > 0 { return "\(total) 张作品" }
-        if loaded > 0 { return "\(loaded) 张作品" }
-        return "作品加载中…"
+    /// 首批还没回来时别闪一个「0 张照片」
+    private var photosText: String {
+        if total > 0 { return "\(total) 张照片" }
+        if loaded > 0 { return "\(loaded) 张照片" }
+        return "照片加载中…"
+    }
+
+    /// 对齐网页版 PersonDetailView：人脸数在前，「N 张人脸 · N 张照片」
+    private var infoLine: String {
+        if person.faceCount > 0 { return "\(person.faceCount) 张人脸 · \(photosText)" }
+        return photosText
     }
 
     private var displayName: String {
@@ -219,29 +225,23 @@ private struct PersonPhotosHeader: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 14) {
+            HStack(spacing: 16) {
                 RemoteImage(url: coverURL, fallbackURL: personFaceURL(person),
                             fallbackIcon: "person.fill",
                             fallbackColors: Theme.placeholderGradient(for: .photo))
                     .imageFilled(alignment: .top)
-                    .frame(width: 68, height: 68)
-                    .clipShape(Circle())
+                    .frame(width: 80, height: 80)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
                 VStack(alignment: .leading, spacing: 5) {
                     Text(displayName)
-                        .font(.title3.weight(.semibold))
+                        .font(.title2.weight(.bold))
                         .lineLimit(1)
                         .truncationMode(.tail)
-                    HStack(spacing: 6) {
-                        Text(worksText)
-                        if person.faceCount > 0 {
-                            Text("·")
-                            Text("\(person.faceCount) 张人脸")
-                        }
-                    }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                    Text(infoLine)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                     if !expanded, let summaryLine {
                         Text(summaryLine)
                             .font(.caption2)
@@ -301,10 +301,17 @@ private struct PersonSidebar: View {
     @State private var expanded = false
 
     private var displayName: String { profile?.displayName ?? person.displayName }
-    private var worksText: String {
-        if total > 0 { return "\(total) 张作品" }
-        if loaded > 0 { return "\(loaded) 张作品" }
-        return "作品加载中…"
+    /// 对齐网页版文案：照片数（不再是「作品」）
+    private var photosText: String {
+        if total > 0 { return "\(total) 张照片" }
+        if loaded > 0 { return "\(loaded) 张照片" }
+        return "照片加载中…"
+    }
+
+    /// 与网页版一致：人脸数在前，「N 张人脸 · N 张照片」
+    private var infoLine: String {
+        if person.faceCount > 0 { return "\(person.faceCount) 张人脸 · \(photosText)" }
+        return photosText
     }
 
     var body: some View {
@@ -315,12 +322,7 @@ private struct PersonSidebar: View {
                 Text(displayName)
                     .font(.title.weight(.semibold))
                     .fixedSize(horizontal: false, vertical: true)
-                Text(worksText).font(.caption).foregroundStyle(.secondary)
-                if person.faceCount > 0 {
-                    Text("\(person.faceCount) 张人脸")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+                Text(infoLine).font(.subheadline).foregroundStyle(.secondary)
             }
 
             if let profile, profile.hasDetails {
@@ -353,9 +355,9 @@ private struct PersonSidebar: View {
                         fallbackColors: Theme.placeholderGradient(for: .photo))
                 .imageFilled(alignment: .top)
                 .frame(width: 160, height: 160)
-                .clipShape(Circle())
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         } else {
-            Circle()
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(Theme.brand.opacity(0.16))
                 .frame(width: 160, height: 160)
                 .overlay {

@@ -525,7 +525,7 @@ private struct AlbumPersonsRow: View {
                     fallbackColors: Theme.placeholderGradient(for: .photo))
             .imageFilled(alignment: .top)
             .frame(width: 64, height: 64)
-            .clipShape(Circle())
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     /// 人物封面，参数是簇 id
