@@ -518,13 +518,13 @@ private struct AlbumPersonsRow: View {
         .task { await viewModel.loadInitial() }
     }
 
-    /// 封面优先（/person-cover 的上半身标准肖像）；该簇没产出封面时退回代表脸
+    /// 封面优先（/person-cover 的上半身标准肖像，原生 3:4）；该簇没产出封面时退回代表脸
     private func avatar(_ person: Person) -> some View {
         RemoteImage(url: coverURL(person), fallbackURL: avatarURL(person),
                     fallbackIcon: "person.fill",
                     fallbackColors: Theme.placeholderGradient(for: .photo))
             .imageFilled(alignment: .top)
-            .frame(width: 64, height: 64)
+            .frame(width: 64, height: 85)
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 

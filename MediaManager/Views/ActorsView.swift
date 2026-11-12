@@ -238,8 +238,8 @@ struct ActorDetailView: View {
     let actorId: Int
     @StateObject private var viewModel: ActorDetailViewModel
     @State private var overviewExpanded = false
-    /// 左栏资料默认收起，点「资料」才展开；与人物详情页一致
-    @State private var profileExpanded = false
+    /// 左栏资料默认展开，需要时点「收起资料」折叠；与人物详情页一致
+    @State private var profileExpanded = true
     @State private var yearFilter: Int? = nil
     @State private var minRating: Double = 0
     @State private var workSort: ActorWorkSort = .yearDesc
@@ -354,7 +354,7 @@ struct ActorDetailView: View {
             }
 
             profileToggle
-            // 资料需要时点开，默认收起；与人物详情页的「资料」按钮同款
+            // 资料默认展开；与人物详情页的「资料」按钮同款，点一下收起
             if profileExpanded {
                 if !profile.aliases.isEmpty { aliasesBlock(profile.aliases) }
                 if let bio = profile.biography, !bio.isEmpty { bioBlock(bio) }

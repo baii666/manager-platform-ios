@@ -282,8 +282,8 @@ private struct PersonPhotosHeader: View {
     /// 已加载条数（首批还没回来时用它兜底）
     let loaded: Int
 
-    /// 资料默认收起：展开后字段多，会把下面的瀑布流挤掉一半
-    @State private var expanded = false
+    /// 资料默认展开（详情页左栏 / 顶部条都一样），需要时点「收起资料」折叠
+    @State private var expanded = true
 
     /// 头像优先级：封面 → 聚类代表脸 → 代表照片 → 占位图标
     private var coverURL: URL? { personCoverURL(person) }
@@ -319,7 +319,7 @@ private struct PersonPhotosHeader: View {
                             fallbackIcon: "person.fill",
                             fallbackColors: Theme.placeholderGradient(for: .photo))
                     .imageFilled(alignment: .top)
-                    .frame(width: 80, height: 80)
+                    .frame(width: 80, height: 107)
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
                 VStack(alignment: .leading, spacing: 5) {
@@ -386,8 +386,8 @@ private struct PersonSidebar: View {
     let total: Int
     let loaded: Int
 
-    /// 资料默认收起，需要时点「资料」展开
-    @State private var expanded = false
+    /// 资料默认展开，需要时点「收起资料」折叠
+    @State private var expanded = true
 
     private var displayName: String { profile?.displayName ?? person.displayName }
     /// 对齐网页版文案：照片数（不再是「作品」）
@@ -436,6 +436,7 @@ private struct PersonSidebar: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    /// 头像按 /person-cover 原生 3:4（675×900）显示，不做 1:1 方裁
     @ViewBuilder
     private var avatar: some View {
         if let url = personCoverURL(person) {
@@ -443,12 +444,12 @@ private struct PersonSidebar: View {
                         fallbackIcon: "person.fill",
                         fallbackColors: Theme.placeholderGradient(for: .photo))
                 .imageFilled(alignment: .top)
-                .frame(width: 160, height: 160)
+                .frame(width: 160, height: 213)
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         } else {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(Theme.brand.opacity(0.16))
-                .frame(width: 160, height: 160)
+                .frame(width: 160, height: 213)
                 .overlay {
                     Text(String(displayName.prefix(1)).uppercased())
                         .font(.system(size: 60, weight: .medium))
