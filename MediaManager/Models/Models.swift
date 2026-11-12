@@ -681,8 +681,17 @@ struct Actor: Identifiable, Codable, Sendable {
         name = (try? c.decode(String.self, forKey: .name)) ?? ""
         id = name
         role = optString(c, .role)
-        thumbURL = flexURL(c, .thumbURL)
+        // /api/media/:id 的 thumb 是未编码的 Windows 路径（中文 / 空格 / 反斜杠），
+        // URL(string:) 偶尔解析不了；换成正斜杠 + 百分号编码再试一次，别丢掉头像
+        thumbURL = flexURL(c, .thumbURL) ?? Self.looseThumbURL(c, .thumbURL)
         actorId = optInt(c, .actorId)
+    }
+
+    private static func looseThumbURL<K: CodingKey>(_ c: KeyedDecodingContainer<K>, _ key: K) -> URL? {
+        guard let s = optString(c, key), !s.isEmpty else { return nil }
+        let cleaned = s.replacingOccurrences(of: "\\", with: "/")
+        guard let encoded = cleaned.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else { return nil }
+        return URL(string: encoded)
     }
 }
 

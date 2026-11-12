@@ -383,7 +383,38 @@ final class APIClient: DataProviding, @unchecked Sendable {
         if !detail.stills.isEmpty {
             detail.stills = detail.stills.compactMap { resolve($0) }
         }
+        // 🔴 演员头像也要 resolve：/api/media/:id 的 actors[].thumb 是
+        // "/raw?path=<Windows 路径>" 相对串（后端 media.go 两处直接拼接、未编码），
+        // Actor 解码只做了 URL(string:) → 得到没有 host 的相对 URL。
+        // 之前这里只 resolve 了 poster / backdrop / stills，RemoteImage 拿着
+        // 相对 URL 必然加载失败 → 电影详情页演员全是占位图，
+        // 而演员库 / 演员详情页（走 /api/actors，返回已编码串且显式 resolve）正常。
+        if !detail.actors.isEmpty {
+            detail.actors = detail.actors.map(resolveActor)
+        }
         return detail
+    }
+
+    private func resolveActor(_ a: Actor) -> Actor {
+        var x = a
+        x.thumbURL = resolveActorThumb(a.thumbURL)
+        return x
+    }
+
+    /// 把 /raw?path= 里的原始 Windows 路径（中文 / 空格 / 反斜杠）规范化编码，再拼上 host。
+    /// URLComponents 解析不了时退回普通 resolve，保证不会比修之前更差。
+    private func resolveActorThumb(_ raw: URL?) -> URL? {
+        guard let raw, raw.scheme == nil else { return resolve(raw) }
+        guard var comp = URLComponents(string: raw.absoluteString),
+              var items = comp.queryItems,
+              let idx = items.firstIndex(where: { $0.name == "path" }),
+              let path = items[idx].value else {
+            return resolve(raw)
+        }
+        items[idx] = URLQueryItem(name: "path", value: path)
+        comp.queryItems = items
+        guard let normalized = comp.string else { return resolve(raw) }
+        return URL(string: normalized, relativeTo: baseURL) ?? resolve(raw)
     }
 
     // MARK: - 人物（人脸聚类）
