@@ -74,6 +74,8 @@ struct PersonsView: View {
 }
 
 // MARK: - 人物卡
+// 对齐网页版 PersonGrid 卡片：大图占满卡片宽（1:1、object-top 保留头部），
+// 下方名字 + 人脸数；没有面板底板、没有描边。
 private struct PersonCard: View {
     let person: Person
 
@@ -84,23 +86,30 @@ private struct PersonCard: View {
     }
 
     var body: some View {
-        VStack(spacing: 8) {
-            RemoteImage(url: coverURL, fallbackURL: personFaceURL(person),
-                        fallbackIcon: "person.fill",
-                        fallbackColors: Theme.placeholderGradient(for: .photo))
-                .imageFilled(alignment: .top)
-                .frame(width: 84, height: 84)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            Text(person.displayName)
-                .font(.subheadline.weight(.medium))
-                .lineLimit(1)
-            Text("\(person.faceCount) 张")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+        VStack(spacing: 0) {
+            // 图区：与卡片同宽的正方形（clear 撑比例，图 overlay 填满）
+            Color.clear
+                .aspectRatio(1, contentMode: .fit)
+                .overlay {
+                    RemoteImage(url: coverURL, fallbackURL: personFaceURL(person),
+                                fallbackIcon: "person.fill",
+                                fallbackColors: Theme.placeholderGradient(for: .photo))
+                        .imageFilled(alignment: .top)
+                }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(person.displayName)
+                    .font(.subheadline.weight(.medium))
+                    .lineLimit(1)
+                Text("\(person.faceCount) 张人脸")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 12)
-        .appSurface(in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
 

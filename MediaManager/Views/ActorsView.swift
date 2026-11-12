@@ -189,25 +189,31 @@ private struct ActorCard: View {
     let actor: ActorItem
 
     var body: some View {
-        VStack(spacing: 8) {
-            RemoteImage(url: actor.thumbURL, fallbackIcon: "person.fill",
-                        fallbackColors: [Color.gray.opacity(0.3), Color.gray.opacity(0.1)])
-                .imageFilled()
-                .frame(width: 84, height: 84)
-                .clipShape(Circle())
-            Text(actor.title)
-                .font(.subheadline.weight(.medium))
-                .lineLimit(1)
-            Text(actor.movieCount + actor.seriesCount > 0
-                 ? "电影 \(actor.movieCount) · 剧集 \(actor.seriesCount)"
-                 : "暂无作品")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
+        VStack(spacing: 0) {
+            // 图区：与卡片同宽的正方形（对齐人物卡 / 网页版，无底板无边框）
+            Color.clear
+                .aspectRatio(1, contentMode: .fit)
+                .overlay {
+                    RemoteImage(url: actor.thumbURL, fallbackIcon: "person.fill",
+                                fallbackColors: [Color.gray.opacity(0.3), Color.gray.opacity(0.1)])
+                        .imageFilled(alignment: .top)
+                }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(actor.title)
+                    .font(.subheadline.weight(.medium))
+                    .lineLimit(1)
+                Text(actor.movieCount + actor.seriesCount > 0
+                     ? "电影 \(actor.movieCount) · 剧集 \(actor.seriesCount)"
+                     : "暂无作品")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 12)
-        .appSurface(in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
 
@@ -450,11 +456,11 @@ struct ActorDetailView: View {
         if let url = profile.thumbURL {
             RemoteImage(url: url, fallbackIcon: "person.fill",
                         fallbackColors: [Color.gray.opacity(0.3), Color.gray.opacity(0.1)])
-                .imageFilled()
+                .imageFilled(alignment: .top)
                 .frame(width: size, height: size)
-                .clipShape(Circle())
+                .clipShape(RoundedRectangle(cornerRadius: size * 0.09, style: .continuous))
         } else {
-            Circle()
+            RoundedRectangle(cornerRadius: size * 0.09, style: .continuous)
                 .fill(Theme.brand.opacity(0.16))
                 .frame(width: size, height: size)
                 .overlay {
@@ -562,9 +568,9 @@ struct ActorDetailView: View {
                         VStack(spacing: 5) {
                             RemoteImage(url: actor.thumbURL, fallbackIcon: "person.fill",
                                         fallbackColors: [Color.gray.opacity(0.3), Color.gray.opacity(0.1)])
-                                .imageFilled()
+                                .imageFilled(alignment: .top)
                                 .frame(width: 44, height: 44)
-                                .clipShape(Circle())
+                                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                             Text(actor.title)
                                 .font(.caption2)
                                 .lineLimit(1)
@@ -587,9 +593,9 @@ struct ActorDetailView: View {
                             VStack(spacing: 6) {
                                 RemoteImage(url: actor.thumbURL, fallbackIcon: "person.fill",
                                             fallbackColors: [Color.gray.opacity(0.3), Color.gray.opacity(0.1)])
-                                    .imageFilled()
+                                    .imageFilled(alignment: .top)
                                     .frame(width: 56, height: 56)
-                                    .clipShape(Circle())
+                                    .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
                                 Text(actor.title)
                                     .font(.caption2)
                                     .lineLimit(1)
