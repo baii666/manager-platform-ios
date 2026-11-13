@@ -1011,7 +1011,9 @@ struct PhotoViewerView: View {
         }
     }
 
-    /// 人脸列表网格：点头像跳到该人物的全部照片（不是放大头像）
+    /// 人脸列表网格：点头像跳到该人物的全部照片（不是放大头像）。
+    /// 后端 /api/photos/:id/faces 已经带 person_name，这里把名字显示在每个头像下面；
+    /// 未命名簇 / 未聚类的脸给状态文字，不留空白。
     private var facesSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             if facesLoading {
@@ -1022,7 +1024,7 @@ struct PhotoViewerView: View {
             } else if faces.isEmpty {
                 Text("该图片未检测到人脸").font(.caption).foregroundStyle(.secondary)
             } else {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 62), spacing: 6)], spacing: 6) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 76), spacing: 6)], spacing: 8) {
                     ForEach(faces) { face in
                         VStack(spacing: 2) {
                             Button {
@@ -1033,14 +1035,26 @@ struct PhotoViewerView: View {
                                     .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                             }
                             .buttonStyle(.plain)
+                            Text(faceDisplayName(face))
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.75)
                             Text(face.scoreText)
                                 .font(.system(size: 9))
                                 .foregroundStyle(.secondary)
                         }
+                        .frame(maxWidth: .infinity)
                     }
                 }
             }
         }
+    }
+
+    /// 人名优先取聚类簇名；簇没起名 / 没聚类时给状态，避免名字行空白
+    private func faceDisplayName(_ face: PhotoFace) -> String {
+        if let name = face.personName, !name.isEmpty { return name }
+        return face.personId == nil ? "未聚类" : "未命名"
     }
 
     private func sectionTitle(_ text: String) -> some View {
