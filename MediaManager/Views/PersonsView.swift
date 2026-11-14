@@ -29,29 +29,37 @@ struct PersonsView: View {
     @Environment(\.horizontalSizeClass) private var hSizeClass
 
     var body: some View {
-        ScrollView {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: hSizeClass == .regular ? 210 : 150), spacing: 14)], spacing: 14) {
-                ForEach(viewModel.items) { person in
-                    NavigationLink(value: person) {
-                        PersonCard(person: person, profile: viewModel.profileFacts[person.id])
-                    }
-                    .buttonStyle(.plain)
-                    // ⚠️ 别用 .task：SwiftUI 会在 cell 复用 / items 重绘时取消它，
-                    // 连带取消正在跑的 URLSession 请求（URLError.cancelled），
-                    // 于是滑到底那一页静默丢掉、还写一条 cancelled 错误。
-                    // 改 onAppear + 非结构化 Task，去重交给 VM 的 isLoading。
-                    .onAppear {
-                        if person.id == viewModel.items.last?.id {
-                            Task { await viewModel.loadMore() }
+        VStack(spacing: 0) {
+            // 「人物」tab 的系统导航栏是收起来的（顶栏只放分段胶囊），所以搜索框
+            // 画在内容区，与「影视演员」分段的 inlineControlBar 同行高、同款淡底胶囊。
+            searchBar
+
+            ScrollView {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: hSizeClass == .regular ? 210 : 150), spacing: 14)], spacing: 14) {
+                    ForEach(viewModel.items) { person in
+                        NavigationLink(value: person) {
+                            PersonCard(person: person, profile: viewModel.profileFacts[person.id])
+                        }
+                        .buttonStyle(.plain)
+                        // ⚠️ 别用 .task：SwiftUI 会在 cell 复用 / items 重绘时取消它，
+                        // 连带取消正在跑的 URLSession 请求（URLError.cancelled），
+                        // 于是滑到底那一页静默丢掉、还写一条 cancelled 错误。
+                        // 改 onAppear + 非结构化 Task，去重交给 VM 的 isLoading。
+                        .onAppear {
+                            if person.id == viewModel.items.last?.id {
+                                Task { await viewModel.loadMore() }
+                            }
                         }
                     }
                 }
+                .padding(16)
+                .bottomBarClearance()
+                if viewModel.isLoading {
+                    ProgressView().frame(maxWidth: .infinity).padding()
+                }
             }
-            .padding(16)
-            .bottomBarClearance()
-            if viewModel.isLoading {
-                ProgressView().frame(maxWidth: .infinity).padding()
-            }
+            // ⚠️ .refreshable 必须挂在 ScrollView 上，不能挪到外层 VStack
+            .refreshing { await viewModel.reload() }
         }
         // 嵌进「人物」聚合页时不写标题：顶栏交给外层那段「照片人物 / 影视演员」分段，
         // 独立从相册页 push 进来时才需要「人物」标题
@@ -60,22 +68,71 @@ struct PersonsView: View {
         // ⚠️ 每个 push 进来的页面都要自己垫一层背景：NavigationStack 只渲染栈顶那一层。
         // 嵌进「人物」聚合页时由外层统一铺，否则背景图模式会压暗两次。
         .background { if !embedded { AppBackgroundView() } }
-        .refreshing { await viewModel.reload() }
         .overlay {
             if viewModel.items.isEmpty && !viewModel.isLoading {
                 ContentUnavailableView(
-                    viewModel.errorMessage ?? "暂无人物",
-                    systemImage: viewModel.errorMessage == nil ? "person.2.fill" : "exclamationmark.triangle"
+                    viewModel.errorMessage ?? (viewModel.searchText.isEmpty ? "暂无人物" : "没有匹配的人物"),
+                    systemImage: viewModel.errorMessage == nil
+                        ? (viewModel.searchText.isEmpty ? "person.2.fill" : "magnifyingglass")
+                        : "exclamationmark.triangle"
                 )
             }
         }
         .task { await viewModel.loadInitial() }
         // 档案资料独立拉一次，失败不影响列表
         .task { await viewModel.loadFacts() }
+        // 搜索防抖 350ms（与演员库 / 三个列表页同一套）
+        .onChange(of: viewModel.searchText) {
+            Task {
+                try? await Task.sleep(nanoseconds: 350_000_000)
+                guard !Task.isCancelled else { return }
+                await viewModel.reload()
+            }
+        }
         // 🔴 这里不注册 navigationDestination：本页只作为「人物」tab 的
         // TabView(.page) 分页使用，page 内部注册的路由不会生效（点了没反应），
         // Person 的路由统一由外层 PeopleHubView 注册。若将来要独立使用本页，
         // 记得在调用方的 NavigationStack 里补 for: Person.self。
+    }
+
+    /// 内容区搜索行：后端 `/api/persons?q=` 按簇名模糊匹配，右侧显示命中总数。
+    /// 布局和演员分段的 inlineControlBar 对齐（左右 16、下 8、胶囊高 32）。
+    private var searchBar: some View {
+        HStack(spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                TextField("搜索人物名…", text: $viewModel.searchText)
+                    .textFieldStyle(.plain)
+                    .font(.subheadline)
+                    .autocorrectionDisabled()
+                    .submitLabel(.search)
+                if !viewModel.searchText.isEmpty {
+                    Button {
+                        viewModel.searchText = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 13))
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 32)
+            .background(Capsule().fill(Color.primary.opacity(0.06)))
+
+            if viewModel.totalCount > 0 {
+                Text("\(viewModel.totalCount) 人")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                    .lineLimit(1)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 8)
     }
 }
 
@@ -697,6 +754,11 @@ final class PersonsViewModel: ObservableObject {
     @Published var totalCount = 0
     @Published var isLoading = false
     @Published var errorMessage: String?
+    /// 搜索词：后端 `/api/persons?q=` 按簇名模糊匹配。
+    /// 与演员库一样按页记住上次输入（切走不清空，只有相册列表是「切走即清空」）。
+    @Published var searchText = "" {
+        didSet { ListSearchPrefs.saveSearch("persons", searchText) }
+    }
     /// 已挂档案人物的资料（出生/身高/出生地/相似度），按簇 id 索引。
     /// 卡片用它显示网页版人物资料页同款的数据行；没挂档案的人物卡片少两行小字。
     @Published var profileFacts: [Int: PersonProfile] = [:]
@@ -710,6 +772,11 @@ final class PersonsViewModel: ObservableObject {
     private var factsLoaded = false
 
     private var client: APIClient? { AppSession.shared.client }
+
+    init() {
+        // 初始化期间给 @Published 赋值不触发 didSet，所以这里不需要额外持久化
+        self.searchText = ListSearchPrefs.loadSearch("persons")
+    }
 
     /// 一次拉全档案列表（约 976 条，接口 size 上限 300 → 最多 4 页并发）。
     /// 失败静默：档案只是卡片上的增强数据，不该拖垮列表本身。
@@ -756,19 +823,26 @@ final class PersonsViewModel: ObservableObject {
 
     @MainActor
     func loadMore(replacing: Bool = false) async {
-        guard let client, !isLoading, (replacing || hasMore) else { return }
         if replacing {
+            // 换搜索词 / 下拉刷新时**立刻**换代：在途的旧请求回来会被 gen 检查丢掉，
+            // 不会出现「上一轮搜索的名单迟到，把新结果盖掉」。
+            generation += 1
             page = 1
             hasMore = true
             errorMessage = nil
+            // 允许新请求取代进行中的那一发（旧请求的 defer 只会把标记复位）
+            isLoading = false
         }
+        guard let client, (replacing || (!isLoading && hasMore)) else { return }
         let gen = generation
         // 请求发起时的页码快照：刷新换代后旧请求回来也不能把 page 改回旧值
         let requestedPage = page
         isLoading = true
         defer { isLoading = false }
         do {
-            let (batch, total) = try await client.fetchPersons(page: requestedPage, size: pageSize)
+            let (batch, total) = try await client.fetchPersons(
+                page: requestedPage, size: pageSize,
+                q: searchText.isEmpty ? nil : searchText)
             // 刷新已换代的旧分页结果、以及已被取消的任务，都不要再改 UI
             guard gen == generation, !Task.isCancelled else { return }
             if replacing {
