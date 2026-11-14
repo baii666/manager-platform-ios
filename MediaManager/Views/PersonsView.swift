@@ -81,14 +81,9 @@ struct PersonsView: View {
         .task { await viewModel.loadInitial() }
         // 档案资料独立拉一次，失败不影响列表
         .task { await viewModel.loadFacts() }
-        // 搜索防抖 350ms（与演员库 / 三个列表页同一套）
-        .onChange(of: viewModel.searchText) {
-            Task {
-                try? await Task.sleep(nanoseconds: 350_000_000)
-                guard !Task.isCancelled else { return }
-                await viewModel.reload()
-            }
-        }
+        // 搜索防抖交给 VM 的可取消任务：连续输入只发最后一次请求。
+        // 后端 /api/persons 单次约 3s，旧实现每个字符都发一发，会堆成一串慢请求。
+        .onChange(of: viewModel.searchText) { viewModel.scheduleSearch() }
         // 🔴 这里不注册 navigationDestination：本页只作为「人物」tab 的
         // TabView(.page) 分页使用，page 内部注册的路由不会生效（点了没反应），
         // Person 的路由统一由外层 PeopleHubView 注册。若将来要独立使用本页，
@@ -770,12 +765,25 @@ final class PersonsViewModel: ObservableObject {
     private var generation = 0
     /// 档案列表只拉一次（数据不随分页变化）
     private var factsLoaded = false
+    /// 搜索防抖任务。每次输入先取消上一个，只有停手后才真正发请求 ——
+    /// `/api/persons` 单次 3s 上下，绝不能让中间输入各打一发把请求堆起来。
+    private var searchTask: Task<Void, Never>?
 
     private var client: APIClient? { AppSession.shared.client }
 
     init() {
         // 初始化期间给 @Published 赋值不触发 didSet，所以这里不需要额外持久化
         self.searchText = ListSearchPrefs.loadSearch("persons")
+    }
+
+    /// 输入变化 → 取消防抖任务 → 250ms 后只请求一次（读最新的 searchText）
+    func scheduleSearch() {
+        searchTask?.cancel()
+        searchTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            guard !Task.isCancelled, let self else { return }
+            await self.reload()
+        }
     }
 
     /// 一次拉全档案列表（约 976 条，接口 size 上限 300 → 最多 4 页并发）。
