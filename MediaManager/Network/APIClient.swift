@@ -469,6 +469,23 @@ final class APIClient: DataProviding, @unchecked Sendable {
         ])
     }
 
+    /// 人物相册（网页版资料页「相册」tab 同源）。GET /api/persons/:id/albums
+    /// 只读聚合，不建表不写库；threshold 固定 0.40 与档案页口径一致。
+    func fetchPersonAlbums(personId: Int, page: Int = 1, size: Int = 60) async throws
+        -> (albums: [PersonAlbum], total: Int, unassigned: Int) {
+        struct Resp: Codable {
+            let albums: [PersonAlbum]
+            let total: Int
+            let unassigned: Int
+        }
+        let resp: Resp = try await request("/api/persons/\(personId)/albums", queryItems: [
+            URLQueryItem(name: "page", value: "\(page)"),
+            URLQueryItem(name: "size", value: "\(size)"),
+            URLQueryItem(name: "threshold", value: "0.40"),
+        ])
+        return (resp.albums, resp.total, resp.unassigned)
+    }
+
     // MARK: - 演员
 
     /// 演员库列表。GET /api/actors?page&size&sort&q

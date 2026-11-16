@@ -719,6 +719,18 @@ struct Person: Identifiable, Codable, Sendable, Hashable {
 // 对应 GET /api/person-profiles/:id。24,471 个聚类人物里约 933 个匹配到了外部档案，
 // 其余人物也返回 200，但 meta 为空对象 —— 用 hasDetails 判断有没有可展示的资料。
 // meta 是后端把 meta_json 解析后的对象，字段值混合字符串与数字，见 PersonMetaValue。
+struct ProfileFact: Identifiable, Hashable {
+    let label: String
+    let value: String
+    var id: String { label }
+}
+
+struct ProfileSite: Identifiable, Hashable {
+    let name: String
+    let count: Int
+    var id: String { name }
+}
+
 struct PersonProfile: Codable, Sendable, Hashable {
     let id: Int
     var name: String = ""
@@ -843,6 +855,75 @@ extension PersonProfile {
 
     var sourceURL: URL? { profileURL.isEmpty ? nil : URL(string: profileURL) }
 
+    // MARK: 网页版 PersonProfileInfo 同款资料（左栏字段表）
+    /// 网页版 hasProfileMeta：meta 里有任意非空值就算挂了档案（徽章 / 空态判据）
+    var hasProfileMeta: Bool {
+        meta.values.contains { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    }
+
+    /// 网页版 first(v)：thenude 的字段常写成「主值 | 备选 / 又一个」，只取第一段
+    func firstMeta(_ key: String) -> String? {
+        guard let raw = metaText(key) else { return nil }
+        let v = raw.split(separator: "|").first.map {
+            String($0).trimmingCharacters(in: .whitespacesAndNewlines)
+        } ?? ""
+        return v.isEmpty ? nil : v
+    }
+
+    /// 网页版关键数字三格：身高 / 三围 / 族裔（缺值占位「—」）
+    var topFacts: [ProfileFact] {
+        [("身高", firstMeta("height")),
+         ("三围", firstMeta("measurements")),
+         ("族裔", firstMeta("ethnicity"))]
+            .map { ProfileFact(label: $0.0, value: $0.1 ?? "—") }
+    }
+
+    /// 网页版 FIELD_LABELS 17 项字段表：只显示有值的行
+    var profileFields: [ProfileFact] {
+        let keys: [(String, String)] = [
+            ("born", "出生"), ("birthplace", "出生地"), ("country", "国家"),
+            ("nationality", "国籍"), ("ethnicity", "族裔"), ("height", "身高"),
+            ("weight", "体重"), ("measurements", "三围"), ("cup", "罩杯"),
+            ("breasts", "胸型"), ("eye_colour", "眼睛"), ("hair_colour", "头发"),
+            ("body_type", "体型"), ("years_active", "活跃年份"), ("career", "职业"),
+            ("tattoos", "纹身"), ("piercings", "穿孔"),
+        ]
+        return keys.compactMap { pair in
+            guard let v = firstMeta(pair.0) else { return nil }
+            return ProfileFact(label: pair.1, value: v)
+        }
+    }
+
+    /// 站点串 "metart(6), femjoy(1)" → 按套图数倒序（网页版收录站点胶囊）
+    var siteTags: [ProfileSite] {
+        guard let raw = metaText("sites") else { return [] }
+        let list: [ProfileSite] = raw.split(separator: ",").compactMap { part in
+            let s = String(part).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !s.isEmpty else { return nil }
+            var name = s
+            var count = 0
+            if s.hasSuffix(")"), let open = s.lastIndex(of: "(") {
+                let inside = String(s[s.index(after: open)..<s.index(before: s.endIndex)])
+                if let n = Int(inside.trimmingCharacters(in: .whitespaces)) {
+                    count = n
+                    name = String(s[..<open]).trimmingCharacters(in: .whitespaces)
+                }
+            }
+            name = name.replacingOccurrences(of: "%20", with: " ")
+            return ProfileSite(name: name.removingPercentEncoding ?? name, count: count)
+        }
+        return list.sorted { $0.count > $1.count }
+    }
+
+    var descriptionText: String? { metaText("description") }
+
+    /// 档案头像原图外链（meta.avatar_url 优先，顶层 avatar_url 兜底）
+    var avatarSourceURL: URL? {
+        if let s = firstMeta("avatar_url") ?? metaText("avatar_url"),
+           let u = URL(string: s), u.scheme != nil { return u }
+        return nil
+    }
+
     /// 有可展示的结构化资料才给「资料」入口，避免空档案点开一片空白
     var hasDetails: Bool {
         aliasesText != nil || bornText != nil || birthplaceText != nil
@@ -853,6 +934,45 @@ extension PersonProfile {
     private func join(_ parts: [String?]) -> String? {
         let vals = parts.compactMap { $0 }
         return vals.isEmpty ? nil : vals.joined(separator: " · ")
+    }
+}
+
+// MARK: - 人物相册（网页版人物资料页「相册」tab）
+/// GET /api/persons/:id/albums 返回项：某人脸簇的照片分布在哪些相册里（只读聚合）
+struct PersonAlbum: Identifiable, Codable, Sendable, Hashable {
+    let id: Int
+    var name: String = ""
+    var folderName: String = ""
+    var folderPath: String = ""
+    var libraryId: Int = 0
+    /// 相册本身的照片总数
+    var photoCount: Int = 0
+    /// 该人物在这个相册里命中的照片数
+    var matched: Int = 0
+    var coverPhotoId: Int = 0
+
+    var title: String { name.isEmpty ? folderName : name }
+
+    enum CodingKeys: String, CodingKey {
+        case id, name
+        case folderName = "folder_name"
+        case folderPath = "folder_path"
+        case libraryId = "library_id"
+        case photoCount = "photo_count"
+        case matched
+        case coverPhotoId = "cover_photo_id"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(Int.self, forKey: .id)
+        name = (try? c.decode(String.self, forKey: .name)) ?? ""
+        folderName = (try? c.decode(String.self, forKey: .folderName)) ?? ""
+        folderPath = (try? c.decode(String.self, forKey: .folderPath)) ?? ""
+        libraryId = (try? c.decode(Int.self, forKey: .libraryId)) ?? 0
+        photoCount = (try? c.decode(Int.self, forKey: .photoCount)) ?? 0
+        matched = (try? c.decode(Int.self, forKey: .matched)) ?? 0
+        coverPhotoId = (try? c.decode(Int.self, forKey: .coverPhotoId)) ?? 0
     }
 }
 

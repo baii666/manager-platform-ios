@@ -60,6 +60,17 @@ struct PeopleHubView: View {
         .navigationDestination(for: Person.self) { person in
             PersonPhotosView(person: person)
         }
+        // 人物资料页「相册」tab 点进去看该相册照片。album 由接口项现构，
+        // 必须带 libID（/api/photos 强制要求），不改全局 Album 模型。
+        .navigationDestination(for: PersonAlbumRoute.self) { route in
+            AlbumPhotosView(album: {
+                var a = Album(id: route.id)
+                a.folderName = route.name
+                a.count = route.count
+                a.coverPhotoId = route.coverPhotoId > 0 ? route.coverPhotoId : nil
+                return a
+            }(), libID: route.libID)
+        }
         .navigationDestination(for: ActorRoute.self) { route in
             ActorDetailView(actorId: route.id)
         }

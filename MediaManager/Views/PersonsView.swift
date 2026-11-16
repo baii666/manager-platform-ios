@@ -268,53 +268,159 @@ private func personFaceURL(_ person: Person) -> URL? {
     return nil
 }
 
-/// 展开后的结构化资料。没有的字段直接不出现，不留「—」占位
+/// 展开后的结构化资料。结构与网页版 PersonProfileInfo 一致：
+/// 三格关键数字 → 17 项字段表 → 别名 → 收录站点 → 简介 → 外链。
+/// 无档案时按网页版显示空态文案，不留一片空白。
 private func personDetails(_ p: PersonProfile) -> some View {
-    VStack(alignment: .leading, spacing: 5) {
-        if let aka = p.aliasesText { personDetailRow("别名", aka, lines: 2) }
-        if let born = personCombine(p.bornText, p.birthplaceText) { personDetailRow("出生", born) }
-        if let size = personCombine(p.heightText, p.weightText) { personDetailRow("身材", size) }
-        if let m = p.measurementsText { personDetailRow("三围", m) }
-        if let look = p.appearanceText { personDetailRow("外貌", look) }
-        if let body = p.bodyTypeText { personDetailRow("体型", body) }
-        if let url = p.sourceURL {
-            Link(destination: url) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    personDetailLabel("来源")
-                    HStack(spacing: 3) {
-                        Text("thenude.com").font(.caption).underline()
-                        Image(systemName: "arrow.up.right")
-                            .font(.system(size: 9, weight: .semibold))
+    VStack(alignment: .leading, spacing: 12) {
+        if p.hasProfileMeta {
+            // 关键数字三格：身高 / 三围 / 族裔
+            HStack(spacing: 8) {
+                ForEach(p.topFacts, id: \.label) { fact in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(fact.label).font(.caption2).foregroundStyle(.tertiary)
+                        Text(fact.value)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 7)
+                    .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
+                }
+            }
+
+            // 字段表（只显示有值的行）
+            if !p.profileFields.isEmpty {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(p.profileFields, id: \.label) { field in
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text(field.label)
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                                .frame(width: 44, alignment: .leading)
+                            Text(field.value)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+            }
+
+            // 别名 / AKA
+            if let aka = p.aliasesText {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("别名 / AKA").font(.caption2).foregroundStyle(.tertiary)
+                    Text(aka)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            // 收录站点（按套图数倒序，最多 18 个，与网页版一致）
+            if !p.siteTags.isEmpty {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("收录站点 (\(p.siteTags.count))")
+                        .font(.caption2).foregroundStyle(.tertiary)
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 82), spacing: 6)], spacing: 6) {
+                        ForEach(p.siteTags.prefix(18), id: \.name) { site in
+                            HStack(spacing: 3) {
+                                Text(site.name).lineLimit(1)
+                                if site.count > 0 {
+                                    Text("\(site.count)")
+                                        .font(.caption2)
+                                        .foregroundStyle(.tertiary)
+                                        .monospacedDigit()
+                                }
+                            }
+                            .font(.caption2)
+                            .foregroundStyle(Theme.brand)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 4)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Theme.brand.opacity(0.12), in: Capsule())
+                        }
+                    }
+                }
+            }
+
+            // 简介
+            if let desc = p.descriptionText {
+                Text(desc)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
+                    .lineLimit(4)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("该人物尚未关联 thenude 档案")
+                    .font(.caption).foregroundStyle(.secondary)
+                Text("仍可查看下方图片与相册；关联判据需人工复核后才会写入")
+                    .font(.caption2).foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+
+        // 外链（网页版同款两个按钮）
+        if p.sourceURL != nil || p.avatarSourceURL != nil {
+            HStack(spacing: 8) {
+                if let url = p.sourceURL {
+                    Link(destination: url) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "safari").font(.system(size: 11, weight: .semibold))
+                            Text("打开 thenude 档案").font(.caption.weight(.medium))
+                        }
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 7)
+                        .background(Theme.brand, in: RoundedRectangle(cornerRadius: 8))
+                    }
+                }
+                if let url = p.avatarSourceURL {
+                    Link(destination: url) {
+                        Text("档案头像原图")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 7)
+                            .background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
+                    }
                 }
             }
         }
     }
-    .padding(.top, 2)
 }
 
-private func personDetailRow(_ label: String, _ value: String, lines: Int = 1) -> some View {
-    HStack(alignment: .firstTextBaseline, spacing: 8) {
-        personDetailLabel(label)
-        Text(value)
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .lineLimit(lines)
-            .truncationMode(.tail)
+/// 网页版 PersonProfileMediaTabs 三 tab：图片 / 相册 / 视频
+private enum PersonMediaTab: String, CaseIterable, Identifiable {
+    case photos = "图片"
+    case albums = "相册"
+    case videos = "视频"
+    var id: String { rawValue }
+    var icon: String {
+        switch self {
+        case .photos: return "photo.stack"
+        case .albums: return "folder"
+        case .videos: return "film"
+        }
     }
 }
 
-private func personDetailLabel(_ text: String) -> some View {
-    Text(text)
-        .font(.caption2)
-        .foregroundStyle(.tertiary)
-        .frame(width: 34, alignment: .leading)
-}
-
-private func personCombine(_ a: String?, _ b: String?) -> String? {
-    let vals = [a, b].compactMap { $0 }
-    return vals.isEmpty ? nil : vals.joined(separator: " · ")
+/// 相册卡点进去用的路由：AlbumPhotosView 必须要 libID，后端相册项带 library_id。
+/// 单列一个 Hashable 路由，避免给全局 Album 模型加字段影响别的页面。
+struct PersonAlbumRoute: Hashable {
+    let id: Int
+    let libID: Int
+    let name: String
+    let count: Int
+    let coverPhotoId: Int
 }
 
 /// 人物照片页的排序（Photo 没有拍摄时间，能排的只有文件名与后端默认顺序）
@@ -393,12 +499,12 @@ private struct PersonPhotosHeader: View {
                     }
                 }
                 Spacer(minLength: 0)
-                if let profile, profile.hasDetails {
+                if let profile, profile.hasProfileMeta {
                     toggleButton
                 }
             }
 
-            if expanded, let profile, profile.hasDetails {
+            if expanded, let profile, profile.hasProfileMeta {
                 personDetails(profile)
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
@@ -461,35 +567,61 @@ private struct PersonSidebar: View {
             avatar.frame(maxWidth: .infinity, alignment: .center)
 
             VStack(alignment: .leading, spacing: 6) {
-                Text(displayName)
-                    .font(.title.weight(.semibold))
-                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 6) {
+                    Text(displayName)
+                        .font(.title3.weight(.semibold))
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let profile, profile.hasProfileMeta {
+                        Text("已挂档案")
+                            .font(.caption2)
+                            .foregroundStyle(Theme.brand)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Theme.brand.opacity(0.12), in: Capsule())
+                    }
+                }
                 Text(infoLine).font(.subheadline).foregroundStyle(.secondary)
+                if let profile, profile.thenudeSim > 0 {
+                    HStack(spacing: 8) {
+                        Text("档案相似度").font(.caption2).foregroundStyle(.tertiary)
+                        Spacer(minLength: 0)
+                        Text(String(format: "%.1f%%", profile.thenudeSim * 100))
+                            .font(.caption.weight(.semibold))
+                            .monospacedDigit()
+                            .foregroundStyle(profile.thenudeSim >= 0.75 ? Color.green : Color.orange)
+                    }
+                }
             }
 
-            if let profile, profile.hasDetails {
-                Button {
-                    withAnimation(.easeInOut(duration: 0.18)) { expanded.toggle() }
-                } label: {
-                    HStack(spacing: 3) {
-                        Text(expanded ? "收起资料" : "资料")
-                            .font(.caption.weight(.medium))
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 9, weight: .semibold))
-                            .rotationEffect(.degrees(expanded ? 180 : 0))
+            if let profile {
+                if profile.hasProfileMeta {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.18)) { expanded.toggle() }
+                    } label: {
+                        HStack(spacing: 3) {
+                            Text(expanded ? "收起资料" : "资料")
+                                .font(.caption.weight(.medium))
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 9, weight: .semibold))
+                                .rotationEffect(.degrees(expanded ? 180 : 0))
+                        }
+                        .foregroundStyle(.secondary)
+                        .padding(.vertical, 6)
+                        .contentShape(Rectangle())
                     }
-                    .foregroundStyle(.secondary)
-                    .padding(.vertical, 6)
-                    .contentShape(Rectangle())
+                    .buttonStyle(.plain)
+                    if expanded { personDetails(profile) }
+                } else {
+                    // 网页版同款空态：没挂档案也要有明确说明，不是一片空白
+                    personDetails(profile)
                 }
-                .buttonStyle(.plain)
-                if expanded { personDetails(profile) }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// 头像按 /person-cover 原生 3:4（675×900）显示，不做 1:1 方裁
+    /// 头像按 /person-cover 原生 3:4（675×900）显示，不做 1:1 方裁；
+    /// 宽度铺满左栏内容区（280 - 20×2 = 240），与网页版 3:4 大头像一致。
     @ViewBuilder
     private var avatar: some View {
         if let url = personCoverURL(person) {
@@ -497,15 +629,15 @@ private struct PersonSidebar: View {
                         fallbackIcon: "person.fill",
                         fallbackColors: Theme.placeholderGradient(for: .photo))
                 .imageFilled(alignment: .top)
-                .frame(width: 160, height: 213)
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .frame(width: 240, height: 320)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         } else {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(Theme.brand.opacity(0.16))
-                .frame(width: 160, height: 213)
+                .frame(width: 240, height: 320)
                 .overlay {
                     Text(String(displayName.prefix(1)).uppercased())
-                        .font(.system(size: 60, weight: .medium))
+                        .font(.system(size: 72, weight: .medium))
                         .foregroundStyle(Theme.brand)
                 }
         }
@@ -533,6 +665,16 @@ struct PersonPhotosView: View {
     @State private var profileLoaded = false
     /// 右栏顶端固定工具行：排序（Photo 无拍摄时间，只排文件名 / 默认顺序）
     @State private var photoSort: PersonPhotoSort = .original
+    /// 右栏三 tab（网页版 PersonProfileMediaTabs）
+    @State private var mediaTab: PersonMediaTab = .photos
+    /// 相册 tab：懒加载 + 触底分页，接口只读不动库
+    @State private var albums: [PersonAlbum] = []
+    @State private var albumsTotal = 0
+    @State private var albumsUnassigned = 0
+    @State private var albumsPage = 1
+    @State private var albumsHasMore = true
+    @State private var albumsLoading = false
+    @State private var albumsErrorMessage: String?
 
     @Environment(\.horizontalSizeClass) private var hSizeClass
     private var isWide: Bool { hSizeClass == .regular }
@@ -590,6 +732,39 @@ struct PersonPhotosView: View {
         }
     }
 
+    /// 相册 tab 懒加载：切到才请求，触底追加；重复 onAppear 由 albumsLoading 防重入
+    @MainActor
+    private func loadAlbums(reset: Bool = false) async {
+        if reset {
+            albumsPage = 1
+            albumsHasMore = true
+            albums = []
+            albumsErrorMessage = nil
+        }
+        guard let client = AppSession.shared.client, !albumsLoading, albumsHasMore else { return }
+        albumsLoading = true
+        defer { albumsLoading = false }
+        do {
+            let (batch, total, unassigned) = try await client.fetchPersonAlbums(
+                personId: person.id, page: albumsPage)
+            guard !Task.isCancelled else { return }
+            if albumsPage == 1 {
+                albums = batch
+            } else {
+                let known = Set(albums.map(\.id))
+                albums.append(contentsOf: batch.filter { !known.contains($0.id) })
+            }
+            albumsTotal = total
+            albumsUnassigned = unassigned
+            albumsPage += 1
+            albumsHasMore = !batch.isEmpty
+            albumsErrorMessage = nil
+        } catch {
+            guard !isExpectedCancellation(error) else { return }
+            albumsErrorMessage = "加载相册失败 · \(((error as? LocalizedError)?.errorDescription) ?? error.localizedDescription)"
+        }
+    }
+
     /// 排序只改显示顺序，不动 photos 本体（分页追加 / 去重逻辑保持原样）
     private var displayPhotos: [Photo] {
         switch photoSort {
@@ -631,10 +806,11 @@ struct PersonPhotosView: View {
                     .fill(Color.primary.opacity(0.15))
                     .frame(width: 0.5)
 
-                // 排序 / 列数 / 数量属于右侧数据区，只占右栏顶部一行
+                // 三 tab / 排序 / 列数 / 数量都属于右侧数据区，不跨到资料区上方
                 VStack(spacing: 0) {
-                    pinnedToolBar
-                    photoGrid
+                    mediaTabBar
+                    if mediaTab != .videos { pinnedToolBar }
+                    mediaContent
                         // UICollectionView 在 VStack 里需要明确拿到剩余空间，否则会塌成 0 高
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
@@ -645,15 +821,16 @@ struct PersonPhotosView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
-    // MARK: iPhone 单栏（顶部资料条 + 固定工具行 + 网格）
+    // MARK: iPhone 单栏（顶部资料条 + 三 tab + 固定工具行 + 网格）
     private var narrowContent: some View {
         VStack(spacing: 0) {
             PersonPhotosHeader(person: person, profile: profile,
                                total: total, loaded: photos.count)
-            photoGrid
+            mediaTabBar
+            // 工具行顶在 tab 条正下方，不随网格滚走
+            if mediaTab != .videos { pinnedToolBar }
+            mediaContent
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                // 工具行顶在资料条正下方，不随网格滚走
-                .safeAreaInset(edge: .top, spacing: 0) { pinnedToolBar }
         }
     }
 
@@ -694,12 +871,182 @@ struct PersonPhotosView: View {
         }
     }
 
-    /// 右栏顶部工具行：不铺底色（资料区与数据区同底），只用一条底部分隔线区分网格
+    /// 右栏顶部工具行：不铺底色（资料区与数据区同底），只用一条底部分隔线区分网格。
+    /// 排序/列数只属于图片 tab；相册 tab 只显示已加载数，视频 tab 不显示。
     private var pinnedToolBar: some View {
-        toolBarContent
-            .padding(.horizontal, panePadding)
-            .padding(.vertical, 10)
-            .overlay(alignment: .bottom) { barDivider }
+        Group {
+            if mediaTab == .photos {
+                toolBarContent
+            } else if mediaTab == .albums {
+                HStack(spacing: 8) {
+                    Text("已加载 \(albums.count)/\(albumsTotal) 个相册")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                    Spacer(minLength: 0)
+                    if albumsLoading { ProgressView().controlSize(.small) }
+                }
+            }
+        }
+        .padding(.horizontal, panePadding)
+        .padding(.vertical, 10)
+        .overlay(alignment: .bottom) { barDivider }
+    }
+
+    // MARK: 右栏三 tab（网页版 PersonProfileMediaTabs）
+    private var mediaTabBar: some View {
+        HStack(spacing: 4) {
+            ForEach(PersonMediaTab.allCases) { tab in
+                Button {
+                    withAnimation(.easeInOut(duration: 0.18)) { mediaTab = tab }
+                    // 相册/视频懒加载：切到才请求，切回不重拉
+                    if tab == .albums && albums.isEmpty && !albumsLoading {
+                        Task { await loadAlbums(reset: true) }
+                    }
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: tab.icon).font(.system(size: 12))
+                        Text(tab.rawValue)
+                        Text(tabCount(tab))
+                            .font(.caption2)
+                            .monospacedDigit()
+                            .foregroundStyle(.tertiary)
+                    }
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(mediaTab == tab ? Theme.brand : Color.secondary)
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 7)
+                    .background(
+                        mediaTab == tab ? Theme.brand.opacity(0.12) : Color.clear,
+                        in: Capsule()
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, panePadding)
+        .padding(.top, 8)
+        .padding(.bottom, 4)
+    }
+
+    private func tabCount(_ tab: PersonMediaTab) -> String {
+        switch tab {
+        case .photos:
+            return total > 0 ? "\(total)" : (photos.isEmpty ? "—" : "\(photos.count)")
+        case .albums:
+            return albumsTotal > 0 ? "\(albumsTotal)" : "—"
+        case .videos:
+            return "—"
+        }
+    }
+
+    @ViewBuilder
+    private var mediaContent: some View {
+        switch mediaTab {
+        case .photos: photoGrid
+        case .albums: albumGrid
+        case .videos: videosEmpty
+        }
+    }
+
+    /// 相册网格：3:4 封面 + 命中数 + 相册名/总数，点进去复用相册照片页
+    private var albumGrid: some View {
+        ScrollView {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: isWide ? 150 : 120), spacing: 12)],
+                      spacing: 14) {
+                ForEach(albums) { album in
+                    NavigationLink(value: PersonAlbumRoute(
+                        id: album.id, libID: album.libraryId, name: album.title,
+                        count: album.photoCount, coverPhotoId: album.coverPhotoId
+                    )) {
+                        albumCard(album)
+                    }
+                    .buttonStyle(.plain)
+                    // 触底追加；loadAlbums 内部有 albumsLoading 防重入
+                    .onAppear {
+                        if album.id == albums.last?.id { Task { await loadAlbums() } }
+                    }
+                }
+            }
+            .padding(panePadding)
+            if albumsUnassigned > 0 {
+                Text("另有 \(albumsUnassigned) 张照片未匹配到相册记录")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, panePadding)
+                    .padding(.bottom, 12)
+            }
+        }
+        .overlay {
+            if albums.isEmpty {
+                if let albumsErrorMessage {
+                    ContentUnavailableView(albumsErrorMessage, systemImage: "exclamationmark.triangle")
+                } else if albumsLoading {
+                    ProgressView("加载相册…")
+                } else {
+                    ContentUnavailableView("该人物的照片暂未归入任何相册", systemImage: "folder")
+                }
+            }
+        }
+    }
+
+    private func albumCard(_ album: PersonAlbum) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ZStack(alignment: .bottomTrailing) {
+                RemoteImage(url: albumCoverURL(album), fallbackIcon: "folder.fill",
+                            fallbackColors: Theme.placeholderGradient(for: .photo))
+                    .imageFilled(alignment: .center)
+                    .aspectRatio(3.0 / 4.0, contentMode: .fill)
+                    .frame(maxWidth: .infinity)
+                    .clipped()
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                Text("\(album.matched) 张")
+                    .font(.caption2)
+                    .monospacedDigit()
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.black.opacity(0.6), in: Capsule())
+                    .padding(6)
+            }
+            Text(album.title)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+            Text("相册共 \(album.photoCount) 张")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .monospacedDigit()
+                .lineLimit(1)
+        }
+    }
+
+    private func albumCoverURL(_ album: PersonAlbum) -> URL? {
+        guard album.coverPhotoId > 0 else { return nil }
+        return AppSession.shared.client?.makeURL("/photo", queryItems: [
+            URLQueryItem(name: "id", value: "\(album.coverPhotoId)"),
+            URLQueryItem(name: "size", value: "600"),
+        ])
+    }
+
+    /// 视频关联空态：与网页版文案一致，不按名字/封面自动猜关联
+    private var videosEmpty: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "film")
+                .font(.system(size: 34))
+                .foregroundStyle(.tertiary)
+            Text("暂无视频关联").font(.headline)
+            Text("人物簇目前只与照片存在关联边，影视与短视频尚无已确认的人物标注。后续需经「人脸候选 → 人工复核 → 正式关联」才会出现在这里；本页不会按名字或封面自动猜测关联。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: 420)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        .padding(panePadding)
     }
 
     private func toolLabel(_ text: String) -> some View {
