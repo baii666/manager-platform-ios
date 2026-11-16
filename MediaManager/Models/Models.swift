@@ -949,7 +949,12 @@ struct PersonAlbum: Identifiable, Codable, Sendable, Hashable {
     var photoCount: Int = 0
     /// 该人物在这个相册里命中的照片数
     var matched: Int = 0
+    /// 相册官方横版封面（与相册列表页同一口径，不是人物命中的照片）
     var coverPhotoId: Int = 0
+    /// 相册官方竖版封面；部分相册只有横版或只有竖版，取用时双向兜底
+    var coverPhotoIdPortrait: Int = 0
+    /// 相册默认展示方向：landscape / portrait
+    var coverOrient: String = ""
 
     var title: String { name.isEmpty ? folderName : name }
 
@@ -961,6 +966,8 @@ struct PersonAlbum: Identifiable, Codable, Sendable, Hashable {
         case photoCount = "photo_count"
         case matched
         case coverPhotoId = "cover_photo_id"
+        case coverPhotoIdPortrait = "cover_photo_id_portrait"
+        case coverOrient = "cover_orient"
     }
 
     init(from decoder: Decoder) throws {
@@ -973,6 +980,8 @@ struct PersonAlbum: Identifiable, Codable, Sendable, Hashable {
         photoCount = (try? c.decode(Int.self, forKey: .photoCount)) ?? 0
         matched = (try? c.decode(Int.self, forKey: .matched)) ?? 0
         coverPhotoId = (try? c.decode(Int.self, forKey: .coverPhotoId)) ?? 0
+        coverPhotoIdPortrait = (try? c.decode(Int.self, forKey: .coverPhotoIdPortrait)) ?? 0
+        coverOrient = (try? c.decode(String.self, forKey: .coverOrient)) ?? ""
     }
 }
 

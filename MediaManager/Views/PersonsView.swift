@@ -140,7 +140,14 @@ private struct PersonCard: View {
     /// 已挂档案的资料（无档案传 nil，卡片就不显示资料行 / 相似度）
     var profile: PersonProfile? = nil
 
-    private var displayName: String { profile?.displayName ?? person.displayName }
+    /// 与网页版人物列表一致：簇名优先，簇名为空才回退到档案名（thenude_name），
+    /// 再没有才显示占位。不能用 profile.displayName——那是「档案名优先」，口径相反。
+    private var displayName: String {
+        let cluster = person.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !cluster.isEmpty { return cluster }
+        let archived = (profile?.thenudeName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return archived.isEmpty ? "人物 #\(person.id)" : archived
+    }
 
     /// 与网页版同款三事实：出生 → 身高 → 出生地，最多展示 2 行
     private var facts: [(icon: String, text: String)] {
@@ -423,6 +430,13 @@ struct PersonAlbumRoute: Hashable {
     let coverPhotoId: Int
 }
 
+/// 人物详情「相册」tab 的封面方向，与网页版相册列表同一口径：
+/// 横版取 cover_photo_id（16:9），竖版取 cover_photo_id_portrait（2:3），缺哪边用另一边兜底。
+private enum AlbumCoverOrientation: String, Equatable {
+    case landscape
+    case portrait
+}
+
 /// 人物照片页的排序（Photo 没有拍摄时间，能排的只有文件名与后端默认顺序）
 private enum PersonPhotoSort: String, CaseIterable, Identifiable {
     case original = "默认顺序"
@@ -667,6 +681,8 @@ struct PersonPhotosView: View {
     @State private var photoSort: PersonPhotoSort = .original
     /// 右栏三 tab（网页版 PersonProfileMediaTabs）
     @State private var mediaTab: PersonMediaTab = .photos
+    /// 相册封面方向：默认横版（与网页版相册列表一致），跨会话记忆
+    @AppStorage("personAlbumCoverOrientation") private var albumOrientation: AlbumCoverOrientation = .landscape
     /// 相册 tab：懒加载 + 触底分页，接口只读不动库
     @State private var albums: [PersonAlbum] = []
     @State private var albumsTotal = 0
@@ -861,6 +877,23 @@ struct PersonPhotosView: View {
 
             Spacer(minLength: 4)
 
+            // 相册封面横竖切换：图标显示当前方向，点击切到另一方向（网页版同款）
+            if mediaTab == .albums {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        albumOrientation = (albumOrientation == .portrait) ? .landscape : .portrait
+                    }
+                } label: {
+                    Image(systemName: albumOrientation == .portrait ? "rectangle.portrait" : "rectangle")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 30, height: 26)
+                        .background(Color.primary.opacity(0.06), in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(albumOrientation == .portrait ? "切换横版封面" : "切换竖版封面")
+            }
+
             // 排序只属于图片 tab，和三个 tab 同一行
             if mediaTab == .photos {
                 Menu {
@@ -909,7 +942,8 @@ struct PersonPhotosView: View {
         }
     }
 
-    /// 相册网格：3:4 封面 + 命中数 + 相册名/总数，点进去复用相册照片页
+    /// 相册网格：官方相册封面 + 命中数 + 相册名/总数，点进去复用相册照片页。
+    /// 封面方向跟着 albumOrientation 走：竖版 2:3，横版 16:9（网页版同款比例）。
     private var albumGrid: some View {
         ScrollView {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: isWide ? 150 : 120), spacing: 12)],
@@ -917,7 +951,7 @@ struct PersonPhotosView: View {
                 ForEach(albums) { album in
                     NavigationLink(value: PersonAlbumRoute(
                         id: album.id, libID: album.libraryId, name: album.title,
-                        count: album.photoCount, coverPhotoId: album.coverPhotoId
+                        count: album.photoCount, coverPhotoId: selectedAlbumCoverId(album)
                     )) {
                         albumCard(album)
                     }
@@ -957,7 +991,8 @@ struct PersonPhotosView: View {
                 RemoteImage(url: albumCoverURL(album), fallbackIcon: "folder.fill",
                             fallbackColors: Theme.placeholderGradient(for: .photo))
                     .imageFilled(alignment: .center)
-                    .aspectRatio(3.0 / 4.0, contentMode: .fill)
+                    .aspectRatio(albumOrientation == .portrait ? 2.0 / 3.0 : 16.0 / 9.0,
+                                 contentMode: .fill)
                     .frame(maxWidth: .infinity)
                     .clipped()
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
@@ -982,10 +1017,19 @@ struct PersonPhotosView: View {
         }
     }
 
+    /// 按当前方向取相册官方封面 id；缺该方向时用另一方向兜底（与网页版一致）
+    private func selectedAlbumCoverId(_ album: PersonAlbum) -> Int {
+        if albumOrientation == .portrait {
+            return album.coverPhotoIdPortrait > 0 ? album.coverPhotoIdPortrait : album.coverPhotoId
+        }
+        return album.coverPhotoId > 0 ? album.coverPhotoId : album.coverPhotoIdPortrait
+    }
+
     private func albumCoverURL(_ album: PersonAlbum) -> URL? {
-        guard album.coverPhotoId > 0 else { return nil }
+        let id = selectedAlbumCoverId(album)
+        guard id > 0 else { return nil }
         return AppSession.shared.client?.makeURL("/photo", queryItems: [
-            URLQueryItem(name: "id", value: "\(album.coverPhotoId)"),
+            URLQueryItem(name: "id", value: "\(id)"),
             URLQueryItem(name: "size", value: "600"),
         ])
     }
