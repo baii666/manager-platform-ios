@@ -806,10 +806,9 @@ struct PersonPhotosView: View {
                     .fill(Color.primary.opacity(0.15))
                     .frame(width: 0.5)
 
-                // 三 tab / 排序 / 列数 / 数量都属于右侧数据区，不跨到资料区上方
+                // 三 tab + 排序 / 数量合为一行，属于右侧数据区，不跨到资料区上方
                 VStack(spacing: 0) {
-                    mediaTabBar
-                    if mediaTab != .videos { pinnedToolBar }
+                    mediaToolbar
                     mediaContent
                         // UICollectionView 在 VStack 里需要明确拿到剩余空间，否则会塌成 0 高
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -821,81 +820,21 @@ struct PersonPhotosView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
-    // MARK: iPhone 单栏（顶部资料条 + 三 tab + 固定工具行 + 网格）
+    // MARK: iPhone 单栏（顶部资料条 + 一行三 tab/排序/计数 + 网格）
     private var narrowContent: some View {
         VStack(spacing: 0) {
             PersonPhotosHeader(person: person, profile: profile,
                                total: total, loaded: photos.count)
-            mediaTabBar
-            // 工具行顶在 tab 条正下方，不随网格滚走
-            if mediaTab != .videos { pinnedToolBar }
+            mediaToolbar
             mediaContent
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
-    /// 排序 / 列数 / 已加载数：iPad 整宽顶 bar 与 iPhone 单栏共用
-    private var toolBarContent: some View {
-        HStack(spacing: 8) {
-            Menu {
-                ForEach(PersonPhotoSort.allCases) { s in
-                    Button {
-                        photoSort = s
-                    } label: {
-                        if photoSort == s { Label(s.rawValue, systemImage: "checkmark") }
-                        else { Text(s.rawValue) }
-                    }
-                }
-            } label: {
-                toolLabel(photoSort.rawValue)
-            }
-            .tint(Color.secondary)
-
-            Menu {
-                ForEach([2, 3, 4, 5, 6], id: \.self) { n in
-                    Button("\(n) 列") {
-                        columns = n
-                        PhotoGridPrefs.save("personPhotos", n)
-                    }
-                }
-            } label: {
-                toolLabel("\(columns) 列")
-            }
-            .tint(Color.secondary)
-
-            Spacer(minLength: 0)
-            Text(countText)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
-        }
-    }
-
-    /// 右栏顶部工具行：不铺底色（资料区与数据区同底），只用一条底部分隔线区分网格。
-    /// 排序/列数只属于图片 tab；相册 tab 只显示已加载数，视频 tab 不显示。
-    private var pinnedToolBar: some View {
-        Group {
-            if mediaTab == .photos {
-                toolBarContent
-            } else if mediaTab == .albums {
-                HStack(spacing: 8) {
-                    Text("已加载 \(albums.count)/\(albumsTotal) 个相册")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                    Spacer(minLength: 0)
-                    if albumsLoading { ProgressView().controlSize(.small) }
-                }
-            }
-        }
-        .padding(.horizontal, panePadding)
-        .padding(.vertical, 10)
-        .overlay(alignment: .bottom) { barDivider }
-    }
-
-    // MARK: 右栏三 tab（网页版 PersonProfileMediaTabs）
-    private var mediaTabBar: some View {
-        HStack(spacing: 4) {
+    /// 右栏唯一一行：三 tab + 排序（仅图片 tab）+ 已加载数，底部一条分隔线。
+    /// 列数选择已去掉；列数仍可双指捏合调整，并按「人物照片页」记忆。
+    private var mediaToolbar: some View {
+        HStack(spacing: 6) {
             ForEach(PersonMediaTab.allCases) { tab in
                 Button {
                     withAnimation(.easeInOut(duration: 0.18)) { mediaTab = tab }
@@ -904,18 +843,14 @@ struct PersonPhotosView: View {
                         Task { await loadAlbums(reset: true) }
                     }
                 } label: {
-                    HStack(spacing: 5) {
+                    HStack(spacing: 4) {
                         Image(systemName: tab.icon).font(.system(size: 12))
                         Text(tab.rawValue)
-                        Text(tabCount(tab))
-                            .font(.caption2)
-                            .monospacedDigit()
-                            .foregroundStyle(.tertiary)
                     }
                     .font(.caption.weight(.medium))
                     .foregroundStyle(mediaTab == tab ? Theme.brand : Color.secondary)
-                    .padding(.horizontal, 11)
-                    .padding(.vertical, 7)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
                     .background(
                         mediaTab == tab ? Theme.brand.opacity(0.12) : Color.clear,
                         in: Capsule()
@@ -923,21 +858,45 @@ struct PersonPhotosView: View {
                 }
                 .buttonStyle(.plain)
             }
-            Spacer(minLength: 0)
+
+            Spacer(minLength: 4)
+
+            // 排序只属于图片 tab，和三个 tab 同一行
+            if mediaTab == .photos {
+                Menu {
+                    ForEach(PersonPhotoSort.allCases) { s in
+                        Button {
+                            photoSort = s
+                        } label: {
+                            if photoSort == s { Label(s.rawValue, systemImage: "checkmark") }
+                            else { Text(s.rawValue) }
+                        }
+                    }
+                } label: {
+                    toolLabel(photoSort.rawValue)
+                }
+                .tint(Color.secondary)
+            }
+
+            if mediaTab != .videos {
+                Text(mediaCountText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                    .lineLimit(1)
+            }
         }
         .padding(.horizontal, panePadding)
-        .padding(.top, 8)
-        .padding(.bottom, 4)
+        .padding(.vertical, 8)
+        .overlay(alignment: .bottom) { barDivider }
     }
 
-    private func tabCount(_ tab: PersonMediaTab) -> String {
-        switch tab {
-        case .photos:
-            return total > 0 ? "\(total)" : (photos.isEmpty ? "—" : "\(photos.count)")
-        case .albums:
-            return albumsTotal > 0 ? "\(albumsTotal)" : "—"
-        case .videos:
-            return "—"
+    /// 同一行右端的计数：图片=已加载/总数，相册=已加载/总数，视频空态不显示
+    private var mediaCountText: String {
+        switch mediaTab {
+        case .photos: return countText
+        case .albums: return "\(albums.count)/\(albumsTotal)"
+        case .videos: return ""
         }
     }
 
