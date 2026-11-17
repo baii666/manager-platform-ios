@@ -718,6 +718,19 @@ struct PersonPhotosView: View {
         .task { await loadProfile() }
         .task { await loadMore() }
         .appBackground()
+        // 🔴 相册卡在本页（被 push 的详情页）里，destination 必须在**本页**也注册一份：
+        // push 出去的页面不在 PeopleHubView 的视图树里，只挂在外层的话这里的
+        // NavigationLink(value: PersonAlbumRoute) 匹配不到，表现就是「点相册没反应」。
+        // 与项目既有做法一致：MediaItem 在 RootView 与 ActorsView 各注册一份。
+        .navigationDestination(for: PersonAlbumRoute.self) { route in
+            AlbumPhotosView(album: {
+                var a = Album(id: route.id)
+                a.folderName = route.name
+                a.count = route.count
+                a.coverPhotoId = route.coverPhotoId > 0 ? route.coverPhotoId : nil
+                return a
+            }(), libID: route.libID)
+        }
     }
 
     /// 资料是可选增强：没有档案的人物返回 200 + 空 meta，网络失败也静默忽略
@@ -954,6 +967,7 @@ struct PersonPhotosView: View {
                         count: album.photoCount, coverPhotoId: selectedAlbumCoverId(album)
                     )) {
                         albumCard(album)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     // 触底追加；loadAlbums 内部有 albumsLoading 防重入
