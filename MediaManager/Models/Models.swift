@@ -1012,6 +1012,9 @@ struct PersonLibraryBreakdown: Codable, Sendable {
     var albums: [PersonLibraryStat] = []
     var videos: [PersonLibraryStat] = []
 
+    // 自定义 init(from:) 会抑制编译器合成无参 init，这里显式补回（空分布兜底用）
+    init() {}
+
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         libraries = (try? c.decode([PersonLibraryStat].self, forKey: .libraries)) ?? []
