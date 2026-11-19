@@ -557,15 +557,15 @@ private struct PersonPhotosHeader: View {
 
     /// 把整张资料卡向左滑走收起
     private var hideButton: some View {
-        Button {
+        Button(action: {
             isHidden = true
-        } label {
+        }, label: {
             Image(systemName: "chevron.left")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.tertiary)
                 .frame(width: 24, height: 26)
                 .contentShape(Rectangle())
-        }
+        })
         .buttonStyle(.plain)
         .accessibilityLabel("隐藏资料卡")
     }
@@ -633,9 +633,9 @@ private struct PersonSidebar: View {
                         .background(Theme.brand.opacity(0.12), in: Capsule())
                 }
                 Spacer(minLength: 0)
-                Button {
+                Button(action: {
                     isHidden = true
-                } label {
+                }, label: {
                     HStack(spacing: 2) {
                         Text("隐藏").font(.caption2)
                         Image(systemName: "chevron.left")
@@ -644,7 +644,7 @@ private struct PersonSidebar: View {
                     .foregroundStyle(.tertiary)
                     .padding(.vertical, 2)
                     .contentShape(Rectangle())
-                }
+                })
                 .buttonStyle(.plain)
                 .accessibilityLabel("隐藏资料栏")
             }
