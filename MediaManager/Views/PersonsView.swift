@@ -1065,26 +1065,35 @@ struct PersonPhotosView: View {
         .overlay(alignment: .bottom) { barDivider }
     }
 
-    /// 三个 tab 共用的按库筛选条：当前 tab 有分布数据时显示。横向滚动，点库名筛该库，再点取消。
+    /// 三个 tab 共用的按库筛选条：始终显示「全部」（用该 tab 总数），库分布到了再补 chip。
+    /// 首次 breakdown 冷查询要几秒，不能让整条筛选条跟着一起晚出。
     private var libraryFilterBar: some View {
-        Group {
-            if !activeLibraryStats.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        libraryChip(id: nil, name: "全部",
-                                    count: activeLibraryStats.reduce(0) { $0 + $1.count },
-                                    active: activeFilterLibrary == nil)
-                        ForEach(activeLibraryStats) { s in
-                            libraryChip(id: s.libraryId, name: s.name, count: s.count,
-                                        active: activeFilterLibrary == s.libraryId)
-                        }
+        VStack(spacing: 0) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    libraryChip(id: nil, name: "全部",
+                                count: activeLibraryStats.isEmpty ? activeTotal
+                                                                  : activeLibraryStats.reduce(0) { $0 + $1.count },
+                                active: activeFilterLibrary == nil)
+                    ForEach(activeLibraryStats) { s in
+                        libraryChip(id: s.libraryId, name: s.name, count: s.count,
+                                    active: activeFilterLibrary == s.libraryId)
                     }
-                    .padding(.horizontal, panePadding)
-                    .padding(.vertical, 6)
                 }
-                .frame(height: 38)
-                .overlay(alignment: .bottom) { barDivider }
+                .padding(.horizontal, panePadding)
+                .padding(.vertical, 6)
             }
+            .frame(height: 38)
+            .overlay(alignment: .bottom) { barDivider }
+        }
+    }
+
+    /// 当前 tab 的总数（分布未到时给「全部」chip 用）
+    private var activeTotal: Int {
+        switch mediaTab {
+        case .photos: return total
+        case .albums: return albumsTotal
+        case .videos: return videosTotal
         }
     }
 
