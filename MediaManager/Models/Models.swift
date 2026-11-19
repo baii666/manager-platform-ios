@@ -990,6 +990,21 @@ struct PersonAlbum: Identifiable, Codable, Sendable, Hashable {
 // 🔴 只含人工复核 verdict='confirmed' 的正式关联；候选不在这个接口里。
 // cover_url / backdrop_url 后端给的是相对路径（/media-cover?path=...），
 // APIClient 取出时 resolve 成完整 URL（与 ActorItem.thumbURL 同一口径）。
+/// 人物照片按媒体库的分布（GET /api/persons/:id/library-breakdown）
+struct PersonLibraryStat: Identifiable, Codable, Sendable, Hashable {
+    let libraryId: Int
+    var name: String = ""
+    var type: String = ""
+    var count: Int = 0
+
+    var id: Int { libraryId }
+
+    enum CodingKeys: String, CodingKey {
+        case libraryId = "library_id"
+        case name, type, count
+    }
+}
+
 struct PersonVideo: Identifiable, Codable, Sendable, Hashable {
     let mediaId: Int
     var title: String = ""

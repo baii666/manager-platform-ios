@@ -673,6 +673,9 @@ struct PersonPhotosView: View {
     @State private var errorMessage: String?
     /// 后端给的作品总数（不是已加载条数）：顶部信息区显示它，翻页时不跳动
     @State private var total = 0
+    /// 照片按媒体库分布 + 当前筛选的库（nil=全部）。切库重置分页重新拉第一页。
+    @State private var libraryStats: [PersonLibraryStat] = []
+    @State private var filterLibrary: Int? = nil
     /// 外部人物档案（thenude）。多数人物没有（meta 为空），顶部退回原来的一行信息
     @State private var profile: PersonProfile?
     /// 只请求一次：.task 在页面重新出现时可能重跑，避免重复请求
@@ -734,6 +737,7 @@ struct PersonPhotosView: View {
         // 两个 task 并发：资料很轻，先回来也不会拖慢照片首屏
         .task { await loadProfile() }
         .task { await loadMore() }
+        .task { await loadLibraryBreakdown() }
         .appBackground()
         // 🔴 相册卡在本页（被 push 的详情页）里，destination 必须在**本页**也注册一份：
         // push 出去的页面不在 PeopleHubView 的视图树里，只挂在外层的话这里的
@@ -768,7 +772,8 @@ struct PersonPhotosView: View {
         isLoading = true
         defer { isLoading = false }
         do {
-            let (batch, totalCount) = try await client.fetchPersonPhotos(personId: person.id, page: page)
+            let (batch, totalCount) = try await client.fetchPersonPhotos(
+                personId: person.id, page: page, libraryId: filterLibrary)
             // 页面已切走 / 任务已取消时别再改 UI，也别把取消写成失败
             guard !Task.isCancelled else { return }
             photos.append(contentsOf: batch)
@@ -780,6 +785,29 @@ struct PersonPhotosView: View {
             guard !isExpectedCancellation(error) else { return }
             errorMessage = "加载照片失败 · \(((error as? LocalizedError)?.errorDescription) ?? error.localizedDescription)"
         }
+    }
+
+    /// 照片库分布：进页面加载一次，与筛选无关（始终全量）
+    @MainActor
+    private func loadLibraryBreakdown() async {
+        guard let client = AppSession.shared.client else { return }
+        libraryStats = (try? await client.fetchPersonLibraryBreakdown(personId: person.id)) ?? []
+    }
+
+    /// 点库 chip 筛选：传 nil=全部；传当前已选库=取消筛选，重置分页重新拉第一页。
+    @MainActor
+    private func applyLibraryFilter(_ libId: Int?) async {
+        if let libId {
+            filterLibrary = (filterLibrary == libId) ? nil : libId
+        } else {
+            filterLibrary = nil
+        }
+        photos = []
+        total = 0
+        page = 1
+        hasMore = true
+        errorMessage = nil
+        await loadMore()
     }
 
     /// 相册 tab 懒加载：切到才请求，触底追加；重复 onAppear 由 albumsLoading 防重入
@@ -892,6 +920,7 @@ struct PersonPhotosView: View {
                 // 三 tab + 排序 / 数量合为一行，属于右侧数据区，不跨到资料区上方
                 VStack(spacing: 0) {
                     mediaToolbar
+                    libraryFilterBar
                     mediaContent
                         // UICollectionView 在 VStack 里需要明确拿到剩余空间，否则会塌成 0 高
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -909,6 +938,7 @@ struct PersonPhotosView: View {
             PersonPhotosHeader(person: person, profile: profile,
                                total: total, loaded: photos.count)
             mediaToolbar
+            libraryFilterBar
             mediaContent
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -999,6 +1029,50 @@ struct PersonPhotosView: View {
         .padding(.horizontal, panePadding)
         .padding(.vertical, 8)
         .overlay(alignment: .bottom) { barDivider }
+    }
+
+    /// 照片库筛选条：仅图片 tab + 有分布数据时显示。横向滚动，点库名筛该库，再点取消。
+    private var libraryFilterBar: some View {
+        Group {
+            if mediaTab == .photos && !libraryStats.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        libraryChip(id: nil, name: "全部",
+                                    count: libraryStats.reduce(0) { $0 + $1.count },
+                                    active: filterLibrary == nil)
+                        ForEach(libraryStats) { s in
+                            libraryChip(id: s.libraryId, name: s.name, count: s.count,
+                                        active: filterLibrary == s.libraryId)
+                        }
+                    }
+                    .padding(.horizontal, panePadding)
+                    .padding(.vertical, 6)
+                }
+                .frame(height: 38)
+                .overlay(alignment: .bottom) { barDivider }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func libraryChip(id: Int?, name: String, count: Int, active: Bool) -> some View {
+        Button {
+            Task { await applyLibraryFilter(id) }
+        } label: {
+            HStack(spacing: 4) {
+                Text(name)
+                Text(count.formatted())
+                    .monospacedDigit()
+                    .foregroundStyle(active ? .primary : .tertiary)
+            }
+            .font(.caption2)
+            .foregroundStyle(active ? .primary : .secondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(active ? Color.primary.opacity(0.12) : Color.primary.opacity(0.05),
+                        in: Capsule())
+        }
+        .buttonStyle(.plain)
     }
 
     /// 同一行右端的计数：图片=已加载/总数，相册=已加载/总数，视频空态不显示

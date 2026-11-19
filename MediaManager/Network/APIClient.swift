@@ -435,14 +435,27 @@ final class APIClient: DataProviding, @unchecked Sendable {
     /// 人物照片。GET /api/persons/:id/photos?page&size
     /// ⚠️ 后端返回的 photos 项字段（id/file_name/library_id/width/height/album_id）
     /// 与 Photo 的 CodingKeys 全对齐，直接解成 [Photo]，复用 resolvePhoto 拼地址
-    func fetchPersonPhotos(personId: Int, page: Int = 1, size: Int = 60) async throws -> (items: [Photo], total: Int) {
+    func fetchPersonPhotos(personId: Int, page: Int = 1, size: Int = 60, libraryId: Int? = nil) async throws -> (items: [Photo], total: Int) {
+        var items = [
+            URLQueryItem(name: "page", value: "\(page)"),
+            URLQueryItem(name: "size", value: "\(size)"),
+        ]
+        if let libraryId { items.append(URLQueryItem(name: "library_id", value: "\(libraryId)")) }
         let resp: PersonPhotosResponse = try await request(
-            "/api/persons/\(personId)/photos", queryItems: [
-                URLQueryItem(name: "page", value: "\(page)"),
-                URLQueryItem(name: "size", value: "\(size)"),
-            ]
+            "/api/persons/\(personId)/photos", queryItems: items
         )
         return (resp.photos.map { resolvePhoto($0) }, resp.total)
+    }
+
+    /// 人物照片按媒体库分布（只读，逻辑合并整组 + photo_id 去重）
+    func fetchPersonLibraryBreakdown(personId: Int) async throws -> [PersonLibraryStat] {
+        struct Resp: Decodable {
+            let libraries: [PersonLibraryStat]
+        }
+        let resp: Resp = try await request("/api/persons/\(personId)/library-breakdown", queryItems: [
+            URLQueryItem(name: "threshold", value: "0.40"),
+        ])
+        return resp.libraries
     }
 
     /// 人物档案列表。GET /api/person-profiles?page&size
