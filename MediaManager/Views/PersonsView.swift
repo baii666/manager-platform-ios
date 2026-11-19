@@ -692,6 +692,15 @@ struct PersonPhotosView: View {
     @State private var albumsLoading = false
     @State private var albumsErrorMessage: String?
 
+    /// 视频 tab：只消费 confirmed 正式关联（候选不在这里），懒加载
+    @State private var videos: [PersonVideo] = []
+    @State private var videosTotal = 0
+    @State private var videosPage = 1
+    @State private var videosHasMore = true
+    @State private var videosLoading = false
+    @State private var videosErrorMessage: String?
+    @State private var videosLoaded = false
+
     @Environment(\.horizontalSizeClass) private var hSizeClass
     private var isWide: Bool { hSizeClass == .regular }
     /// 与演员详情页同一套分栏宽度 / 内边距，两页视觉一致
@@ -730,6 +739,10 @@ struct PersonPhotosView: View {
                 a.coverPhotoId = route.coverPhotoId > 0 ? route.coverPhotoId : nil
                 return a
             }(), libID: route.libID)
+        }
+        // 视频卡点进影视详情（同 RootView/ActorsView 的注册方式）
+        .navigationDestination(for: MediaItem.self) { item in
+            MediaDetailView(media: item)
         }
     }
 
@@ -791,6 +804,39 @@ struct PersonPhotosView: View {
         } catch {
             guard !isExpectedCancellation(error) else { return }
             albumsErrorMessage = "加载相册失败 · \(((error as? LocalizedError)?.errorDescription) ?? error.localizedDescription)"
+        }
+    }
+
+    /// 视频 tab 懒加载：切到才请求，只拉 confirmed 关联；未确认候选不显示。
+    @MainActor
+    private func loadVideos(reset: Bool = false) async {
+        if reset {
+            videosPage = 1
+            videosHasMore = true
+            videos = []
+            videosErrorMessage = nil
+        }
+        guard let client = AppSession.shared.client, !videosLoading, videosHasMore else { return }
+        videosLoading = true
+        defer { videosLoading = false }
+        do {
+            let (batch, total) = try await client.fetchPersonVideos(
+                personId: person.id, page: videosPage)
+            guard !Task.isCancelled else { return }
+            if videosPage == 1 {
+                videos = batch
+            } else {
+                let known = Set(videos.map(\.id))
+                videos.append(contentsOf: batch.filter { !known.contains($0.id) })
+            }
+            videosTotal = total
+            videosPage += 1
+            videosHasMore = !batch.isEmpty
+            videosLoaded = true
+            videosErrorMessage = nil
+        } catch {
+            guard !isExpectedCancellation(error) else { return }
+            videosErrorMessage = "加载视频关联失败 · \(((error as? LocalizedError)?.errorDescription) ?? error.localizedDescription)"
         }
     }
 
@@ -871,6 +917,9 @@ struct PersonPhotosView: View {
                     if tab == .albums && albums.isEmpty && !albumsLoading {
                         Task { await loadAlbums(reset: true) }
                     }
+                    if tab == .videos && !videosLoaded {
+                        Task { await loadVideos(reset: true) }
+                    }
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: tab.icon).font(.system(size: 12))
@@ -924,7 +973,7 @@ struct PersonPhotosView: View {
                 .tint(Color.secondary)
             }
 
-            if mediaTab != .videos {
+            if mediaTab == .videos ? !videos.isEmpty : true {
                 Text(mediaCountText)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -942,7 +991,7 @@ struct PersonPhotosView: View {
         switch mediaTab {
         case .photos: return countText
         case .albums: return "\(albums.count)/\(albumsTotal)"
-        case .videos: return ""
+        case .videos: return "\(videos.count)/\(videosTotal)"
         }
     }
 
@@ -951,7 +1000,7 @@ struct PersonPhotosView: View {
         switch mediaTab {
         case .photos: photoGrid
         case .albums: albumGrid
-        case .videos: videosEmpty
+        case .videos: videoGrid
         }
     }
 
@@ -1046,6 +1095,75 @@ struct PersonPhotosView: View {
             URLQueryItem(name: "id", value: "\(id)"),
             URLQueryItem(name: "size", value: "600"),
         ])
+    }
+
+    /// 视频关联网格：只显示人工复核确认过的正式关联（sim 标在角标），
+    /// 点进复用 MediaDetailView（与 RootView/ActorsView 同一套影视详情）。
+    private var videoGrid: some View {
+        ScrollView {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: isWide ? 180 : 140), spacing: 12)],
+                      spacing: 14) {
+                ForEach(videos) { v in
+                    NavigationLink(value: MediaItem(id: v.mediaId, title: v.displayTitle)) {
+                        videoCard(v)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    if v.id == videos.last?.id {
+                        Color.clear.frame(height: 1).onAppear { Task { await loadVideos() } }
+                    }
+                }
+            }
+            .padding(panePadding)
+            if videosLoading && !videos.isEmpty {
+                ProgressView().padding()
+            }
+        }
+        .overlay {
+            if videos.isEmpty {
+                if let videosErrorMessage {
+                    VStack(spacing: 12) {
+                        ContentUnavailableView(videosErrorMessage, systemImage: "exclamationmark.triangle")
+                        Button("重试") { Task { await loadVideos(reset: true) } }
+                            .buttonStyle(.bordered)
+                    }
+                } else if videosLoading || !videosLoaded {
+                    ProgressView("加载视频关联…")
+                } else {
+                    videosEmpty
+                }
+            }
+        }
+    }
+
+    private func videoCard(_ v: PersonVideo) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ZStack(alignment: .topLeading) {
+                RemoteImage(url: v.backdropURL ?? v.coverURL, fallbackIcon: "film",
+                            fallbackColors: Theme.placeholderGradient(for: .media))
+                    .imageFilled(alignment: .center)
+                    .aspectRatio(16.0 / 9.0, contentMode: .fill)
+                    .frame(maxWidth: .infinity)
+                    .clipped()
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                Text(String(format: "sim %.3f", v.sim))
+                    .font(.caption2)
+                    .monospacedDigit()
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.black.opacity(0.6), in: Capsule())
+                    .padding(6)
+            }
+            Text(v.displayTitle)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+            Text("\(v.year.isEmpty ? "—" : v.year) · 已人工确认")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+        }
     }
 
     /// 视频关联空态：与网页版文案一致，不按名字/封面自动猜关联

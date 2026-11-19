@@ -486,6 +486,31 @@ final class APIClient: DataProviding, @unchecked Sendable {
         return (resp.albums, resp.total, resp.unassigned)
     }
 
+    /// 人物视频关联（网页版资料页「视频」tab 同源）。GET /api/person-media-hub/videos
+    /// 只返回经人工复核 verdict='confirmed' 的正式关联，候选不会出现在正式列表里。
+    /// 这个插件路由走 /api 前缀、带宿主 AuthMiddleware，与其它人物接口同一鉴权口径。
+    func fetchPersonVideos(personId: Int, page: Int = 1, size: Int = 60) async throws
+        -> (videos: [PersonVideo], total: Int) {
+        struct Resp: Codable {
+            let videos: [PersonVideo]
+            let total: Int
+        }
+        let resp: Resp = try await request("/api/person-media-hub/videos", queryItems: [
+            URLQueryItem(name: "person_id", value: "\(personId)"),
+            URLQueryItem(name: "page", value: "\(page)"),
+            URLQueryItem(name: "size", value: "\(size)"),
+        ])
+        // cover_url / backdrop_url 都是后端返回的相对路径（/media-cover?path=...），
+        // resolve 成完整 URL 再交给 RemoteImage（与演员头像 resolve 同一口径）。
+        let videos = resp.videos.map { v -> PersonVideo in
+            var r = v
+            r.coverURL = resolve(v.coverURL)
+            r.backdropURL = resolve(v.backdropURL)
+            return r
+        }
+        return (videos, resp.total)
+    }
+
     // MARK: - 演员
 
     /// 演员库列表。GET /api/actors?page&size&sort&q

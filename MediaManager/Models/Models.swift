@@ -985,6 +985,62 @@ struct PersonAlbum: Identifiable, Codable, Sendable, Hashable {
     }
 }
 
+// MARK: - 人物视频关联
+// 对应 GET /api/person-media-hub/videos 的 items 项。
+// 🔴 只含人工复核 verdict='confirmed' 的正式关联；候选不在这个接口里。
+// cover_url / backdrop_url 后端给的是相对路径（/media-cover?path=...），
+// APIClient 取出时 resolve 成完整 URL（与 ActorItem.thumbURL 同一口径）。
+struct PersonVideo: Identifiable, Codable, Sendable, Hashable {
+    let mediaId: Int
+    var title: String = ""
+    var year: String = ""
+    var folderName: String = ""
+    var coverURL: URL? = nil
+    var backdropURL: URL? = nil
+    var sim: Double = 0
+    var verdict: String = ""
+    var reviewedAt: String = ""
+    var note: String = ""
+    var hitId: Int? = nil
+
+    var id: Int { mediaId }
+
+    /// 展示名：标题优先，退回目录名
+    var displayTitle: String { title.isEmpty ? folderName : title }
+
+    enum CodingKeys: String, CodingKey {
+        case mediaId = "media_id"
+        case title, year
+        case folderName = "folder_name"
+        case coverURL = "cover_url"
+        case backdropURL = "backdrop_url"
+        case sim, verdict
+        case reviewedAt = "reviewed_at"
+        case note
+        case hitId = "hit_id"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        mediaId = (try? c.decode(Int.self, forKey: .mediaId)) ?? 0
+        title = (try? c.decode(String.self, forKey: .title)) ?? ""
+        year = (try? c.decode(String.self, forKey: .year)) ?? ""
+        folderName = (try? c.decode(String.self, forKey: .folderName)) ?? ""
+        // 后端可能返回 ""，URL(string: "") 会得到空 URL，这里过滤掉
+        if let s = try? c.decode(String.self, forKey: .coverURL), !s.isEmpty {
+            coverURL = URL(string: s)
+        }
+        if let s = try? c.decode(String.self, forKey: .backdropURL), !s.isEmpty {
+            backdropURL = URL(string: s)
+        }
+        sim = (try? c.decode(Double.self, forKey: .sim)) ?? 0
+        verdict = (try? c.decode(String.self, forKey: .verdict)) ?? ""
+        reviewedAt = (try? c.decode(String.self, forKey: .reviewedAt)) ?? ""
+        note = (try? c.decode(String.self, forKey: .note)) ?? ""
+        hitId = try? c.decode(Int.self, forKey: .hitId)
+    }
+}
+
 // MARK: - 演员库条目
 // 对应 GET /api/actors 列表项。⚠️ 与上面内嵌的 Actor 区分：那个是影片详情里的
 // {name, role, thumb}（ historically 没有 id），这个是演员库条目，必有 id。
