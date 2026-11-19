@@ -683,6 +683,8 @@ struct PersonPhotosView: View {
     @State private var mediaTab: PersonMediaTab = .photos
     /// 相册封面方向：默认横版（与网页版相册列表一致），跨会话记忆
     @AppStorage("personAlbumCoverOrientation") private var albumOrientation: AlbumCoverOrientation = .landscape
+    /// 视频封面方向：默认横版（剧照 fanart），跨会话记忆（与网页版 personVideoOrientation 对应）
+    @AppStorage("personVideoCoverOrientation") private var videoOrientation: AlbumCoverOrientation = .landscape
     /// 相册 tab：懒加载 + 触底分页，接口只读不动库
     @State private var albums: [PersonAlbum] = []
     @State private var albumsTotal = 0
@@ -939,21 +941,28 @@ struct PersonPhotosView: View {
 
             Spacer(minLength: 4)
 
-            // 相册封面横竖切换：图标显示当前方向，点击切到另一方向（网页版同款）
-            if mediaTab == .albums {
+            // 相册/视频封面横竖切换：图标显示当前方向，点击切到另一方向（网页版同款）
+            if mediaTab == .albums || mediaTab == .videos {
                 Button {
                     withAnimation(.easeInOut(duration: 0.18)) {
-                        albumOrientation = (albumOrientation == .portrait) ? .landscape : .portrait
+                        if mediaTab == .albums {
+                            albumOrientation = (albumOrientation == .portrait) ? .landscape : .portrait
+                        } else {
+                            videoOrientation = (videoOrientation == .portrait) ? .landscape : .portrait
+                        }
                     }
                 } label: {
-                    Image(systemName: albumOrientation == .portrait ? "rectangle.portrait" : "rectangle")
+                    let current: AlbumCoverOrientation = mediaTab == .albums ? albumOrientation : videoOrientation
+                    Image(systemName: current == .portrait ? "rectangle.portrait" : "rectangle")
                         .font(.system(size: 14, weight: .medium))
                         .foregroundStyle(.secondary)
                         .frame(width: 30, height: 26)
                         .background(Color.primary.opacity(0.06), in: Capsule())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(albumOrientation == .portrait ? "切换横版封面" : "切换竖版封面")
+                .accessibilityLabel(mediaTab == .videos
+                    ? (videoOrientation == .portrait ? "切换横版剧照" : "切换竖版海报")
+                    : (albumOrientation == .portrait ? "切换横版封面" : "切换竖版封面"))
             }
 
             // 排序只属于图片 tab，和三个 tab 同一行
@@ -1101,8 +1110,8 @@ struct PersonPhotosView: View {
     /// 点进复用 MediaDetailView（与 RootView/ActorsView 同一套影视详情）。
     private var videoGrid: some View {
         ScrollView {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: isWide ? 180 : 140), spacing: 12)],
-                      spacing: 14) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: isWide ? 280 : 200), spacing: 14)],
+                      spacing: 18) {
                 ForEach(videos) { v in
                     NavigationLink(value: MediaItem(id: v.mediaId, title: v.displayTitle)) {
                         videoCard(v)
@@ -1137,15 +1146,42 @@ struct PersonPhotosView: View {
     }
 
     private func videoCard(_ v: PersonVideo) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        let isPortrait = videoOrientation == .portrait
+        // 竖版用海报(poster)，横版用剧照(fanart)；缺哪边用另一边兜底（网页版口径）
+        let primaryURL = isPortrait ? (v.coverURL ?? v.backdropURL) : (v.backdropURL ?? v.coverURL)
+        // 横版没有剧照、只有竖版海报时：模糊同图铺底 + 完整显示，避免把海报裁成中间一条
+        let blurredFallback = !isPortrait && v.backdropURL == nil && v.coverURL != nil
+        return VStack(alignment: .leading, spacing: 8) {
             ZStack(alignment: .topLeading) {
-                RemoteImage(url: v.backdropURL ?? v.coverURL, fallbackIcon: "film",
-                            fallbackColors: Theme.placeholderGradient(for: .media))
-                    .imageFilled(alignment: .center)
-                    .aspectRatio(16.0 / 9.0, contentMode: .fill)
-                    .frame(maxWidth: .infinity)
-                    .clipped()
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                ZStack {
+                    if let url = primaryURL {
+                        if blurredFallback {
+                            // 底层：模糊放大铺满（先模糊再放大，边缘不出软边）
+                            RemoteImage(url: url, fallbackIcon: "film",
+                                        fallbackColors: Theme.placeholderGradient(for: .media))
+                                .imageFilled(alignment: .center)
+                                .blur(radius: 20)
+                                .scaleEffect(1.15)
+                            // 上层：完整显示海报，不裁切
+                            RemoteImage(url: url, fallbackIcon: "film",
+                                        fallbackColors: Theme.placeholderGradient(for: .media))
+                                .imageFitted()
+                        } else {
+                            RemoteImage(url: url, fallbackIcon: "film",
+                                        fallbackColors: Theme.placeholderGradient(for: .media))
+                                .imageFilled(alignment: .center)
+                        }
+                    } else {
+                        Image(systemName: "film")
+                            .font(.system(size: 28))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .aspectRatio(isPortrait ? 2.0 / 3.0 : 16.0 / 9.0, contentMode: .fill)
+                .frame(maxWidth: .infinity)
+                .clipped()
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+
                 Text(String(format: "sim %.3f", v.sim))
                     .font(.caption2)
                     .monospacedDigit()
@@ -1153,14 +1189,14 @@ struct PersonPhotosView: View {
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
                     .background(Color.black.opacity(0.6), in: Capsule())
-                    .padding(6)
+                    .padding(7)
             }
             Text(v.displayTitle)
-                .font(.caption.weight(.medium))
+                .font(.subheadline.weight(.medium))
                 .foregroundStyle(.primary)
                 .lineLimit(1)
             Text("\(v.year.isEmpty ? "—" : v.year) · 已人工确认")
-                .font(.caption2)
+                .font(.caption)
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
         }

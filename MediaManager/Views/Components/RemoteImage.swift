@@ -134,4 +134,15 @@ extension View {
             self.frame(width: geo.size.width, height: geo.size.height, alignment: alignment).clipped()
         }
     }
+
+    /// 把内容完整装箱进父级给到的尺寸里（不裁切、留白），对称于 imageFilled。
+    /// RemoteImage 内部是 scaledToFill，直接用会裁切；这里用 GeometryReader 先拿到
+    /// 确定尺寸，再用 aspectRatio(contentMode: .fit) 完整显示。
+    /// 用途：横版容器里只有竖版海报时的上层完整图（配下层模糊铺底）。
+    func imageFitted() -> some View {
+        GeometryReader { geo in
+            self.aspectRatio(contentMode: .fit)
+                .frame(width: geo.size.width, height: geo.size.height, alignment: .center)
+        }
+    }
 }
