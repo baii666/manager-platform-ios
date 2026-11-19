@@ -685,6 +685,12 @@ struct PersonPhotosView: View {
     @AppStorage("personAlbumCoverOrientation") private var albumOrientation: AlbumCoverOrientation = .landscape
     /// 视频封面方向：默认横版（剧照 fanart），跨会话记忆（与网页版 personVideoOrientation 对应）
     @AppStorage("personVideoCoverOrientation") private var videoOrientation: AlbumCoverOrientation = .landscape
+    /// 相册/视频卡片的捏合缩放宽度（每 tab 独立记忆）。捏合放大→宽度变大→列数变少
+    @State private var albumCardWidth: CGFloat = CGFloat(PhotoGridPrefs.load("personAlbumCards", fallback: 150))
+    @State private var videoCardWidth: CGFloat = CGFloat(PhotoGridPrefs.load("personVideoCards", fallback: 200))
+    @State private var albumPinchStart: CGFloat = 0
+    @State private var videoPinchStart: CGFloat = 0
+    private let cardWidthRange: ClosedRange<CGFloat> = 90...420
     /// 相册 tab：懒加载 + 触底分页，接口只读不动库
     @State private var albums: [PersonAlbum] = []
     @State private var albumsTotal = 0
@@ -1017,7 +1023,7 @@ struct PersonPhotosView: View {
     /// 封面方向跟着 albumOrientation 走：竖版 2:3，横版 16:9（网页版同款比例）。
     private var albumGrid: some View {
         ScrollView {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: isWide ? 150 : 120), spacing: 12)],
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: albumCardWidth), spacing: 12)],
                       spacing: 14) {
                 ForEach(albums) { album in
                     NavigationLink(value: PersonAlbumRoute(
@@ -1044,6 +1050,8 @@ struct PersonPhotosView: View {
                     .padding(.bottom, 12)
             }
         }
+        // 双指捏合缩放卡片大小（对齐相册列表页）
+        .simultaneousGesture(albumPinch)
         .overlay {
             if albums.isEmpty {
                 if let albumsErrorMessage {
@@ -1110,7 +1118,7 @@ struct PersonPhotosView: View {
     /// 点进复用 MediaDetailView（与 RootView/ActorsView 同一套影视详情）。
     private var videoGrid: some View {
         ScrollView {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: isWide ? 280 : 200), spacing: 14)],
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: videoCardWidth), spacing: 14)],
                       spacing: 18) {
                 ForEach(videos) { v in
                     NavigationLink(value: MediaItem(id: v.mediaId, title: v.displayTitle)) {
@@ -1128,6 +1136,8 @@ struct PersonPhotosView: View {
                 ProgressView().padding()
             }
         }
+        // 双指捏合缩放卡片大小（对齐相册列表页）
+        .simultaneousGesture(videoPinch)
         .overlay {
             if videos.isEmpty {
                 if let videosErrorMessage {
@@ -1200,6 +1210,32 @@ struct PersonPhotosView: View {
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
         }
+    }
+
+    /// 相册 tab 双指捏合缩放卡片宽度。拖动中只改内存，松手才落盘。
+    private var albumPinch: some Gesture {
+        MagnificationGesture()
+            .onChanged { scale in
+                if albumPinchStart == 0 { albumPinchStart = albumCardWidth }
+                albumCardWidth = min(max(albumPinchStart * scale, cardWidthRange.lowerBound), cardWidthRange.upperBound)
+            }
+            .onEnded { _ in
+                albumPinchStart = 0
+                PhotoGridPrefs.save("personAlbumCards", Int(albumCardWidth))
+            }
+    }
+
+    /// 视频 tab 双指捏合缩放卡片宽度。
+    private var videoPinch: some Gesture {
+        MagnificationGesture()
+            .onChanged { scale in
+                if videoPinchStart == 0 { videoPinchStart = videoCardWidth }
+                videoCardWidth = min(max(videoPinchStart * scale, cardWidthRange.lowerBound), cardWidthRange.upperBound)
+            }
+            .onEnded { _ in
+                videoPinchStart = 0
+                PhotoGridPrefs.save("personVideoCards", Int(videoCardWidth))
+            }
     }
 
     /// 视频关联空态：与网页版文案一致，不按名字/封面自动猜关联
