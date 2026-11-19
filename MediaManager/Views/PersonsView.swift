@@ -461,8 +461,8 @@ private struct PersonPhotosHeader: View {
     /// 已加载条数（首批还没回来时用它兜底）
     let loaded: Int
 
-    /// 资料默认展开（详情页左栏 / 顶部条都一样），需要时点「收起资料」折叠
-    @State private var expanded = true
+    /// 资料默认收起（顶部太厚），需要时点「资料」展开
+    @State private var expanded = false
 
     /// 头像优先级：封面 → 聚类代表脸 → 代表照片 → 占位图标
     private var coverURL: URL? { personCoverURL(person) }
@@ -565,8 +565,8 @@ private struct PersonSidebar: View {
     let total: Int
     let loaded: Int
 
-    /// 资料默认展开，需要时点「收起资料」折叠
-    @State private var expanded = true
+    /// 资料默认收起（左栏也不预占高度），需要时点「资料」展开
+    @State private var expanded = false
 
     private var displayName: String { profile?.displayName ?? person.displayName }
     /// 对齐网页版文案：照片数（不再是「作品」）
@@ -1000,7 +1000,7 @@ struct PersonPhotosView: View {
                     .font(.caption.weight(.medium))
                     .foregroundStyle(mediaTab == tab ? Theme.brand : Color.secondary)
                     .padding(.horizontal, 8)
-                    .padding(.vertical, 6)
+                    .padding(.vertical, 4)
                     .background(
                         mediaTab == tab ? Theme.brand.opacity(0.12) : Color.clear,
                         in: Capsule()
@@ -1061,7 +1061,7 @@ struct PersonPhotosView: View {
             }
         }
         .padding(.horizontal, panePadding)
-        .padding(.vertical, 8)
+        .padding(.vertical, 5)
         .overlay(alignment: .bottom) { barDivider }
     }
 
@@ -1081,9 +1081,9 @@ struct PersonPhotosView: View {
                     }
                 }
                 .padding(.horizontal, panePadding)
-                .padding(.vertical, 6)
+                .padding(.vertical, 3)
             }
-            .frame(height: 38)
+            .frame(height: 30)
             .overlay(alignment: .bottom) { barDivider }
         }
     }
@@ -1111,7 +1111,7 @@ struct PersonPhotosView: View {
             .font(.caption2)
             .foregroundStyle(active ? .primary : .secondary)
             .padding(.horizontal, 10)
-            .padding(.vertical, 5)
+            .padding(.vertical, 3)
             .background(active ? Color.primary.opacity(0.12) : Color.primary.opacity(0.05),
                         in: Capsule())
         }
