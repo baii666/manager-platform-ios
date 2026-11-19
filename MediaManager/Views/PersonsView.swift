@@ -133,7 +133,7 @@ struct PersonsView: View {
 
 // MARK: - 人物卡
 // 对齐网页版人物资料页 ProfileCard：封面原生 3:4 完整显示，
-// 图上左上「N 脸」黑胶囊、右上相似度胶囊；图下名字 + 出生/身高/出生地最多两行。
+// 图上左上「N 脸」黑胶囊、右上相似度胶囊；图下名字一行 + 出生/身高并排一行。
 // 卡片边界只是一条 0.5pt 细描边 + 薄底板，不是厚边框。
 private struct PersonCard: View {
     let person: Person
@@ -149,7 +149,7 @@ private struct PersonCard: View {
         return archived.isEmpty ? "人物 #\(person.id)" : archived
     }
 
-    /// 与网页版同款三事实：出生 → 身高 → 出生地，最多展示 2 行
+    /// 与网页版同款三事实：出生 → 身高 → 出生地，取前两条并排在同一行（· 分隔）
     private var facts: [(icon: String, text: String)] {
         guard let p = profile else { return [] }
         var list: [(String, String)] = []
@@ -190,16 +190,16 @@ private struct PersonCard: View {
                     }
                 }
 
-            // 文字区整块固定高度：名字一行 + 资料两行。
+            // 文字区整块固定高度：名字一行 + 资料一行（日期/身高并排，用 · 分隔）。
             // 用显式 VStack 容器固定，不能把 .frame 加在 Group 上（Group 会把 frame
-            // 传给每个子行，两行资料的卡就比一行/无资料的卡高，整页网格对不齐）。
+            // 传给每个子行，不同行数的卡就比别的卡高，整页网格对不齐）。
             VStack(alignment: .leading, spacing: 3) {
                 Text(displayName)
                     .font(.subheadline.weight(.medium))
                     .lineLimit(1)
                     .frame(height: 19)
 
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 0) {
                     if facts.isEmpty {
                         HStack(spacing: 4) {
                             Image(systemName: "person.crop.rectangle")
@@ -211,25 +211,31 @@ private struct PersonCard: View {
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                     } else {
-                        ForEach(facts.indices, id: \.self) { i in
-                            HStack(spacing: 4) {
-                                Image(systemName: facts[i].icon)
-                                    .font(.system(size: 9, weight: .medium))
-                                    .foregroundStyle(.tertiary)
-                                Text(facts[i].text)
-                                    .lineLimit(1)
-                                    .truncationMode(.tail)
+                        HStack(spacing: 8) {
+                            ForEach(facts.indices, id: \.self) { i in
+                                HStack(spacing: 4) {
+                                    if i > 0 {
+                                        Text("·")
+                                            .foregroundStyle(.tertiary)
+                                    }
+                                    Image(systemName: facts[i].icon)
+                                        .font(.system(size: 9, weight: .medium))
+                                        .foregroundStyle(.tertiary)
+                                    Text(facts[i].text)
+                                        .lineLimit(1)
+                                        .truncationMode(.tail)
+                                }
                             }
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
                         }
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                     }
                 }
-                .frame(maxWidth: .infinity, minHeight: 30, maxHeight: 30, alignment: .topLeading)
+                .frame(maxWidth: .infinity, minHeight: 16, maxHeight: 16, alignment: .topLeading)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
-            .frame(maxWidth: .infinity, minHeight: 74, maxHeight: 74, alignment: .topLeading)
+            .frame(maxWidth: .infinity, minHeight: 58, maxHeight: 58, alignment: .topLeading)
         }
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .appSurface(in: RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -673,9 +679,11 @@ struct PersonPhotosView: View {
     @State private var errorMessage: String?
     /// 后端给的作品总数（不是已加载条数）：顶部信息区显示它，翻页时不跳动
     @State private var total = 0
-    /// 照片按媒体库分布 + 当前筛选的库（nil=全部）。切库重置分页重新拉第一页。
-    @State private var libraryStats: [PersonLibraryStat] = []
-    @State private var filterLibrary: Int? = nil
+    /// 三个 tab 各自的按库分布 + 筛选库（nil=全部）。切库重置该 tab 分页重新拉第一页。
+    @State private var breakdown = PersonLibraryBreakdown()
+    @State private var photoFilterLibrary: Int? = nil
+    @State private var albumFilterLibrary: Int? = nil
+    @State private var videoFilterLibrary: Int? = nil
     /// 外部人物档案（thenude）。多数人物没有（meta 为空），顶部退回原来的一行信息
     @State private var profile: PersonProfile?
     /// 只请求一次：.task 在页面重新出现时可能重跑，避免重复请求
@@ -773,7 +781,7 @@ struct PersonPhotosView: View {
         defer { isLoading = false }
         do {
             let (batch, totalCount) = try await client.fetchPersonPhotos(
-                personId: person.id, page: page, libraryId: filterLibrary)
+                personId: person.id, page: page, libraryId: photoFilterLibrary)
             // 页面已切走 / 任务已取消时别再改 UI，也别把取消写成失败
             guard !Task.isCancelled else { return }
             photos.append(contentsOf: batch)
@@ -787,27 +795,53 @@ struct PersonPhotosView: View {
         }
     }
 
-    /// 照片库分布：进页面加载一次，与筛选无关（始终全量）
+    /// 三个 tab 的库分布：进页面加载一次，与筛选无关（始终全量）
     @MainActor
     private func loadLibraryBreakdown() async {
         guard let client = AppSession.shared.client else { return }
-        libraryStats = (try? await client.fetchPersonLibraryBreakdown(personId: person.id)) ?? []
+        breakdown = (try? await client.fetchPersonLibraryBreakdown(personId: person.id))
+            ?? PersonLibraryBreakdown()
     }
 
-    /// 点库 chip 筛选：传 nil=全部；传当前已选库=取消筛选，重置分页重新拉第一页。
+    /// 当前 tab 的库分布 / 筛选库
+    private var activeLibraryStats: [PersonLibraryStat] {
+        switch mediaTab {
+        case .photos: return breakdown.libraries
+        case .albums: return breakdown.albums
+        case .videos: return breakdown.videos
+        }
+    }
+    private var activeFilterLibrary: Int? {
+        switch mediaTab {
+        case .photos: return photoFilterLibrary
+        case .albums: return albumFilterLibrary
+        case .videos: return videoFilterLibrary
+        }
+    }
+
+    /// 点库 chip 筛选：传 nil=全部；传当前已选库=取消筛选，重置该 tab 分页重新拉第一页。
     @MainActor
     private func applyLibraryFilter(_ libId: Int?) async {
-        if let libId {
-            filterLibrary = (filterLibrary == libId) ? nil : libId
-        } else {
-            filterLibrary = nil
+        let next: Int?
+        if let libId { next = (activeFilterLibrary == libId) ? nil : libId }
+        else { next = nil }
+        switch mediaTab {
+        case .photos:
+            photoFilterLibrary = next
+            isLoading = false
+            photos = []; total = 0; page = 1; hasMore = true; errorMessage = nil
+            await loadMore()
+        case .albums:
+            albumFilterLibrary = next
+            albumsLoading = false
+            albums = []; albumsTotal = 0; albumsPage = 1; albumsHasMore = true; albumsErrorMessage = nil
+            await loadAlbums(reset: false)
+        case .videos:
+            videoFilterLibrary = next
+            videosLoading = false
+            videos = []; videosTotal = 0; videosPage = 1; videosHasMore = true; videosErrorMessage = nil
+            await loadVideos(reset: false)
         }
-        photos = []
-        total = 0
-        page = 1
-        hasMore = true
-        errorMessage = nil
-        await loadMore()
     }
 
     /// 相册 tab 懒加载：切到才请求，触底追加；重复 onAppear 由 albumsLoading 防重入
@@ -824,7 +858,7 @@ struct PersonPhotosView: View {
         defer { albumsLoading = false }
         do {
             let (batch, total, unassigned) = try await client.fetchPersonAlbums(
-                personId: person.id, page: albumsPage)
+                personId: person.id, page: albumsPage, libraryId: albumFilterLibrary)
             guard !Task.isCancelled else { return }
             if albumsPage == 1 {
                 albums = batch
@@ -857,7 +891,7 @@ struct PersonPhotosView: View {
         defer { videosLoading = false }
         do {
             let (batch, total) = try await client.fetchPersonVideos(
-                personId: person.id, page: videosPage)
+                personId: person.id, page: videosPage, libraryId: videoFilterLibrary)
             guard !Task.isCancelled else { return }
             if videosPage == 1 {
                 videos = batch
@@ -1031,18 +1065,18 @@ struct PersonPhotosView: View {
         .overlay(alignment: .bottom) { barDivider }
     }
 
-    /// 照片库筛选条：仅图片 tab + 有分布数据时显示。横向滚动，点库名筛该库，再点取消。
+    /// 三个 tab 共用的按库筛选条：当前 tab 有分布数据时显示。横向滚动，点库名筛该库，再点取消。
     private var libraryFilterBar: some View {
         Group {
-            if mediaTab == .photos && !libraryStats.isEmpty {
+            if !activeLibraryStats.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
                         libraryChip(id: nil, name: "全部",
-                                    count: libraryStats.reduce(0) { $0 + $1.count },
-                                    active: filterLibrary == nil)
-                        ForEach(libraryStats) { s in
+                                    count: activeLibraryStats.reduce(0) { $0 + $1.count },
+                                    active: activeFilterLibrary == nil)
+                        ForEach(activeLibraryStats) { s in
                             libraryChip(id: s.libraryId, name: s.name, count: s.count,
-                                        active: filterLibrary == s.libraryId)
+                                        active: activeFilterLibrary == s.libraryId)
                         }
                     }
                     .padding(.horizontal, panePadding)

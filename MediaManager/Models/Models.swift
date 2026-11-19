@@ -1005,8 +1005,28 @@ struct PersonLibraryStat: Identifiable, Codable, Sendable, Hashable {
     }
 }
 
+/// 人物三个 tab 各自的按库分布。libraries=图片、albums=相册、videos=视频。
+/// 老后端只返回 libraries 时，albums/videos 用 decodeIfPresent 兜底为空，不炸解码。
+struct PersonLibraryBreakdown: Codable, Sendable {
+    var libraries: [PersonLibraryStat] = []
+    var albums: [PersonLibraryStat] = []
+    var videos: [PersonLibraryStat] = []
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        libraries = (try? c.decode([PersonLibraryStat].self, forKey: .libraries)) ?? []
+        albums = (try? c.decode([PersonLibraryStat].self, forKey: .albums)) ?? []
+        videos = (try? c.decode([PersonLibraryStat].self, forKey: .videos)) ?? []
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case libraries, albums, videos
+    }
+}
+
 struct PersonVideo: Identifiable, Codable, Sendable, Hashable {
     let mediaId: Int
+    var libraryId: Int = 0
     var title: String = ""
     var year: String = ""
     var folderName: String = ""
@@ -1025,6 +1045,7 @@ struct PersonVideo: Identifiable, Codable, Sendable, Hashable {
 
     enum CodingKeys: String, CodingKey {
         case mediaId = "media_id"
+        case libraryId = "library_id"
         case title, year
         case folderName = "folder_name"
         case coverURL = "cover_url"
@@ -1038,6 +1059,7 @@ struct PersonVideo: Identifiable, Codable, Sendable, Hashable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         mediaId = (try? c.decode(Int.self, forKey: .mediaId)) ?? 0
+        libraryId = (try? c.decode(Int.self, forKey: .libraryId)) ?? 0
         title = (try? c.decode(String.self, forKey: .title)) ?? ""
         year = (try? c.decode(String.self, forKey: .year)) ?? ""
         folderName = (try? c.decode(String.self, forKey: .folderName)) ?? ""

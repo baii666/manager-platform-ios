@@ -447,15 +447,11 @@ final class APIClient: DataProviding, @unchecked Sendable {
         return (resp.photos.map { resolvePhoto($0) }, resp.total)
     }
 
-    /// 人物照片按媒体库分布（只读，逻辑合并整组 + photo_id 去重）
-    func fetchPersonLibraryBreakdown(personId: Int) async throws -> [PersonLibraryStat] {
-        struct Resp: Decodable {
-            let libraries: [PersonLibraryStat]
-        }
-        let resp: Resp = try await request("/api/persons/\(personId)/library-breakdown", queryItems: [
+    /// 人物三个 tab 按媒体库分布（只读，逻辑合并整组 + photo_id 去重）
+    func fetchPersonLibraryBreakdown(personId: Int) async throws -> PersonLibraryBreakdown {
+        try await request("/api/persons/\(personId)/library-breakdown", queryItems: [
             URLQueryItem(name: "threshold", value: "0.40"),
         ])
-        return resp.libraries
     }
 
     /// 人物档案列表。GET /api/person-profiles?page&size
@@ -484,35 +480,39 @@ final class APIClient: DataProviding, @unchecked Sendable {
 
     /// 人物相册（网页版资料页「相册」tab 同源）。GET /api/persons/:id/albums
     /// 只读聚合，不建表不写库；threshold 固定 0.40 与档案页口径一致。
-    func fetchPersonAlbums(personId: Int, page: Int = 1, size: Int = 60) async throws
+    func fetchPersonAlbums(personId: Int, page: Int = 1, size: Int = 60, libraryId: Int? = nil) async throws
         -> (albums: [PersonAlbum], total: Int, unassigned: Int) {
         struct Resp: Codable {
             let albums: [PersonAlbum]
             let total: Int
             let unassigned: Int
         }
-        let resp: Resp = try await request("/api/persons/\(personId)/albums", queryItems: [
+        var items = [
             URLQueryItem(name: "page", value: "\(page)"),
             URLQueryItem(name: "size", value: "\(size)"),
             URLQueryItem(name: "threshold", value: "0.40"),
-        ])
+        ]
+        if let libraryId { items.append(URLQueryItem(name: "library_id", value: "\(libraryId)")) }
+        let resp: Resp = try await request("/api/persons/\(personId)/albums", queryItems: items)
         return (resp.albums, resp.total, resp.unassigned)
     }
 
     /// 人物视频关联（网页版资料页「视频」tab 同源）。GET /api/person-media-hub/videos
     /// 只返回经人工复核 verdict='confirmed' 的正式关联，候选不会出现在正式列表里。
     /// 这个插件路由走 /api 前缀、带宿主 AuthMiddleware，与其它人物接口同一鉴权口径。
-    func fetchPersonVideos(personId: Int, page: Int = 1, size: Int = 60) async throws
+    func fetchPersonVideos(personId: Int, page: Int = 1, size: Int = 60, libraryId: Int? = nil) async throws
         -> (videos: [PersonVideo], total: Int) {
         struct Resp: Codable {
             let videos: [PersonVideo]
             let total: Int
         }
-        let resp: Resp = try await request("/api/person-media-hub/videos", queryItems: [
+        var items = [
             URLQueryItem(name: "person_id", value: "\(personId)"),
             URLQueryItem(name: "page", value: "\(page)"),
             URLQueryItem(name: "size", value: "\(size)"),
-        ])
+        ]
+        if let libraryId { items.append(URLQueryItem(name: "library_id", value: "\(libraryId)")) }
+        let resp: Resp = try await request("/api/person-media-hub/videos", queryItems: items)
         // cover_url / backdrop_url 都是后端返回的相对路径（/media-cover?path=...），
         // resolve 成完整 URL 再交给 RemoteImage（与演员头像 resolve 同一口径）。
         let videos = resp.videos.map { v -> PersonVideo in
