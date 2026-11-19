@@ -456,8 +456,8 @@ private struct PersonPhotosHeader: View {
     /// 外部档案：约 96% 的聚类人物没匹配到（接口 200 但 meta 为空），
     /// 这种人物顶部保持原来的一行信息，不出现「资料」入口
     let profile: PersonProfile?
-    /// 点它把整张资料卡向左滑走收起（顶部只留一个小入口）
-    let onHide: () -> Void
+    /// 绑定父层的隐藏状态：点按钮/左滑时整张卡向左滑走
+    @Binding var isHidden: Bool
     /// 后端返回的作品总数
     let total: Int
     /// 已加载条数（首批还没回来时用它兜底）
@@ -549,7 +549,7 @@ private struct PersonPhotosHeader: View {
                 .onEnded { value in
                     if value.translation.width < -60,
                        abs(value.translation.width) > abs(value.translation.height) {
-                        onHide()
+                        withAnimation(.easeInOut(duration: 0.22)) { isHidden = true }
                     }
                 }
         )
@@ -557,7 +557,9 @@ private struct PersonPhotosHeader: View {
 
     /// 把整张资料卡向左滑走收起
     private var hideButton: some View {
-        Button(action: onHide) {
+        Button {
+            withAnimation(.easeInOut(duration: 0.22)) { isHidden = true }
+        } label {
             Image(systemName: "chevron.left")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.tertiary)
@@ -593,8 +595,8 @@ private struct PersonPhotosHeader: View {
 private struct PersonSidebar: View {
     let person: Person
     let profile: PersonProfile?
-    /// 点它把整条左侧资料栏向左滑走（右栏网格占满宽度）
-    let onHide: () -> Void
+    /// 绑定父层的左栏隐藏状态
+    @Binding var isHidden: Bool
     let total: Int
     let loaded: Int
 
@@ -631,7 +633,9 @@ private struct PersonSidebar: View {
                         .background(Theme.brand.opacity(0.12), in: Capsule())
                 }
                 Spacer(minLength: 0)
-                Button(action: onHide) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.22)) { isHidden = true }
+                } label {
                     HStack(spacing: 2) {
                         Text("隐藏").font(.caption2)
                         Image(systemName: "chevron.left")
@@ -986,8 +990,8 @@ struct PersonPhotosView: View {
             HStack(spacing: 0) {
                 if !sidebarHidden {
                     ScrollView {
-                        PersonSidebar(person: person, profile: profile, total: total, loaded: photos.count,
-                                      onHide: { withAnimation(.easeInOut(duration: 0.22)) { sidebarHidden = true } })
+                        PersonSidebar(person: person, profile: profile, isHidden: $sidebarHidden,
+                                      total: total, loaded: photos.count)
                             .padding(panePadding)
                             .bottomBarClearance()
                     }
@@ -1021,9 +1025,8 @@ struct PersonPhotosView: View {
                 hiddenProfileStrip
                     .transition(.move(edge: .leading).combined(with: .opacity))
             } else {
-                PersonPhotosHeader(person: person, profile: profile,
-                                   total: total, loaded: photos.count,
-                                   onHide: { withAnimation(.easeInOut(duration: 0.22)) { profileHidden = true } })
+                PersonPhotosHeader(person: person, profile: profile, isHidden: $profileHidden,
+                                   total: total, loaded: photos.count)
                     .transition(.move(edge: .leading).combined(with: .opacity))
             }
             mediaToolbar
