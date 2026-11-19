@@ -494,7 +494,20 @@ private struct PersonPhotosHeader: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
+            // 人名在图片上方（顶栏已不再显示人名）
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(displayName)
+                    .font(.title2.weight(.bold))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Spacer(minLength: 0)
+                if let profile, profile.hasProfileMeta {
+                    toggleButton
+                }
+                hideButton
+            }
+
             HStack(spacing: 16) {
                 RemoteImage(url: coverURL, fallbackURL: personFaceURL(person),
                             fallbackIcon: "person.fill",
@@ -504,10 +517,6 @@ private struct PersonPhotosHeader: View {
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(displayName)
-                        .font(.title2.weight(.bold))
-                        .lineLimit(1)
-                        .truncationMode(.tail)
                     Text(infoLine)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
@@ -521,10 +530,6 @@ private struct PersonPhotosHeader: View {
                     }
                 }
                 Spacer(minLength: 0)
-                if let profile, profile.hasProfileMeta {
-                    toggleButton
-                }
-                hideButton
             }
 
             if expanded, let profile, profile.hasProfileMeta {
@@ -611,8 +616,20 @@ private struct PersonSidebar: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack {
+        VStack(alignment: .leading, spacing: 12) {
+            // 人名在图片上方（顶栏不再显示人名）；隐藏按钮同行右端
+            HStack(spacing: 6) {
+                Text(displayName)
+                    .font(.title3.weight(.semibold))
+                    .fixedSize(horizontal: false, vertical: true)
+                if let profile, profile.hasProfileMeta {
+                    Text("已挂档案")
+                        .font(.caption2)
+                        .foregroundStyle(Theme.brand)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Theme.brand.opacity(0.12), in: Capsule())
+                }
                 Spacer(minLength: 0)
                 Button(action: onHide) {
                     HStack(spacing: 2) {
@@ -631,19 +648,6 @@ private struct PersonSidebar: View {
             avatar.frame(maxWidth: .infinity, alignment: .center)
 
             VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 6) {
-                    Text(displayName)
-                        .font(.title3.weight(.semibold))
-                        .fixedSize(horizontal: false, vertical: true)
-                    if let profile, profile.hasProfileMeta {
-                        Text("已挂档案")
-                            .font(.caption2)
-                            .foregroundStyle(Theme.brand)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Theme.brand.opacity(0.12), in: Capsule())
-                    }
-                }
                 Text(infoLine).font(.subheadline).foregroundStyle(.secondary)
                 if let profile, profile.thenudeSim > 0 {
                     HStack(spacing: 8) {
@@ -782,8 +786,8 @@ struct PersonPhotosView: View {
         Group {
             if isWide { wideContent } else { narrowContent }
         }
-        // 顶 bar 显示人名；其下左栏放信息、右栏放数据
-        .navigationTitle(profile?.displayName ?? person.displayName)
+        // 顶栏不显示人名：名字已放到左侧图片上方，顶栏只承载三个 tab 与图库筛选
+        .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         // 顶 bar 保持实心并与下面那条整宽工具行同色：连成一个整体 bar
         .toolbarBackground(.visible, for: .navigationBar)
@@ -972,14 +976,8 @@ struct PersonPhotosView: View {
         }
     }
 
-    /// 右侧固定显示「已加载数/总数」，分页时左值递增
-    private var countText: String {
-        let t = total > 0 ? "\(total)" : (photos.count > 0 ? "\(photos.count)" : "—")
-        return "\(photos.count)/\(t)"
-    }
-
     // MARK: iPad 双栏：系统导航栏是唯一横跨整页的顶 bar；
-    // bar 之下左栏信息 / 右栏数据，排序/数量只在右栏顶部，不跨到资料区上方
+    // bar 之下左栏信息 / 右栏数据，三 tab + 图库筛选只在右栏顶行，不跨到资料区上方
     private var wideContent: some View {
         VStack(spacing: 0) {
             // 顶 bar 的下边界，属于系统导航栏那一条，不属于数据区
@@ -1005,7 +1003,6 @@ struct PersonPhotosView: View {
                 // 三 tab + 排序 / 数量合为一行，属于右侧数据区，不跨到资料区上方
                 VStack(spacing: 0) {
                     mediaToolbar
-                    libraryFilterBar
                     mediaContent
                         // UICollectionView 在 VStack 里需要明确拿到剩余空间，否则会塌成 0 高
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1030,7 +1027,6 @@ struct PersonPhotosView: View {
                     .transition(.move(edge: .leading).combined(with: .opacity))
             }
             mediaToolbar
-            libraryFilterBar
             mediaContent
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -1063,7 +1059,7 @@ struct PersonPhotosView: View {
         .overlay(alignment: .bottom) { barDivider }
     }
 
-    /// 右栏唯一一行：三 tab + 排序（仅图片 tab）+ 已加载数，底部一条分隔线。
+    /// 顶栏唯一一行：三 tab（左）+ 排序/方向 + 图库筛选（右），底部一条分隔线。
     /// 列数选择已去掉；列数仍可双指捏合调整，并按「人物照片页」记忆。
     private var mediaToolbar: some View {
         HStack(spacing: 6) {
@@ -1109,9 +1105,28 @@ struct PersonPhotosView: View {
                 .buttonStyle(.plain)
             }
 
-            Spacer(minLength: 4)
+            // 右侧第一栏：排序/方向 + 图库筛选（图库 chip 自带计数，不再单独显示总数）
+            if mediaTab == .photos {
+                Menu {
+                    ForEach(PersonPhotoSort.allCases) { s in
+                        Button {
+                            photoSort = s
+                        } label: {
+                            if photoSort == s { Label(s.rawValue, systemImage: "checkmark") }
+                            else { Text(s.rawValue) }
+                        }
+                    }
+                } label: {
+                    Image(systemName: "arrow.up.arrow.down")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 26, height: 26)
+                        .background(Color.primary.opacity(0.06), in: Capsule())
+                }
+                .tint(Color.secondary)
+                .accessibilityLabel("照片排序")
+            }
 
-            // 相册/视频封面横竖切换：图标显示当前方向，点击切到另一方向（网页版同款）
             if mediaTab == .albums || mediaTab == .videos {
                 Button {
                     withAnimation(.easeInOut(duration: 0.18)) {
@@ -1135,57 +1150,30 @@ struct PersonPhotosView: View {
                     : (albumOrientation == .portrait ? "切换横版封面" : "切换竖版封面"))
             }
 
-            // 排序只属于图片 tab，和三个 tab 同一行
-            if mediaTab == .photos {
-                Menu {
-                    ForEach(PersonPhotoSort.allCases) { s in
-                        Button {
-                            photoSort = s
-                        } label: {
-                            if photoSort == s { Label(s.rawValue, systemImage: "checkmark") }
-                            else { Text(s.rawValue) }
-                        }
-                    }
-                } label: {
-                    toolLabel(photoSort.rawValue)
-                }
-                .tint(Color.secondary)
-            }
-
-            if mediaTab == .videos ? !videos.isEmpty : true {
-                Text(mediaCountText)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-                    .lineLimit(1)
-            }
+            libraryFilterChips
         }
         .padding(.horizontal, panePadding)
         .padding(.vertical, 5)
+        .background(topBarColor)
         .overlay(alignment: .bottom) { barDivider }
     }
 
-    /// 三个 tab 共用的按库筛选条：始终显示「全部」（用该 tab 总数），库分布到了再补 chip。
-    /// 首次 breakdown 冷查询要几秒，不能让整条筛选条跟着一起晚出。
-    private var libraryFilterBar: some View {
-        VStack(spacing: 0) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    libraryChip(id: nil, name: "全部",
-                                count: activeLibraryStats.isEmpty ? activeTotal
-                                                                  : activeLibraryStats.reduce(0) { $0 + $1.count },
-                                active: activeFilterLibrary == nil)
-                    ForEach(activeLibraryStats) { s in
-                        libraryChip(id: s.libraryId, name: s.name, count: s.count,
-                                    active: activeFilterLibrary == s.libraryId)
-                    }
+    /// 顶栏右侧的图库筛选：可横向滚动，点库筛该 tab，再点取消。
+    private var libraryFilterChips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                libraryChip(id: nil, name: "全部",
+                            count: activeLibraryStats.isEmpty ? activeTotal
+                                                              : activeLibraryStats.reduce(0) { $0 + $1.count },
+                            active: activeFilterLibrary == nil)
+                ForEach(activeLibraryStats) { s in
+                    libraryChip(id: s.libraryId, name: s.name, count: s.count,
+                                active: activeFilterLibrary == s.libraryId)
                 }
-                .padding(.horizontal, panePadding)
-                .padding(.vertical, 3)
             }
-            .frame(height: 30)
-            .overlay(alignment: .bottom) { barDivider }
+            .padding(.horizontal, 2)
         }
+        .frame(maxWidth: .infinity, minHeight: 26)
     }
 
     /// 当前 tab 的总数（分布未到时给「全部」chip 用）
@@ -1216,15 +1204,6 @@ struct PersonPhotosView: View {
                         in: Capsule())
         }
         .buttonStyle(.plain)
-    }
-
-    /// 同一行右端的计数：图片=已加载/总数，相册=已加载/总数，视频空态不显示
-    private var mediaCountText: String {
-        switch mediaTab {
-        case .photos: return countText
-        case .albums: return "\(albums.count)/\(albumsTotal)"
-        case .videos: return "\(videos.count)/\(videosTotal)"
-        }
     }
 
     @ViewBuilder
@@ -1471,17 +1450,6 @@ struct PersonPhotosView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         .padding(panePadding)
-    }
-
-    private func toolLabel(_ text: String) -> some View {
-        HStack(spacing: 4) {
-            Text(text).font(.caption.weight(.medium))
-            Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
-        }
-        .foregroundStyle(.secondary)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(Color.primary.opacity(0.06), in: Capsule())
     }
 
     private var photoGrid: some View {
