@@ -456,13 +456,15 @@ private struct PersonPhotosHeader: View {
     /// 外部档案：约 96% 的聚类人物没匹配到（接口 200 但 meta 为空），
     /// 这种人物顶部保持原来的一行信息，不出现「资料」入口
     let profile: PersonProfile?
+    /// 点它把整张资料卡向左滑走收起（顶部只留一个小入口）
+    let onHide: () -> Void
     /// 后端返回的作品总数
     let total: Int
     /// 已加载条数（首批还没回来时用它兜底）
     let loaded: Int
 
-    /// 资料默认收起（顶部太厚），需要时点「资料」展开
-    @State private var expanded = false
+    /// 资料默认展开；整张卡可左滑/点按钮隐藏，不是折叠详情
+    @State private var expanded = true
 
     /// 头像优先级：封面 → 聚类代表脸 → 代表照片 → 占位图标
     private var coverURL: URL? { personCoverURL(person) }
@@ -522,6 +524,7 @@ private struct PersonPhotosHeader: View {
                 if let profile, profile.hasProfileMeta {
                     toggleButton
                 }
+                hideButton
             }
 
             if expanded, let profile, profile.hasProfileMeta {
@@ -535,6 +538,29 @@ private struct PersonPhotosHeader: View {
         .overlay(alignment: .bottom) {
             Divider().frame(maxWidth: .infinity).opacity(0.6)
         }
+        // 向左滑整张资料卡即隐藏（不是折叠详情），与按钮等效
+        .gesture(
+            DragGesture(minimumDistance: 40)
+                .onEnded { value in
+                    if value.translation.width < -60,
+                       abs(value.translation.width) > abs(value.translation.height) {
+                        onHide()
+                    }
+                }
+        )
+    }
+
+    /// 把整张资料卡向左滑走收起
+    private var hideButton: some View {
+        Button(action: onHide) {
+            Image(systemName: "chevron.left")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.tertiary)
+                .frame(width: 24, height: 26)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("隐藏资料卡")
     }
 
     private var toggleButton: some View {
@@ -562,11 +588,13 @@ private struct PersonPhotosHeader: View {
 private struct PersonSidebar: View {
     let person: Person
     let profile: PersonProfile?
+    /// 点它把整条左侧资料栏向左滑走（右栏网格占满宽度）
+    let onHide: () -> Void
     let total: Int
     let loaded: Int
 
-    /// 资料默认收起（左栏也不预占高度），需要时点「资料」展开
-    @State private var expanded = false
+    /// 资料默认展开；整栏可隐藏，不是折叠详情
+    @State private var expanded = true
 
     private var displayName: String { profile?.displayName ?? person.displayName }
     /// 对齐网页版文案：照片数（不再是「作品」）
@@ -584,6 +612,22 @@ private struct PersonSidebar: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Spacer(minLength: 0)
+                Button(action: onHide) {
+                    HStack(spacing: 2) {
+                        Text("隐藏").font(.caption2)
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 9, weight: .semibold))
+                    }
+                    .foregroundStyle(.tertiary)
+                    .padding(.vertical, 2)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("隐藏资料栏")
+            }
+
             avatar.frame(maxWidth: .infinity, alignment: .center)
 
             VStack(alignment: .leading, spacing: 6) {
@@ -686,6 +730,9 @@ struct PersonPhotosView: View {
     @State private var videoFilterLibrary: Int? = nil
     /// 外部人物档案（thenude）。多数人物没有（meta 为空），顶部退回原来的一行信息
     @State private var profile: PersonProfile?
+    /// 资料卡/资料栏是否已被用户向左隐藏（默认展开，隐藏后留小入口唤出）
+    @State private var profileHidden = false
+    @State private var sidebarHidden = false
     /// 只请求一次：.task 在页面重新出现时可能重跑，避免重复请求
     @State private var profileLoaded = false
     /// 右栏顶端固定工具行：排序（Photo 无拍摄时间，只排文件名 / 默认顺序）
@@ -939,17 +986,21 @@ struct PersonPhotosView: View {
             barDivider
 
             HStack(spacing: 0) {
-                ScrollView {
-                    PersonSidebar(person: person, profile: profile, total: total, loaded: photos.count)
-                        .padding(panePadding)
-                        .bottomBarClearance()
-                }
-                .frame(width: sidebarWidth)
-                .clipped()
+                if !sidebarHidden {
+                    ScrollView {
+                        PersonSidebar(person: person, profile: profile, total: total, loaded: photos.count,
+                                      onHide: { withAnimation(.easeInOut(duration: 0.22)) { sidebarHidden = true } })
+                            .padding(panePadding)
+                            .bottomBarClearance()
+                    }
+                    .frame(width: sidebarWidth)
+                    .clipped()
+                    .transition(.move(edge: .leading).combined(with: .opacity))
 
-                Rectangle()
-                    .fill(Color.primary.opacity(0.15))
-                    .frame(width: 0.5)
+                    Rectangle()
+                        .fill(Color.primary.opacity(0.15))
+                        .frame(width: 0.5)
+                }
 
                 // 三 tab + 排序 / 数量合为一行，属于右侧数据区，不跨到资料区上方
                 VStack(spacing: 0) {
@@ -969,8 +1020,15 @@ struct PersonPhotosView: View {
     // MARK: iPhone 单栏（顶部资料条 + 一行三 tab/排序/计数 + 网格）
     private var narrowContent: some View {
         VStack(spacing: 0) {
-            PersonPhotosHeader(person: person, profile: profile,
-                               total: total, loaded: photos.count)
+            if profileHidden {
+                hiddenProfileStrip
+                    .transition(.move(edge: .leading).combined(with: .opacity))
+            } else {
+                PersonPhotosHeader(person: person, profile: profile,
+                                   total: total, loaded: photos.count,
+                                   onHide: { withAnimation(.easeInOut(duration: 0.22)) { profileHidden = true } })
+                    .transition(.move(edge: .leading).combined(with: .opacity))
+            }
             mediaToolbar
             libraryFilterBar
             mediaContent
@@ -978,10 +1036,52 @@ struct PersonPhotosView: View {
         }
     }
 
+    /// 资料卡向左隐藏后，顶部只留这一条细入口，点它恢复资料卡
+    private var hiddenProfileStrip: some View {
+        HStack(spacing: 6) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.22)) { profileHidden = false }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                    Text("资料").font(.caption.weight(.medium))
+                }
+                .foregroundStyle(Theme.brand)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 4)
+                .background(Theme.brand.opacity(0.10), in: Capsule())
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("显示资料卡")
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, panePadding)
+        .padding(.vertical, 4)
+        .background(.regularMaterial)
+        .overlay(alignment: .bottom) { barDivider }
+    }
+
     /// 右栏唯一一行：三 tab + 排序（仅图片 tab）+ 已加载数，底部一条分隔线。
     /// 列数选择已去掉；列数仍可双指捏合调整，并按「人物照片页」记忆。
     private var mediaToolbar: some View {
         HStack(spacing: 6) {
+            // iPad 左栏被向左隐藏后，在这一行左边留一个唤出入口
+            if isWide && sidebarHidden {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.22)) { sidebarHidden = false }
+                } label: {
+                    Image(systemName: "sidebar.left")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(Theme.brand)
+                        .frame(width: 28, height: 26)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("显示资料栏")
+            }
+
             ForEach(PersonMediaTab.allCases) { tab in
                 Button {
                     withAnimation(.easeInOut(duration: 0.18)) { mediaTab = tab }
