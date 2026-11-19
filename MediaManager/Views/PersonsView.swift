@@ -549,7 +549,7 @@ private struct PersonPhotosHeader: View {
                 .onEnded { value in
                     if value.translation.width < -60,
                        abs(value.translation.width) > abs(value.translation.height) {
-                        withAnimation(.easeInOut(duration: 0.22)) { isHidden = true }
+                        isHidden = true
                     }
                 }
         )
@@ -558,7 +558,7 @@ private struct PersonPhotosHeader: View {
     /// 把整张资料卡向左滑走收起
     private var hideButton: some View {
         Button {
-            withAnimation(.easeInOut(duration: 0.22)) { isHidden = true }
+            isHidden = true
         } label {
             Image(systemName: "chevron.left")
                 .font(.system(size: 12, weight: .semibold))
@@ -634,7 +634,7 @@ private struct PersonSidebar: View {
                 }
                 Spacer(minLength: 0)
                 Button {
-                    withAnimation(.easeInOut(duration: 0.22)) { isHidden = true }
+                    isHidden = true
                 } label {
                     HStack(spacing: 2) {
                         Text("隐藏").font(.caption2)
@@ -1016,6 +1016,7 @@ struct PersonPhotosView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .animation(.easeInOut(duration: 0.22), value: sidebarHidden)
     }
 
     // MARK: iPhone 单栏（顶部资料条 + 一行三 tab/排序/计数 + 网格）
@@ -1033,6 +1034,7 @@ struct PersonPhotosView: View {
             mediaContent
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .animation(.easeInOut(duration: 0.22), value: profileHidden)
     }
 
     /// 资料卡向左隐藏后，顶部只留这一条细入口，点它恢复资料卡
