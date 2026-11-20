@@ -1122,17 +1122,8 @@ struct PersonPhotosView: View {
 
             libraryFilterChips
 
-            // 右侧：加载数/总数 + 排序/方向
+            // 右侧从左到右：排序 → 横竖 → 加载数/总数
             HStack(spacing: 6) {
-                // 加载数/总数：图片=已加载/总数，相册=已加载/总数，视频空态不显示
-                if mediaTab == .videos ? !videos.isEmpty : true {
-                    Text(mediaCountText)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                        .lineLimit(1)
-                }
-
                 if mediaTab == .photos {
                     Menu {
                         ForEach(PersonPhotoSort.allCases) { s in
@@ -1175,6 +1166,15 @@ struct PersonPhotosView: View {
                     .accessibilityLabel(mediaTab == .videos
                         ? (videoOrientation == .portrait ? "切换横版剧照" : "切换竖版海报")
                         : (albumOrientation == .portrait ? "切换横版封面" : "切换竖版封面"))
+                }
+
+                // 加载数/总数：图片=已加载/总数，相册=已加载/总数，视频空态不显示
+                if mediaTab == .videos ? !videos.isEmpty : true {
+                    Text(mediaCountText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                        .lineLimit(1)
                 }
             }
             .layoutPriority(1)
