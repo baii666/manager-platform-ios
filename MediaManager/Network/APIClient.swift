@@ -773,15 +773,21 @@ final class APIClient: DataProviding, @unchecked Sendable {
 
     private func resolveRecent(_ item: RecentItem) -> RecentItem {
         var r = item
+        // 🔴 最近入库卡片必须带 fast=1：缩略图缓存缺失时后端不再同步跑 FFmpeg
+        //（排队 2s + 解码最多 20s + 并发闸门），直接降级出原图，避免一屏卡片被
+        // 少数没缩略图的拖死。缩略图留给正常浏览详情页的请求按需生成。
+        // 其它页面 URL 不带此参数，不受影响（与网页端 HomePageV3 同口径）。
         if let coverPhotoId = r.coverPhotoId {
             r.coverURL = makeURL("/photo", queryItems: [
                 URLQueryItem(name: "id", value: "\(coverPhotoId)"),
                 URLQueryItem(name: "size", value: "600"),
+                URLQueryItem(name: "fast", value: "1"),
             ])
         } else if let posterId = r.posterImageId {
             r.coverURL = makeURL("/media-image", queryItems: [
                 URLQueryItem(name: "id", value: "\(posterId)"),
                 URLQueryItem(name: "size", value: "600"),
+                URLQueryItem(name: "fast", value: "1"),
             ])
         }
         return r
