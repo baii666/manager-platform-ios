@@ -54,6 +54,9 @@ struct RootView: View {
     // 各 tab 的导航栈（正常页面跳转用；看图器「进入相册」不走导航栈，见下面的相册层）
     @State private var homePath = NavigationPath()
     @State private var libraryPath = NavigationPath()
+    /// 人物 tab 导航栈：绑定 path 才能在「从人物详情返回」时发清空搜索词通知
+    /// （本页是 tab 根页常驻，不绑定就收不到 pop，搜索词一直留在搜索结果）。
+    @State private var peoplePath = NavigationPath()
     /// 媒体库 tab 内的二级分类（电影/相册/拍摄集）：提升到根，首页「拍摄集」卡
     /// 切 tab 的同时能落准分类（只切 tab 会落在默认的电影分类，卡等于半死）。
     /// 与 tab 对称：用户手动切分类也改这里，两边始终同源。
@@ -75,7 +78,7 @@ struct RootView: View {
                 .allowsHitTesting(tab == .short)
 
             // 人物：照片人脸聚类 + 影视演员。页面没有标题顶栏，顶栏只放分段。
-            NavigationStack { PeopleHubView() }
+            NavigationStack(path: $peoplePath) { PeopleHubView() }
                 .opacity(tab == .people ? 1 : 0)
                 .allowsHitTesting(tab == .people)
 
@@ -190,6 +193,13 @@ struct RootView: View {
         }
         .onChange(of: homePath.count) { _, _ in
             NotificationCenter.default.post(name: .listPageShouldResetSearch, object: nil)
+        }
+        // 人物详情 pop 回来时清空列表搜索词，让用户退回完整人物列表。
+        // 只在 pop（count 变小）时发；push 进详情不动，否则详情刚打开搜索词就没了。
+        .onChange(of: peoplePath.count) { oldCount, newCount in
+            if newCount < oldCount {
+                NotificationCenter.default.post(name: .listPageShouldResetSearch, object: nil)
+            }
         }
     }
 }

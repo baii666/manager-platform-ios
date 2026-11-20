@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import Combine
 
 // MARK: - 取消类错误（列表加载通用）
 /// URLSession 的 async 请求在所属 Task 被取消时抛 URLError(.cancelled)，
@@ -1546,12 +1547,25 @@ final class PersonsViewModel: ObservableObject {
     /// 搜索防抖任务。每次输入先取消上一个，只有停手后才真正发请求 ——
     /// `/api/persons` 单次 3s 上下，绝不能让中间输入各打一发把请求堆起来。
     private var searchTask: Task<Void, Never>?
+    /// 切页面信号订阅：五个 tab 是 ZStack + opacity 常驻，切 tab / 导航栈 push-pop
+    /// 都不会让本页卸载，靠通知清空搜索词，避免「搜索后返回还一直卡在搜索结果」。
+    private var resetCancellable: AnyCancellable?
 
     private var client: APIClient? { AppSession.shared.client }
 
     init() {
-        // 初始化期间给 @Published 赋值不触发 didSet，所以这里不需要额外持久化
-        self.searchText = ListSearchPrefs.loadSearch("persons")
+        // 🔴 2026-11-20 用户要求「搜索后能返回、不要一直显示搜索结果」：
+        // 对齐相册列表 —— 不再还原上次搜索词，并抹掉历史版本写进 UserDefaults 的旧值。
+        ListSearchPrefs.clearSearch("persons")
+        self.searchText = ""
+        resetCancellable = NotificationCenter.default.publisher(for: .listPageShouldResetSearch)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                Task { @MainActor in
+                    guard let self, !self.searchText.isEmpty else { return }
+                    self.searchText = ""
+                }
+            }
     }
 
     /// 输入变化 → 取消防抖任务 → 250ms 后只请求一次（读最新的 searchText）
