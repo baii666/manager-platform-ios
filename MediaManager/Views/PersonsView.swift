@@ -1101,7 +1101,7 @@ struct PersonPhotosView: View {
         }
     }
 
-    /// 工具行：iPad 唤出按钮 + 排序/方向 + 加载数/总数 + 图库筛选。三 tab 已移到顶栏。
+    /// 工具行：左=图库筛选 chips；右=加载数/总数 + 排序/方向。三 tab 已移到顶栏。
     /// 列数仍可双指捏合调整，并按「人物照片页」记忆。
     private var mediaToolbar: some View {
         HStack(spacing: 6) {
@@ -1120,61 +1120,64 @@ struct PersonPhotosView: View {
                 .accessibilityLabel("显示资料栏")
             }
 
-            // 加载数/总数：图片=已加载/总数，相册=已加载/总数，视频空态不显示
-            if mediaTab == .videos ? !videos.isEmpty : true {
-                Text(mediaCountText)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-                    .lineLimit(1)
-            }
-
-            // 右侧：排序/方向 + 图库筛选
-            if mediaTab == .photos {
-                Menu {
-                    ForEach(PersonPhotoSort.allCases) { s in
-                        Button {
-                            photoSort = s
-                        } label: {
-                            if photoSort == s { Label(s.rawValue, systemImage: "checkmark") }
-                            else { Text(s.rawValue) }
-                        }
-                    }
-                } label: {
-                    Image(systemName: "arrow.up.arrow.down")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 26, height: 26)
-                        .background(Color.primary.opacity(0.06), in: Capsule())
-                }
-                .tint(Color.secondary)
-                .accessibilityLabel("照片排序")
-            }
-
-            if mediaTab == .albums || mediaTab == .videos {
-                Button {
-                    withAnimation(.easeInOut(duration: 0.18)) {
-                        if mediaTab == .albums {
-                            albumOrientation = (albumOrientation == .portrait) ? .landscape : .portrait
-                        } else {
-                            videoOrientation = (videoOrientation == .portrait) ? .landscape : .portrait
-                        }
-                    }
-                } label: {
-                    let current: AlbumCoverOrientation = mediaTab == .albums ? albumOrientation : videoOrientation
-                    Image(systemName: current == .portrait ? "rectangle.portrait" : "rectangle")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 30, height: 26)
-                        .background(Color.primary.opacity(0.06), in: Capsule())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(mediaTab == .videos
-                    ? (videoOrientation == .portrait ? "切换横版剧照" : "切换竖版海报")
-                    : (albumOrientation == .portrait ? "切换横版封面" : "切换竖版封面"))
-            }
-
             libraryFilterChips
+
+            // 右侧：加载数/总数 + 排序/方向
+            HStack(spacing: 6) {
+                // 加载数/总数：图片=已加载/总数，相册=已加载/总数，视频空态不显示
+                if mediaTab == .videos ? !videos.isEmpty : true {
+                    Text(mediaCountText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                        .lineLimit(1)
+                }
+
+                if mediaTab == .photos {
+                    Menu {
+                        ForEach(PersonPhotoSort.allCases) { s in
+                            Button {
+                                photoSort = s
+                            } label: {
+                                if photoSort == s { Label(s.rawValue, systemImage: "checkmark") }
+                                else { Text(s.rawValue) }
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "arrow.up.arrow.down")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 26, height: 26)
+                            .background(Color.primary.opacity(0.06), in: Capsule())
+                    }
+                    .tint(Color.secondary)
+                    .accessibilityLabel("照片排序")
+                }
+
+                if mediaTab == .albums || mediaTab == .videos {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.18)) {
+                            if mediaTab == .albums {
+                                albumOrientation = (albumOrientation == .portrait) ? .landscape : .portrait
+                            } else {
+                                videoOrientation = (videoOrientation == .portrait) ? .landscape : .portrait
+                            }
+                        }
+                    } label: {
+                        let current: AlbumCoverOrientation = mediaTab == .albums ? albumOrientation : videoOrientation
+                        Image(systemName: current == .portrait ? "rectangle.portrait" : "rectangle")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 30, height: 26)
+                            .background(Color.primary.opacity(0.06), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(mediaTab == .videos
+                        ? (videoOrientation == .portrait ? "切换横版剧照" : "切换竖版海报")
+                        : (albumOrientation == .portrait ? "切换横版封面" : "切换竖版封面"))
+                }
+            }
+            .layoutPriority(1)
         }
         .padding(.horizontal, panePadding)
         .padding(.vertical, 5)
