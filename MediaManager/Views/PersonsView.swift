@@ -790,9 +790,14 @@ struct PersonPhotosView: View {
         Group {
             if isWide { wideContent } else { narrowContent }
         }
-        // 顶栏不显示人名：名字已放到左侧图片上方，顶栏只承载三个 tab 与图库筛选
+        // 顶栏：人名移到资料卡图片上方；这里用 principal 放 图片/相册/视频 三个 tab
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                tabPicker
+            }
+        }
         // 顶 bar 保持实心并与下面那条整宽工具行同色：连成一个整体 bar
         .toolbarBackground(.visible, for: .navigationBar)
         .toolbarBackground(topBarColor, for: .navigationBar)
@@ -1064,8 +1069,40 @@ struct PersonPhotosView: View {
         .overlay(alignment: .bottom) { barDivider }
     }
 
-    /// 顶栏唯一一行：三 tab（左）+ 排序/方向 + 图库筛选（右），底部一条分隔线。
-    /// 列数选择已去掉；列数仍可双指捏合调整，并按「人物照片页」记忆。
+    /// 顶栏（navigationBar principal）的三个 tab：图片 / 相册 / 视频。
+    /// 相册/视频懒加载：切到才请求，切回不重拉。
+    private var tabPicker: some View {
+        HStack(spacing: 2) {
+            ForEach(PersonMediaTab.allCases) { tab in
+                Button(action: {
+                    withAnimation(.easeInOut(duration: 0.18)) { mediaTab = tab }
+                    if tab == .albums && albums.isEmpty && !albumsLoading {
+                        Task { await loadAlbums(reset: true) }
+                    }
+                    if tab == .videos && !videosLoaded {
+                        Task { await loadVideos(reset: true) }
+                    }
+                }, label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: tab.icon).font(.system(size: 12))
+                        Text(tab.rawValue)
+                    }
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(mediaTab == tab ? Theme.brand : Color.secondary)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .background(
+                        mediaTab == tab ? Theme.brand.opacity(0.12) : Color.clear,
+                        in: Capsule()
+                    )
+                })
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    /// 工具行：iPad 唤出按钮 + 排序/方向 + 加载数/总数 + 图库筛选。三 tab 已移到顶栏。
+    /// 列数仍可双指捏合调整，并按「人物照片页」记忆。
     private var mediaToolbar: some View {
         HStack(spacing: 6) {
             // iPad 左栏被向左隐藏后，在这一行左边留一个唤出入口
@@ -1083,34 +1120,16 @@ struct PersonPhotosView: View {
                 .accessibilityLabel("显示资料栏")
             }
 
-            ForEach(PersonMediaTab.allCases) { tab in
-                Button {
-                    withAnimation(.easeInOut(duration: 0.18)) { mediaTab = tab }
-                    // 相册/视频懒加载：切到才请求，切回不重拉
-                    if tab == .albums && albums.isEmpty && !albumsLoading {
-                        Task { await loadAlbums(reset: true) }
-                    }
-                    if tab == .videos && !videosLoaded {
-                        Task { await loadVideos(reset: true) }
-                    }
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: tab.icon).font(.system(size: 12))
-                        Text(tab.rawValue)
-                    }
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(mediaTab == tab ? Theme.brand : Color.secondary)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(
-                        mediaTab == tab ? Theme.brand.opacity(0.12) : Color.clear,
-                        in: Capsule()
-                    )
-                }
-                .buttonStyle(.plain)
+            // 加载数/总数：图片=已加载/总数，相册=已加载/总数，视频空态不显示
+            if mediaTab == .videos ? !videos.isEmpty : true {
+                Text(mediaCountText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                    .lineLimit(1)
             }
 
-            // 右侧第一栏：排序/方向 + 图库筛选（图库 chip 自带计数，不再单独显示总数）
+            // 右侧：排序/方向 + 图库筛选
             if mediaTab == .photos {
                 Menu {
                     ForEach(PersonPhotoSort.allCases) { s in
@@ -1188,6 +1207,18 @@ struct PersonPhotosView: View {
         case .albums: return albumsTotal
         case .videos: return videosTotal
         }
+    }
+
+    /// 工具行显示的「已加载/总数」：图片=已加载照片/后端总数，相册/视频同理
+    private var mediaCountText: String {
+        let loaded: Int
+        switch mediaTab {
+        case .photos: loaded = photos.count
+        case .albums: loaded = albums.count
+        case .videos: loaded = videos.count
+        }
+        let t = activeTotal > 0 ? "\(activeTotal)" : (loaded > 0 ? "\(loaded)" : "—")
+        return "\(loaded)/\(t)"
     }
 
     @ViewBuilder
