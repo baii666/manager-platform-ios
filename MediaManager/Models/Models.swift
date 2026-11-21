@@ -635,6 +635,10 @@ struct AlbumVideo: Identifiable, Codable, Sendable {
     var hasThumb: Int? = nil
     /// 后端补的 /api/album-video/:id 直链（App 内播放不用它，走 resolvePlayback）
     var playUrl: String? = nil
+    /// 静态封面（WebP）/ 动态封面（animated WebP），后端 /api/album-videos 已返回
+    /// /raw?path=... 相对地址，由 APIClient.resolve 转绝对 URL。has_thumb 不是封面判据。
+    var coverUrl: String? = nil
+    var motionUrl: String? = nil
 
     /// 卡片标题：优先文件夹名（更像片名），没有才用文件名
     var title: String {
@@ -662,6 +666,8 @@ struct AlbumVideo: Identifiable, Codable, Sendable {
         case bitrate
         case hasThumb = "has_thumb"
         case playUrl = "play_url"
+        case coverUrl = "cover_url"
+        case motionUrl = "motion_url"
     }
 }
 

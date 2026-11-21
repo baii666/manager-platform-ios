@@ -830,11 +830,17 @@ struct AlbumPhotosView: View {
                     startPlayback(video)
                 } label: {
                     ZStack {
-                        LinearGradient(colors: [Theme.brand.opacity(0.45), Theme.brand.opacity(0.08)],
-                                       startPoint: .top, endPoint: .bottom)
-                        Image(systemName: "play.fill")
-                            .font(.system(size: 20, weight: .semibold))
-                            .foregroundStyle(.white)
+                        // 静态封面打底（cover_url 相对地址已在 APIClient resolve 成绝对 URL）
+                        RemoteImage(
+                            url: video.coverUrl.flatMap(URL.init(string:)),
+                            fallbackIcon: "play.fill",
+                            fallbackColors: Theme.placeholderGradient(for: .media)
+                        )
+                        // 动态封面（animated WebP）就绪后盖在静态图上；解不出来就空渲染，
+                        // 底下的静态图自然露出。
+                        if let motion = video.motionUrl.flatMap(URL.init(string:)) {
+                            AnimatedWebView(url: motion)
+                        }
                     }
                     .frame(width: width, height: width * 9 / 16)
                     .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))

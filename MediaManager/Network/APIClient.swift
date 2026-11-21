@@ -823,7 +823,14 @@ final class APIClient: DataProviding, @unchecked Sendable {
     ///   路由必须是独立前缀 —— /albums/:libraryId/*rest 已被相册标签的 catch-all 占用。
     func fetchAlbumVideos(albumID: Int) async throws -> [AlbumVideo] {
         let resp: ItemsResponse<AlbumVideo> = try await request("/api/album-videos/\(albumID)")
-        return resp.items
+        // 封面是 /raw?path=... 相对地址，必须 resolve 成带 host 的绝对 URL，
+        // 否则 RemoteImage 拿相对串直接请求会失败。
+        return resp.items.map { v in
+            var out = v
+            out.coverUrl = resolve(v.coverUrl.flatMap(URL.init(string:)))?.absoluteString
+            out.motionUrl = resolve(v.motionUrl.flatMap(URL.init(string:)))?.absoluteString
+            return out
+        }
     }
 
     /// VidHub 外播用的相册视频地址。
