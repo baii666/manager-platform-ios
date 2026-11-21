@@ -11,6 +11,16 @@ enum AssetType: String, Codable, CaseIterable, Identifiable, Sendable {
 
     var id: String { rawValue }
 
+    /// 人脸探测的 medium（后端 /api/video-face-probe 只认这三个）。
+    /// photo 是静态图库、没有视频画面，返回 nil 让播放器不显示检测按钮。
+    var faceProbeMedium: String? {
+        switch self {
+        case .media: return "media"
+        case .short: return "short_video"
+        case .photo: return nil
+        }
+    }
+
     /// 容错解码：后端若出现未知类型，不至于让整条列表解码失败
     init(from decoder: Decoder) throws {
         let raw = (try? decoder.singleValueContainer().decode(String.self)) ?? "media"

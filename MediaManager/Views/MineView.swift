@@ -537,7 +537,10 @@ struct MineView: View {
                                   assetType: asset.type.rawValue,
                                   assetID: asset.id,
                                   startAt: asset.position,
-                                  knownDuration: asset.duration)
+                                  knownDuration: asset.duration,
+                                  // 继续观看/收藏卡片点开也能检测当前画面人脸
+                                  faceProbeMedium: asset.type.faceProbeMedium,
+                                  faceProbeMediaID: asset.type == .photo ? nil : asset.id)
     }
 }
 
@@ -667,6 +670,9 @@ struct ActionAssetListView: View {
                                   assetType: asset.type.rawValue,
                                   assetID: asset.id,
                                   startAt: asset.position,
-                                  knownDuration: asset.duration)
+                                  knownDuration: asset.duration,
+                                  // 观看记录/收藏全量列表点开同样支持检测
+                                  faceProbeMedium: asset.type.faceProbeMedium,
+                                  faceProbeMediaID: asset.type == .photo ? nil : asset.id)
     }
 }

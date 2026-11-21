@@ -325,13 +325,16 @@ final class APIClient: DataProviding, @unchecked Sendable {
     }
 
     /// 播放中点「检测人脸」：把当前画面的人脸检测后写入 fr_* 统一人脸系统。
-    /// POST /api/video-face-probe {media_id,t,medium} → {ok:true,data:{...}}。
-    /// 同步接口，后端串行跑 Python 脚本（模型加载重），约 10 秒，UI 必须给忙碌反馈。
+    /// POST /api/video-face-probe {media_id,t,medium,frame_base64?} → {ok:true,data:{...}}。
+    /// 传 frame_base64（当前帧 JPEG data URI）时后端直接解码检测，绕开挂载盘读 4K 帧
+    /// （1~2s vs 约 14s）；截图不可用时省略该字段，后端回退 t±window 抓帧。
     /// medium 按资源来源传 media / album_video / short_video，决定后端去哪张表查文件路径。
-    func probeFaceAtTime(mediaID: Int, t: Double, medium: String) async throws -> FaceProbeResult {
+    func probeFaceAtTime(mediaID: Int, t: Double, medium: String,
+                         frameBase64: String? = nil) async throws -> FaceProbeResult {
+        var body: [String: Any] = ["media_id": mediaID, "t": t, "medium": medium]
+        if let frameBase64 { body["frame_base64"] = frameBase64 }
         let resp: FaceProbeResponse = try await request(
-            "/api/video-face-probe", method: "POST",
-            json: ["media_id": mediaID, "t": t, "medium": medium]
+            "/api/video-face-probe", method: "POST", json: body
         )
         return resp.data
     }

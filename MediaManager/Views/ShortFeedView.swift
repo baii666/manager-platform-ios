@@ -827,7 +827,8 @@ private struct FeedBottomBar: View {
                     // 刷流起播不传 startAt（偏移 0），引擎时间即源文件绝对时间
                     FaceProbeCenter.shared.probe(
                         medium: "short_video", mediaID: video.id,
-                        t: pageEngine?.currentTime ?? 0)
+                        t: pageEngine?.currentTime ?? 0,
+                        player: pageEngine?.player)
                 }
             }
         }

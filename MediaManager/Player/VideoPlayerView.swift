@@ -473,7 +473,8 @@ struct VideoPlayerView: View {
     @MainActor
     private func probeFace() {
         guard let medium = faceProbeMedium, let mediaID = faceProbeMediaID else { return }
-        FaceProbeCenter.shared.probe(medium: medium, mediaID: mediaID, t: displayPosition)
+        FaceProbeCenter.shared.probe(medium: medium, mediaID: mediaID,
+                                     t: displayPosition, player: engine.player)
     }
 
     /// 检测反馈的 hud 自动收起。用 WorkItem 可被下一次操作取消，
