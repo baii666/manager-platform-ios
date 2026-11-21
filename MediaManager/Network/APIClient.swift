@@ -324,6 +324,18 @@ final class APIClient: DataProviding, @unchecked Sendable {
         return resp.faces
     }
 
+    /// 播放中点「检测人脸」：把当前画面的人脸检测后写入 fr_* 统一人脸系统。
+    /// POST /api/video-face-probe {media_id,t,medium} → {ok:true,data:{...}}。
+    /// 同步接口，后端串行跑 Python 脚本（模型加载重），约 10 秒，UI 必须给忙碌反馈。
+    /// medium 按资源来源传 media / album_video / short_video，决定后端去哪张表查文件路径。
+    func probeFaceAtTime(mediaID: Int, t: Double, medium: String) async throws -> FaceProbeResult {
+        let resp: FaceProbeResponse = try await request(
+            "/api/video-face-probe", method: "POST",
+            json: ["media_id": mediaID, "t": t, "medium": medium]
+        )
+        return resp.data
+    }
+
     /// 相似图片。GET /api/photos/:id/similar?method=phash|clip&limit=n → {similar:[...]}
     func fetchSimilarPhotos(photoId: Int, method: String, limit: Int = 50) async throws -> [SimilarPhoto] {
         let resp: SimilarPhotosResponse = try await request(
@@ -1031,6 +1043,11 @@ private struct PhotoFacesResponse: Decodable {
 /// GET /api/photos/:id/similar 的响应：similar 数组
 private struct SimilarPhotosResponse: Decodable {
     let similar: [SimilarPhoto]
+}
+
+/// POST /api/video-face-probe 的响应：结果挂在 data 键下
+private struct FaceProbeResponse: Decodable {
+    let data: FaceProbeResult
 }
 
 /// GET /api/cover-tasks/status 的响应：单张照片的封面生成队列状态

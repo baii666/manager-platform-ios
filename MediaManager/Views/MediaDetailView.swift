@@ -643,7 +643,10 @@ struct MediaDetailView: View {
                                       // duration 是 indefinite(0)，进度条换算与快进钳位都依赖它，
                                       // 缺了会表现成「进度条/快进拖了没反应」（全算成 0）。
                                       // runtime 是分钟（nfo 元数据）。
-                                      knownDuration: d.runtime.map { Double($0) * 60 })
+                                      knownDuration: d.runtime.map { Double($0) * 60 },
+                                      // 播放中点人脸按钮 → 检测当前画面入库（medium 决定后端查哪张表）
+                                      faceProbeMedium: "media",
+                                      faceProbeMediaID: d.id)
     }
 
     // MARK: VidHub 外播

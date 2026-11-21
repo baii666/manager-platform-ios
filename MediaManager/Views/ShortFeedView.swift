@@ -1251,7 +1251,10 @@ private struct ShortRelatedPlayer: View {
                                 showsControlBar: true,
                                 onEngineReady: nil,
                                 hidesStatusBar: true,
-                                showsBottomProgressBar: true)
+                                showsBottomProgressBar: true,
+                                // 短视频也支持检测当前画面人脸（后端按 short_videos 表查路径）
+                                faceProbeMedium: "short_video",
+                                faceProbeMediaID: video.id)
             } else {
                 placeholder
             }

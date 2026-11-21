@@ -453,6 +453,56 @@ struct PhotoFace: Identifiable, Decodable, Sendable {
     }
 }
 
+// MARK: - 播放中点按钮的人脸探测结果
+// POST /api/video-face-probe 的 data 段。检测当前画面的人脸并写入 fr_* 统一人脸系统，
+// 之后在人物页可见。written 是各表实际写入条数，entities 才是「登记了几个人脸实体」。
+struct FaceProbeResult: Decodable, Sendable {
+    var ok: Bool = false
+    var medium: String = ""
+    var mediaID: Int = 0
+    var t: Double = 0
+    var frames: Int = 0
+    var faces: Int = 0
+    var targets: Int = 0
+    var planned: Int = 0
+    var plan: [FaceProbePlan] = []
+    var written: FaceProbeWritten? = nil
+
+    /// 实际登记的人脸实体数（toast 用；没写库时返回 0）
+    var entities: Int { written?.entities ?? 0 }
+    /// 命中已有 illustrator/人物 的名字，去重保序
+    var matchedNames: [String] {
+        var seen = Set<String>()
+        return plan.compactMap { $0.personName }.filter { !$0.isEmpty && seen.insert($0).inserted }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case ok, medium, t, frames, faces, targets, planned, plan, written
+        case mediaID = "media_id"
+    }
+}
+
+struct FaceProbePlan: Decodable, Sendable {
+    /// 后端未命中已有簇时给 null / 0 —— 必须可选，否则一条 null 让整包解码失败
+    var personRef: Int? = nil
+    var personName: String? = nil
+    var sim: Double = 0
+
+    enum CodingKeys: String, CodingKey {
+        case sim
+        case personRef = "person_ref"
+        case personName = "person_name"
+    }
+}
+
+struct FaceProbeWritten: Decodable, Sendable {
+    var hits: Int = 0
+    var cands: Int = 0
+    var links: Int = 0
+    var entities: Int = 0
+    var occ: Int = 0
+}
+
 // MARK: - 相似图片
 // 对应 GET /api/photos/:id/similar 返回的 similar 项。
 // phash 结果带 distance（汉明距离，越小越像）；clip 结果带 similarity（余弦相似度 0~1，越大越像）。

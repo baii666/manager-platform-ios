@@ -75,6 +75,12 @@ struct VideoPlayerView: View {
     /// ⚠️ 放在参数列表末尾并带默认值：详情页 / 关联页 / 拍摄集等既有调用点全部不受影响，
     ///    Swift 也要求实参顺序与声明一致，追加在最后最安全。
     var prefetchSeconds: Double = 0
+    /// 播放中点「检测人脸」按钮用：提供资源 id 与来源表名（media / album_video / short_video）。
+    /// 两者都非 nil 才在顶栏显示按钮；短视频刷流、无对应 id 的资源传 nil 即可。
+    /// ⚠️ 必须放在参数列表最后：Swift 要求实参顺序与声明一致，
+    /// 追加在末尾才不影响既有调用点（见 prefetchSeconds 注释）。
+    var faceProbeMedium: String? = nil
+    var faceProbeMediaID: Int? = nil
 
     @StateObject private var engine = PlayerEngine()
     @Environment(\.dismiss) private var dismiss
@@ -90,6 +96,12 @@ struct VideoPlayerView: View {
     @State private var volumeBase: Float = 0
     @State private var pendingSeek: Double? = nil
     @State private var hud: String? = nil
+    /// 人脸探测：后端同步跑 Python（约 10 秒），必须锁住按钮防重复提交；
+    /// 结果用 hud 显示（复用已有的居中胶囊，不另造 toast 层）。
+    @State private var faceProbing = false
+    @State private var faceProbeTask: Task<Void, Never>? = nil
+    /// 检测反馈 4 秒后自动收起；下一次提示会先取消上一个定时器
+    @State private var hudClearWork: DispatchWorkItem? = nil
     /// 刷流底部进度条的拖动状态。视觉细线在 BottomProgressBar 里，热区另有 34pt。
     @State private var barScrubbing = false
     @State private var barScrubRatio: Double = 0
@@ -440,9 +452,73 @@ struct VideoPlayerView: View {
             if engine.isPiPSupported {
                 playerButton(engine.isPiPActive ? "pip.exit" : "pip.enter") { engine.togglePiP() }
             }
+            // 播放中点当前画面检测人脸 → 写入 fr_* → 人物页可见。
+            // 只有能拿到资源 id 时才有意义（后端按 id 查文件路径）；探测中禁用防重复。
+            if faceProbeMedium != nil, faceProbeMediaID != nil {
+                faceProbeButton
+            }
             AirPlayButton()
                 .frame(width: 30, height: 30)
         }
+    }
+
+    /// 人脸探测按钮。忙碌时换图标 + 禁用，hud 显示「正在检测…」，
+    /// 免得 10 秒里用户以为没反应反复点。
+    private var faceProbeButton: some View {
+        Button { Task { await probeFace() } } label: {
+            Image(systemName: faceProbing ? "ellipsis" : "faceid")
+                .font(.system(size: 18, weight: .medium))
+                .frame(width: 34, height: 34)
+                .contentShape(Rectangle())
+                .opacity(faceProbing ? 0.5 : 1)
+        }
+        .disabled(faceProbing)
+        .accessibilityLabel("检测当前画面人脸")
+    }
+
+    /// 取当前**绝对**时间点（HLS 从 -ss 切片时 engine.currentTime 从 0 起，
+    /// 必须加 activeOffset 才是源文件时间，否则检测的是错误的一帧）。
+    /// 检测是同步接口，约 10 秒；后端串行执行，UI 这边只防本页重复提交。
+    @MainActor
+    private func probeFace() async {
+        guard !faceProbing,
+              let medium = faceProbeMedium, let mediaID = faceProbeMediaID,
+              let client = AppSession.shared.client else { return }
+        faceProbing = true
+        hud = "正在检测当前画面的人脸…"
+        faceProbeTask?.cancel()
+        let task = Task { @MainActor in
+            defer { faceProbing = false }
+            do {
+                let result = try await client.probeFaceAtTime(
+                    mediaID: mediaID, t: displayPosition, medium: medium)
+                guard !Task.isCancelled else { return }
+                let n = result.entities
+                if n > 0 {
+                    let names = result.matchedNames
+                    hud = names.isEmpty
+                        ? "已登记 \(n) 张人脸，人物页可见"
+                        : "已登记 \(n) 张人脸：" + names.joined(separator: "、")
+                } else {
+                    hud = "当前画面未检出可归入已有的人物人脸"
+                }
+            } catch {
+                guard !Task.isCancelled else { return }
+                hud = "人脸检测失败：\(error.localizedDescription)"
+            }
+            // 提示 4 秒后自行消失，不用手动关控制条
+            scheduleHudClear()
+        }
+        faceProbeTask = task
+    }
+
+    /// 检测反馈的 hud 自动收起。用 WorkItem 可被下一次操作取消，
+    /// 免得新的提示刚出来就被上一次的定时器抹掉。
+    private func scheduleHudClear() {
+        hudClearWork?.cancel()
+        let work = DispatchWorkItem { hud = nil }
+        hudClearWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4, execute: work)
     }
 
     private var bottomBar: some View {
@@ -632,6 +708,10 @@ struct VideoPlayerView: View {
         holdWork = nil
         reportTask?.cancel()
         reportTask = nil
+        faceProbeTask?.cancel()
+        faceProbeTask = nil
+        hudClearWork?.cancel()
+        hudClearWork = nil
         let pos = engine.currentTime + activeOffset
         // HLS 没跑完时 engine.duration 是 0，退回服务端已知的时长，否则这次观看根本不会记录
         let dur = engine.duration > 0 ? engine.duration + activeOffset : (knownDuration ?? 0)

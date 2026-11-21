@@ -18,6 +18,10 @@ struct PlaybackRequest: Identifiable {
     let assetID: Int?
     let startAt: Double?
     let knownDuration: Double?
+    /// 播放中点「检测人脸」按钮用。nil = 不显示（短视频刷流等场景没有可用 id）。
+    /// medium 取 media / album_video / short_video，决定后端去哪张表读文件路径。
+    var faceProbeMedium: String? = nil
+    var faceProbeMediaID: Int? = nil
 }
 
 // MARK: - 播放宿主
@@ -45,7 +49,9 @@ struct PlayerHostView: View {
                                     knownDuration: target.knownDuration ?? request.knownDuration,
                                     title: target.title,
                                     assetType: target.assetType ?? request.assetType,
-                                    assetID: target.assetID ?? request.assetID)
+                                    assetID: target.assetID ?? request.assetID,
+                                    faceProbeMedium: request.faceProbeMedium,
+                                    faceProbeMediaID: request.faceProbeMediaID)
                 } else {
                     PreparingOverlay(title: request.title,
                                      error: error,
