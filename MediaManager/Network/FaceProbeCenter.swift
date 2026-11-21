@@ -19,14 +19,22 @@ final class FaceProbeCenter {
     /// t 必须是源文件绝对时间（调用方负责把 HLS 切片偏移加好）。
     /// player 用于抓当前帧：抓到就走截图检测（1~2s，绕开挂载盘读 4K 帧），
     /// 抓不到（HLS 未解码 / seek 中）就传 nil，后端自动回退 t-only 抓帧。
+    /// onStatus 把每一步状态回传给调用方自己的 UI —— 🔴 fullScreenCover 是独立
+    /// window，RootView 的全局 toast 盖不住它，播放器必须用自己的 hud 显示反馈。
     func probe(medium: String, mediaID: Int, t: Double,
-               player: AVPlayer? = nil) {
+               player: AVPlayer? = nil,
+               onStatus: (@MainActor (String) -> Void)? = nil) {
+        // 全局 toast（RootView overlay 内，刷流等场景可见）+ 调用方本地 hud 同步报
+        let report: @MainActor (String) -> Void = { text in
+            FaceProbeToastCenter.shared.show(text)
+            onStatus?(text)
+        }
         let key = "\(medium):\(mediaID):\(Int(t.rounded()))"
         guard inFlight.insert(key).inserted else {
-            FaceProbeToastCenter.shared.show("这次人脸检测已提交，完成后会提示")
+            report("这次人脸检测已提交，完成后会提示")
             return
         }
-        FaceProbeToastCenter.shared.show("人脸检测已提交，完成后会提示")
+        report("人脸检测已提交，完成后会提示")
         Task { @MainActor in
             defer { inFlight.remove(key) }
             guard let client = AppSession.shared.client else { return }
@@ -43,14 +51,14 @@ final class FaceProbeCenter {
                 let n = result.entities
                 let names = result.matchedNames
                 if n > 0 {
-                    FaceProbeToastCenter.shared.show(names.isEmpty
+                    report(names.isEmpty
                         ? "已登记 \(n) 张人脸，人物页可见"
                         : "已登记 \(n) 张人脸：" + names.joined(separator: "、"))
                 } else {
-                    FaceProbeToastCenter.shared.show("当前画面未检出可归入已有的人物人脸")
+                    report("当前画面未检出可归入已有的人物人脸")
                 }
             } catch {
-                FaceProbeToastCenter.shared.show("人脸检测失败：\(error.localizedDescription)")
+                report("人脸检测失败：\(error.localizedDescription)")
             }
         }
     }

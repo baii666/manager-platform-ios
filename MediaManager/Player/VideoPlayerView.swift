@@ -469,12 +469,20 @@ struct VideoPlayerView: View {
     }
 
     /// displayPosition 已含 HLS 切片偏移，是源文件绝对时间点。
-    /// 探测交给全局后台中心异步跑，这里不碰任何 @State、不阻塞控制条。
+    /// 探测交给全局后台中心异步跑，这里不碰网络、不阻塞控制条。
+    /// 🔴 必须把状态回写到本视图的 hud：播放器是 fullScreenCover 独立 window，
+    /// RootView 那层全局 toast 盖不住它，只有自己的 hud 才看得见反馈。
     @MainActor
     private func probeFace() {
         guard let medium = faceProbeMedium, let mediaID = faceProbeMediaID else { return }
+        hud = "正在检测当前画面人脸…"
+        scheduleHudClear()
         FaceProbeCenter.shared.probe(medium: medium, mediaID: mediaID,
-                                     t: displayPosition, player: engine.player)
+                                     t: displayPosition, player: engine.player,
+                                     onStatus: { text in
+                                        self.hud = text
+                                        self.scheduleHudClear()
+                                     })
     }
 
     /// 检测反馈的 hud 自动收起。用 WorkItem 可被下一次操作取消，
