@@ -572,9 +572,11 @@ struct AlbumPhotosView: View {
     @State private var mediaTab: MediaTab = .photos
     @State private var videos: [AlbumVideo] = []
     @State private var videoErrorMessage: String?
-    /// 🔴 地址 + 偏移打包成一个 item 传给 fullScreenCover，不用 isPresented + 分离 URL 状态
-    @State private var playTarget: PlaybackTarget?
-    @State private var playError: String?
+    /// 🔴 点击瞬间零网络构造请求、立刻弹全屏；ffprobe 探测 + 开 HLS 会话的等待
+    ///    交给 PlayerHostView 在屏内显示（旧写法先 await resolvePlayback 再弹屏，点击像卡死）
+    @State private var playRequest: PlaybackRequest?
+    /// VidHub 外播：相册视频格式杂，内置播放器解不动的交给它
+    @StateObject private var vidHub = VidHubLauncher()
 
     /// 顶栏分母（相册总张数）。相册接口没给 count 时退回已加载张数，
     /// 免得顶栏出现「120 / 0」这种明显不对的分母。
@@ -671,24 +673,31 @@ struct AlbumPhotosView: View {
             await loadCoverCount()
             await loadVideos()
         }
-        // 🔴 item: 把解析好的地址/偏移直接传进闭包，避免弹层出来但 URL 还是 nil
-        .fullScreenCover(item: $playTarget) { target in
-            VideoPlayerView(url: target.url,
-                            startPosition: target.startAt,
-                            timeOffset: target.timeOffset,
-                            sourcePath: target.sourcePath,
-                            knownDuration: target.knownDuration,
-                            title: target.title,
-                            assetType: target.assetType,
-                            assetID: target.assetID)
+        // 🔴 点击即弹：PlaybackRequest 零网络构造，PlayerHostView 自己跑探测并显示准备状态
+        .fullScreenCover(item: $playRequest) { request in
+            PlayerHostView(request: request)
         }
-        .alert("播放失败", isPresented: Binding(
-            get: { playError != nil },
-            set: { if !$0 { playError = nil } }
+        .onDisappear { vidHub.cancel() }
+        .alert("未安装 VidHub", isPresented: Binding(
+            get: { vidHub.vidHubMissing },
+            set: { if !$0 { vidHub.vidHubMissing = false } }
+        )) {
+            Button("去 App Store 找") {
+                if let u = URL(string: "https://apps.apple.com/cn/search?term=vidhub") {
+                    UIApplication.shared.open(u)
+                }
+            }
+            Button("好", role: .cancel) {}
+        } message: {
+            Text("装好 VidHub 后，视频卡片右上角的按钮会把文件交给它播放（MKV / AVI / HEVC 等内置播放器放不了的格式都能解）。")
+        }
+        .alert("外播失败", isPresented: Binding(
+            get: { vidHub.error != nil },
+            set: { if !$0 { vidHub.error = nil } }
         )) {
             Button("好", role: .cancel) {}
         } message: {
-            Text(playError ?? "")
+            Text(vidHub.error ?? "")
         }
         // 看图器里加入/取消封面后回到本页，计数要跟着变
         .onReceive(coverChanged) { _ in
@@ -814,30 +823,46 @@ struct AlbumPhotosView: View {
         // 卡宽约屏宽 60%：一屏露出一个半，暗示可以横滑
         let width: CGFloat = 232
         return VStack(alignment: .leading, spacing: 6) {
-            Button {
-                Task { await play(video) }
-            } label: {
-                ZStack {
-                    LinearGradient(colors: [Theme.brand.opacity(0.45), Theme.brand.opacity(0.08)],
-                                   startPoint: .top, endPoint: .bottom)
-                    Image(systemName: "play.fill")
-                        .font(.system(size: 20, weight: .semibold))
-                        .foregroundStyle(.white)
-                }
-                .frame(width: width, height: width * 9 / 16)
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                .overlay(alignment: .bottomTrailing) {
-                    if let duration = video.durationText {
-                        Text(duration)
-                            .font(.caption2.weight(.medium)).monospacedDigit()
+            // ⚠️ 播放与 VidHub 两个按钮必须并列在 ZStack 里，不能嵌套 Button：
+            // 嵌套时点击一律被外层吞掉，VidHub 永远点不到（老拍摄集踩过）
+            ZStack(alignment: .topTrailing) {
+                Button {
+                    startPlayback(video)
+                } label: {
+                    ZStack {
+                        LinearGradient(colors: [Theme.brand.opacity(0.45), Theme.brand.opacity(0.08)],
+                                       startPoint: .top, endPoint: .bottom)
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 20, weight: .semibold))
                             .foregroundStyle(.white)
-                            .padding(.horizontal, 6).padding(.vertical, 3)
-                            .background(.black.opacity(0.55), in: Capsule())
-                            .padding(6)
+                    }
+                    .frame(width: width, height: width * 9 / 16)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .overlay(alignment: .bottomTrailing) {
+                        if let duration = video.durationText {
+                            Text(duration)
+                                .font(.caption2.weight(.medium)).monospacedDigit()
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 6).padding(.vertical, 3)
+                                .background(.black.opacity(0.55), in: Capsule())
+                                .padding(6)
+                        }
                     }
                 }
+                .buttonStyle(.plain)
+
+                Button {
+                    playInVidHub(video)
+                } label: {
+                    Label("VidHub", systemImage: "arrow.up.right")
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background(.black.opacity(0.5), in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .padding(6)
             }
-            .buttonStyle(.plain)
 
             Text(video.title)
                 .font(.caption)
@@ -859,23 +884,22 @@ struct AlbumPhotosView: View {
         }
     }
 
-    /// 按容器/编码选最优路线：MP4 直连 / 非 MP4 走 HLS，hev1 与解不出的编码自动降级。
-    /// 已知时长一起带进去，补 HLS 会话跑完前没有 ENDLIST 导致的 duration 洞。
-    @MainActor
-    private func play(_ video: AlbumVideo) async {
-        guard let client else { return }
-        do {
-            playTarget = try await client.resolvePlayback(
-                path: video.filePath,
-                startAt: nil,
-                title: video.title,
-                assetType: nil,
-                assetID: nil,
-                knownDuration: video.duration
-            )
-        } catch {
-            playError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-        }
+    /// 零网络构造请求，点击瞬间就弹全屏。真正的 ffprobe 探测 / HLS 会话由
+    /// PlayerHostView 在全屏里跑，并显示「正在准备…」+ 取消 / 重试，
+    /// 不再让列表页看起来卡死（旧写法先 await resolvePlayback 再弹屏）。
+    private func startPlayback(_ video: AlbumVideo) {
+        playRequest = PlaybackRequest(path: video.filePath,
+                                      title: video.title,
+                                      assetType: nil,
+                                      assetID: nil,
+                                      startAt: nil,
+                                      knownDuration: video.duration)
+    }
+
+    /// VidHub 外播：带 ?token= 的直链，用它自己的解码器，格式杂时比内置快得多
+    private func playInVidHub(_ video: AlbumVideo) {
+        guard let url = client?.albumVideoExternalURL(video) else { return }
+        vidHub.play(url: url, title: video.title)
     }
 }
 

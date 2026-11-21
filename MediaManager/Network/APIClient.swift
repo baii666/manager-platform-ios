@@ -811,6 +811,19 @@ final class APIClient: DataProviding, @unchecked Sendable {
         return resp.items
     }
 
+    /// VidHub 外播用的相册视频地址。
+    /// ⚠️ 必须带 ?token=：/api/album-video 不在 AuthMiddleware 白名单里，
+    ///    而 VidHub 是自己来拉这个 URL 的，带不上我们的 session cookie —— 不带会 401。
+    ///    只传 id 形式的路径，不要把 file_path（服务器本地 X:\...）拼进去。
+    func albumVideoExternalURL(_ video: AlbumVideo) -> URL? {
+        let path = video.playUrl ?? "/api/album-video/\(video.id)"
+        var items: [URLQueryItem] = []
+        if let tok = AppSession.shared.sessionToken, !tok.isEmpty {
+            items.append(URLQueryItem(name: "token", value: tok))
+        }
+        return makeURL(path, queryItems: items)
+    }
+
     /// 影视列表。type: movie / tv；libID 为 nil 时后端返回用户可见媒体库的全集
     /// sort：title / title_desc / year_desc / year_asc / rating_desc / updated_desc / premiered_desc 等
     func fetchMedia(type: String, libID: Int? = nil, page: Int = 1, size: Int = 60, sort: String = "updated_desc", q: String? = nil) async throws -> (items: [MediaItem], total: Int) {
