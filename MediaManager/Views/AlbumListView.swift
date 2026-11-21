@@ -584,7 +584,6 @@ struct AlbumPhotosView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            mediaTabBar
             switch mediaTab {
             case .photos: photosTab
             case .videos: videosTab
@@ -622,6 +621,12 @@ struct AlbumPhotosView: View {
                         .frame(minWidth: onBack == nil ? 120 : 90, alignment: .leading)
                         .layoutPriority(1)
                 }
+            }
+            .withoutGlass()
+
+            // 图片 / 视频 tab 放在系统顶栏正中（principal），不是内容区顶部那一条
+            ToolbarItem(placement: .principal) {
+                mediaTabBar
             }
             .withoutGlass()
 
@@ -723,9 +728,10 @@ struct AlbumPhotosView: View {
 
     // MARK: - 图片 / 视频分区
 
-    /// 顶栏下方的分段胶囊。样式对齐 PeopleHub / 历史拍摄集详情页：
+    /// 顶栏正中的分段胶囊（placement: .principal）。样式对齐 PeopleHub / 历史拍摄集详情页：
     /// 品牌色淡底 + 图标 + 数量；不用系统 segmented（灰底板跟全站顶栏节奏不合）。
     /// 字重恒定，避免切换时中文字重变化让胶囊宽度跳动。
+    /// ⚠️ 顶栏里不要再垫 material 背景/分隔线（导航栏自己有），否则成了"第二条顶栏"。
     private var mediaTabBar: some View {
         HStack(spacing: 8) {
             ForEach(MediaTab.allCases) { item in
@@ -750,12 +756,8 @@ struct AlbumPhotosView: View {
             }
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
-        .background(.regularMaterial)
-        .overlay(alignment: .bottom) {
-            Rectangle().fill(Color.primary.opacity(0.12)).frame(height: 0.5)
-        }
+        // 顶栏空间紧张时不许压缩换行（换行会撑高导航栏）
+        .fixedSize(horizontal: true, vertical: false)
     }
 
     private func tabCount(_ item: MediaTab) -> String {
