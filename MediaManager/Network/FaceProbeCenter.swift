@@ -33,7 +33,7 @@ final class FaceProbeCenter {
             // 抓帧放后台：AVAssetImageGenerator 同步阻塞，别卡住控制条。
             // AVPlayer 非 Sendable，用 @unchecked 盒子跨到 detached 闭包。
             let box = player.map(FaceProbePlayerBox.init)
-            let frame = await Task.detached(priority: .userInitiated) {
+            let frame: String? = await Task.detached(priority: .userInitiated) { () -> String? in
                 guard let box else { return nil }
                 return captureFrame(from: box.player)
             }.value
