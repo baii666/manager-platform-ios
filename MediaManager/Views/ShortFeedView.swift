@@ -333,11 +333,6 @@ struct ShortFeedView: View {
     @State private var scrollProxy: ScrollViewProxy?
     /// 非nil 时弹「同文件夹关联视频页」（item 式 fullScreenCover，跟随当前视频换内容）
     @State private var relatedVideo: ShortVideo?
-    /// 右下角固定的人脸检测：点当前画面入库，结果用居中胶囊反馈（不另造 toast 层）
-    @State private var faceProbing = false
-    @State private var faceProbeHud: String?
-    /// 结果 4 秒后收起；下一次提示先取消上一个定时器，避免新提示被旧定时器抹掉
-    @State private var faceHudClearWork: DispatchWorkItem?
     // 进度条手势态 / 简介展开态已下沉到每页的 FeedBottomBar（各自独立，
     // 换页天然不带旧状态，不需要在外层重置）。
 
@@ -477,42 +472,6 @@ struct ShortFeedView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
             .padding(.trailing, 16)
             .padding(.top, 8)
-
-            // 右下角固定图标：点击检测当前画面人脸（本页播放器控制条关掉了，
-            // 只能画在外层固定层；用当前页引擎和当前视频 id，切视频也不串）。
-            Button { Task { await probeCurrentFace() } } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: faceProbing ? "ellipsis" : "faceid")
-                        .font(.system(size: 16, weight: .semibold))
-                    if faceProbing {
-                        Text("检测中")
-                            .font(.caption.weight(.medium))
-                    }
-                }
-                .foregroundStyle(.white)
-                .padding(.horizontal, 12)
-                .frame(height: 34)
-                .background(Capsule().fill(Color.black.opacity(0.45)))
-            }
-            .buttonStyle(.plain)
-            .disabled(faceProbing)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-            .padding(.trailing, 16)
-            // 页内底栏高约 60pt + home indicator，按钮抬到它上方，避免挡住倍速
-            .padding(.bottom, 88)
-
-            // 检测反馈：居中胶囊，4 秒自动收起；不吃手势，滑动照常
-            if let hudText = faceProbeHud {
-                Text(hudText)
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                    .background(Capsule().fill(Color.black.opacity(0.72)))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-                    .offset(y: -60)
-                    .allowsHitTesting(false)
-            }
 
             // 信息区（标题 / 简介 / 进度条 / 关联内容 / 收藏·连播·倍速）已下沉到
             // 每一页内部：上滑时随本页一起滚走、下一条的从下方升上来（抖音式）。
@@ -673,9 +632,6 @@ struct ShortFeedView: View {
     private func beginExit() {
         guard !isExiting else { return }
         isExiting = true
-        faceHudClearWork?.cancel()
-        faceHudClearWork = nil
-        faceProbeHud = nil
         onBeginExit()
         let screenW = UIScreen.main.bounds.width
         withAnimation(.easeIn(duration: 0.28)) {
@@ -684,43 +640,6 @@ struct ShortFeedView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
             onClose()
         }
-    }
-
-    /// 右下角人脸检测：探测当前页当前画面，写入 fr_* 统一人脸系统。
-    /// 引擎是外层句柄里那一份（跟随当前页切换），id 用 currentID 对应的视频，
-    /// 所以固定按钮不会和正在滑动的页面串台。
-    @MainActor
-    private func probeCurrentFace() async {
-        guard !faceProbing else { return }
-        guard let client = viewModel.client,
-              let engine = engineHandle.engine,
-              let id = currentID,
-              let video = items.first(where: { $0.id == id }) else { return }
-        faceProbing = true
-        showFaceHud("正在检测当前画面人脸…")
-        defer { faceProbing = false }
-        do {
-            // 刷流页起播不传 startAt（HLS 偏移为 0），播放器时间轴就是绝对时间
-            let result = try await client.probeFaceAtTime(
-                mediaID: video.id, t: engine.currentTime, medium: "short_video"
-            )
-            let names = result.matchedNames
-            let text = names.isEmpty
-                ? "已登记 \(result.entities) 张人脸"
-                : "已登记 \(result.entities) 张人脸：\(names.joined(separator: "、"))"
-            showFaceHud(text)
-        } catch {
-            showFaceHud("检测失败：\(error.localizedDescription)")
-        }
-    }
-
-    /// 检测结果胶囊：下一次提示先取消旧定时器，避免刚显示就被上一次的定时器抹掉
-    private func showFaceHud(_ text: String) {
-        faceHudClearWork?.cancel()
-        faceProbeHud = text
-        let work = DispatchWorkItem { faceProbeHud = nil }
-        faceHudClearWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 4, execute: work)
     }
 }
 
@@ -854,6 +773,8 @@ private struct FeedProgressOverlay: View {
 private struct FeedBottomBar: View {
     let video: ShortVideo
     let client: APIClient?
+    /// 本页播放引擎：人脸检测要读当前绝对时间点（视图出现时已由 ShortFeedPage 绑定）
+    var pageEngine: PlayerEngine?
     /// 全局刷流设置（收藏 / 连播 / 倍速），跨页共享
     @ObservedObject var controls: ShortFeedControls
     /// 点「关联内容」→ 外层弹关联视频页
@@ -900,6 +821,14 @@ private struct FeedBottomBar: View {
                 }
 
                 rateButton
+
+                // 人脸检测：与收藏/连播/倍速同排，刷流里也能点当前画面入库
+                inlineButton(icon: "faceid", text: "检测", active: false) {
+                    // 刷流起播不传 startAt（偏移 0），引擎时间即源文件绝对时间
+                    FaceProbeCenter.shared.probe(
+                        medium: "short_video", mediaID: video.id,
+                        t: pageEngine?.currentTime ?? 0)
+                }
             }
         }
         .padding(.leading, 16)
@@ -1056,6 +985,7 @@ private struct ShortFeedPage: View {
 
             // 独立底部状态栏：上沿紧贴视频下沿（进度线压在接缝）；视频层止于这里
             FeedBottomBar(video: video, client: client,
+                          pageEngine: pageEngine,
                           controls: controls, onRelated: { v in onRelated?(v) })
         }
         .ignoresSafeArea(edges: .bottom)

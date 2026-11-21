@@ -165,6 +165,10 @@ struct RootView: View {
                         .transition(.move(edge: .trailing))
                         .zIndex(4)
                 }
+
+                // 人脸检测后台结果：z 高于刷流，任何页面播放时点检测都能看到反馈
+                FaceProbeToastView()
+                    .zIndex(10)
             }
         }
         .animation(.easeIn(duration: 0.15), value: photoViewer.isVisible)

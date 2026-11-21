@@ -97,9 +97,8 @@ struct VideoPlayerView: View {
     @State private var pendingSeek: Double? = nil
     @State private var hud: String? = nil
     /// 人脸探测：后端同步跑 Python（约 10 秒），必须锁住按钮防重复提交；
-    /// 结果用 hud 显示（复用已有的居中胶囊，不另造 toast 层）。
-    @State private var faceProbing = false
-    @State private var faceProbeTask: Task<Void, Never>? = nil
+    // 人脸检测改为全局后台中心（FaceProbeCenter）：点击即返回，不阻塞控制条。
+    // 探测中/结果都由 RootView 的全局 toast 显示，本视图不再持有忙碌态和任务。
     /// 检测反馈 4 秒后自动收起；下一次提示会先取消上一个定时器
     @State private var hudClearWork: DispatchWorkItem? = nil
     /// 刷流底部进度条的拖动状态。视觉细线在 BottomProgressBar 里，热区另有 34pt。
@@ -452,64 +451,29 @@ struct VideoPlayerView: View {
             if engine.isPiPSupported {
                 playerButton(engine.isPiPActive ? "pip.exit" : "pip.enter") { engine.togglePiP() }
             }
-            // 播放中点当前画面检测人脸 → 写入 fr_* → 人物页可见。
-            // 只有能拿到资源 id 时才有意义（后端按 id 查文件路径）；探测中禁用防重复。
-            if faceProbeMedium != nil, faceProbeMediaID != nil {
-                faceProbeButton
-            }
             AirPlayButton()
                 .frame(width: 30, height: 30)
         }
     }
 
-    /// 人脸探测按钮。忙碌时换图标 + 禁用，hud 显示「正在检测…」，
-    /// 免得 10 秒里用户以为没反应反复点。
+    /// 人脸探测按钮（底部控制条）。点击即返回，结果与忙碌提示都由全局 toast 负责，
+    /// 不用 await 后端的 10 秒同步脚本 —— 那样按钮会一直停在「检测中」。
     private var faceProbeButton: some View {
-        Button { Task { await probeFace() } } label: {
-            Image(systemName: faceProbing ? "ellipsis" : "faceid")
+        Button { probeFace() } label: {
+            Image(systemName: "faceid")
                 .font(.system(size: 18, weight: .medium))
                 .frame(width: 34, height: 34)
                 .contentShape(Rectangle())
-                .opacity(faceProbing ? 0.5 : 1)
         }
-        .disabled(faceProbing)
         .accessibilityLabel("检测当前画面人脸")
     }
 
-    /// 取当前**绝对**时间点（HLS 从 -ss 切片时 engine.currentTime 从 0 起，
-    /// 必须加 activeOffset 才是源文件时间，否则检测的是错误的一帧）。
-    /// 检测是同步接口，约 10 秒；后端串行执行，UI 这边只防本页重复提交。
+    /// displayPosition 已含 HLS 切片偏移，是源文件绝对时间点。
+    /// 探测交给全局后台中心异步跑，这里不碰任何 @State、不阻塞控制条。
     @MainActor
-    private func probeFace() async {
-        guard !faceProbing,
-              let medium = faceProbeMedium, let mediaID = faceProbeMediaID,
-              let client = AppSession.shared.client else { return }
-        faceProbing = true
-        hud = "正在检测当前画面的人脸…"
-        faceProbeTask?.cancel()
-        let task = Task { @MainActor in
-            defer { faceProbing = false }
-            do {
-                let result = try await client.probeFaceAtTime(
-                    mediaID: mediaID, t: displayPosition, medium: medium)
-                guard !Task.isCancelled else { return }
-                let n = result.entities
-                if n > 0 {
-                    let names = result.matchedNames
-                    hud = names.isEmpty
-                        ? "已登记 \(n) 张人脸，人物页可见"
-                        : "已登记 \(n) 张人脸：" + names.joined(separator: "、")
-                } else {
-                    hud = "当前画面未检出可归入已有的人物人脸"
-                }
-            } catch {
-                guard !Task.isCancelled else { return }
-                hud = "人脸检测失败：\(error.localizedDescription)"
-            }
-            // 提示 4 秒后自行消失，不用手动关控制条
-            scheduleHudClear()
-        }
-        faceProbeTask = task
+    private func probeFace() {
+        guard let medium = faceProbeMedium, let mediaID = faceProbeMediaID else { return }
+        FaceProbeCenter.shared.probe(medium: medium, mediaID: mediaID, t: displayPosition)
     }
 
     /// 检测反馈的 hud 自动收起。用 WorkItem 可被下一次操作取消，
@@ -557,6 +521,10 @@ struct VideoPlayerView: View {
                 Spacer()
                 playerButton("gobackward.10") { seekTo(absolute: displayPosition - 10) }
                 playerButton("goforward.10") { seekTo(absolute: displayPosition + 10) }
+                // 人脸检测：与快进/倍速同排，所有接入 faceProbe 参数的播放器都能点
+                if faceProbeMedium != nil, faceProbeMediaID != nil {
+                    faceProbeButton
+                }
                 rateMenu
             }
         }
@@ -708,8 +676,6 @@ struct VideoPlayerView: View {
         holdWork = nil
         reportTask?.cancel()
         reportTask = nil
-        faceProbeTask?.cancel()
-        faceProbeTask = nil
         hudClearWork?.cancel()
         hudClearWork = nil
         let pos = engine.currentTime + activeOffset
