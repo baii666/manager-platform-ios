@@ -803,6 +803,14 @@ final class APIClient: DataProviding, @unchecked Sendable {
         return resp.items.map { resolvePhoto($0) }
     }
 
+    /// 相册内视频。GET /api/album-videos/:albumId（方案B：视频独立于 photos 表）
+    /// ⚠️ 后端按相册的 (library_id, folder_path) 关联，一次性全量返回、没有分页；
+    ///   路由必须是独立前缀 —— /albums/:libraryId/*rest 已被相册标签的 catch-all 占用。
+    func fetchAlbumVideos(albumID: Int) async throws -> [AlbumVideo] {
+        let resp: ItemsResponse<AlbumVideo> = try await request("/api/album-videos/\(albumID)")
+        return resp.items
+    }
+
     /// 影视列表。type: movie / tv；libID 为 nil 时后端返回用户可见媒体库的全集
     /// sort：title / title_desc / year_desc / year_asc / rating_desc / updated_desc / premiered_desc 等
     func fetchMedia(type: String, libID: Int? = nil, page: Int = 1, size: Int = 60, sort: String = "updated_desc", q: String? = nil) async throws -> (items: [MediaItem], total: Int) {

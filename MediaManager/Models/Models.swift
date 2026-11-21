@@ -554,6 +554,57 @@ struct Album: Identifiable, Codable, Sendable, Hashable {
     }
 }
 
+// MARK: - 相册视频
+// 对应 GET /api/album-videos/:albumId 的 items（Go album_videos 表）。
+// 方案B：视频独立于 photos 存储，通过 (library_id, folder_path) 关联到相册。
+// duration 后端是 sql.NullFloat64，JSON 可能是 number 也可能是 null → 必须 Double?
+struct AlbumVideo: Identifiable, Codable, Sendable {
+    let id: Int
+    var libraryId: Int? = nil
+    var folderPath: String = ""
+    var folderName: String? = nil
+    var filePath: String = ""
+    var fileName: String = ""
+    var fileSize: Int64? = nil
+    var width: Int? = nil
+    var height: Int? = nil
+    var duration: Double? = nil
+    var videoCodec: String? = nil
+    var audioCodec: String? = nil
+    var bitrate: Int64? = nil
+    var hasThumb: Int? = nil
+    /// 后端补的 /api/album-video/:id 直链（App 内播放不用它，走 resolvePlayback）
+    var playUrl: String? = nil
+
+    /// 卡片标题：优先文件夹名（更像片名），没有才用文件名
+    var title: String {
+        if let folderName, !folderName.isEmpty { return folderName }
+        return fileName
+    }
+
+    var durationText: String? {
+        guard let duration, duration.isFinite, duration > 0 else { return nil }
+        let total = Int(duration.rounded())
+        return String(format: "%d:%02d", total / 60, total % 60)
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case libraryId = "library_id"
+        case folderPath = "folder_path"
+        case folderName = "folder_name"
+        case filePath = "file_path"
+        case fileName = "file_name"
+        case fileSize = "file_size"
+        case width, height, duration
+        case videoCodec = "video_codec"
+        case audioCodec = "audio_codec"
+        case bitrate
+        case hasThumb = "has_thumb"
+        case playUrl = "play_url"
+    }
+}
+
 // MARK: - 影视条目
 // 对应 /api/media?type=movie|tv 返回的 items 项
 struct MediaItem: Identifiable, Codable, Sendable, Hashable {

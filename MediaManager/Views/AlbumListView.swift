@@ -561,28 +561,36 @@ struct AlbumPhotosView: View {
     /// 看图器里点了封面按钮 → 回本页时刷新计数
     private let coverChanged = NotificationCenter.default.publisher(for: .coverTaskDidChange)
 
+    // MARK: 图片 / 视频分区
+    /// 照片是相册主体，默认落在图片；视频按方案B存在独立表，切过去才拉
+    private enum MediaTab: String, CaseIterable, Identifiable {
+        case photos = "图片"
+        case videos = "视频"
+        var id: String { rawValue }
+        var icon: String { self == .photos ? "photo" : "film" }
+    }
+    @State private var mediaTab: MediaTab = .photos
+    @State private var videos: [AlbumVideo] = []
+    @State private var videoErrorMessage: String?
+    /// 🔴 地址 + 偏移打包成一个 item 传给 fullScreenCover，不用 isPresented + 分离 URL 状态
+    @State private var playTarget: PlaybackTarget?
+    @State private var playError: String?
+
     /// 顶栏分母（相册总张数）。相册接口没给 count 时退回已加载张数，
     /// 免得顶栏出现「120 / 0」这种明显不对的分母。
     private var totalCount: Int { album.count > 0 ? album.count : photos.count }
 
+    private var client: APIClient? { AppSession.shared.client }
+
     var body: some View {
-        PhotoGrid(
-            photos: photos,
-            columns: columns,
-            onColumnsChange: { columns = $0; PhotoGridPrefs.save("albumPhotos", $0) },
-            onSelect: { photo in
-                guard let i = photos.firstIndex(where: { $0.id == photo.id }) else { return }
-                // 全局 overlay 呈现（见 PhotoViewerPresenter 注释）。
-                // 网格翻页后要把新数组同步给看图器，否则翻不到新加载的图
-                PhotoViewerPresenter.shared.show(photos, index: i, hasMore: hasMore, onLoadMore: {
-                    Task {
-                        await loadMore()
-                        PhotoViewerPresenter.shared.updatePhotos(photos)
-                    }
-                })
-            },
-            onReachEnd: { Task { await loadMore() } }
-        )
+        VStack(spacing: 0) {
+            mediaTabBar
+            switch mediaTab {
+            case .photos: photosTab
+            case .videos: videosTab
+            }
+        }
+        // ⚠️ 只忽略底部：tab 胶囊仍留在导航栏下方的安全区里
         .ignoresSafeArea(edges: .bottom)
         .navigationBarTitleDisplayMode(.inline)
         // ⚠️ 相册名**不**用 navigationTitle：它是居中的，而且要跟系统返回按钮抢位。
@@ -619,15 +627,16 @@ struct AlbumPhotosView: View {
 
             TrailingToolsItem {
                 // AI 封面个数（可点：手动刷新一次，看图器里改过也能立刻对上）
-                if let n = coverCount {
+                // 视频 tab 没有"生成封面"这件事，不显示
+                if mediaTab == .photos, let n = coverCount {
                     ToolChip(label: "封面 \(n)", icon: "photo.on.rectangle",
                              // 有封面就绿 —— 与看图器里那个封面标记同一个颜色语义
                              tintColor: n > 0 ? .green : nil) {
                         Task { await loadCoverCount() }
                     }
                 }
-                // 已加载 / 本相册总数。格式与相册列表页的计数完全一致
-                Text("\(photos.count) / \(totalCount)")
+                // 图片 tab：已加载 / 总数；视频 tab：视频是一次性全量返回，直接报个数
+                Text(mediaTab == .photos ? "\(photos.count) / \(totalCount)" : "\(videos.count) 个视频")
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
                     // ⚠️ 不加 fixedSize：工具栏空间紧张时会被压缩换行，撑高导航栏
@@ -638,17 +647,43 @@ struct AlbumPhotosView: View {
             }
         }
         .overlay {
-            if photos.isEmpty {
+            if mediaTab == .photos, photos.isEmpty {
                 if let errorMessage {
                     ContentUnavailableView(errorMessage, systemImage: "exclamationmark.triangle")
                 } else {
                     ProgressView("加载照片…")
+                }
+            } else if mediaTab == .videos, videos.isEmpty {
+                if let videoErrorMessage {
+                    ContentUnavailableView(videoErrorMessage, systemImage: "exclamationmark.triangle")
+                } else {
+                    ProgressView("加载视频…")
                 }
             }
         }
         .task {
             await loadMore()
             await loadCoverCount()
+            await loadVideos()
+        }
+        // 🔴 item: 把解析好的地址/偏移直接传进闭包，避免弹层出来但 URL 还是 nil
+        .fullScreenCover(item: $playTarget) { target in
+            VideoPlayerView(url: target.url,
+                            startPosition: target.startAt,
+                            timeOffset: target.timeOffset,
+                            sourcePath: target.sourcePath,
+                            knownDuration: target.knownDuration,
+                            title: target.title,
+                            assetType: target.assetType,
+                            assetID: target.assetID)
+        }
+        .alert("播放失败", isPresented: Binding(
+            get: { playError != nil },
+            set: { if !$0 { playError = nil } }
+        )) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text(playError ?? "")
         }
         // 看图器里加入/取消封面后回到本页，计数要跟着变
         .onReceive(coverChanged) { _ in
@@ -683,6 +718,161 @@ struct AlbumPhotosView: View {
             coverCount = try await client.fetchCoverTaskCount(albumId: album.id).total
         } catch {
             coverCount = nil
+        }
+    }
+
+    // MARK: - 图片 / 视频分区
+
+    /// 顶栏下方的分段胶囊。样式对齐 PeopleHub / 历史拍摄集详情页：
+    /// 品牌色淡底 + 图标 + 数量；不用系统 segmented（灰底板跟全站顶栏节奏不合）。
+    /// 字重恒定，避免切换时中文字重变化让胶囊宽度跳动。
+    private var mediaTabBar: some View {
+        HStack(spacing: 8) {
+            ForEach(MediaTab.allCases) { item in
+                Button {
+                    withAnimation(.easeInOut(duration: 0.18)) { mediaTab = item }
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: item.icon)
+                            .font(.system(size: 12, weight: .semibold))
+                        Text(item.rawValue)
+                        Text(tabCount(item))
+                            .font(.caption2).monospacedDigit()
+                            .foregroundStyle(mediaTab == item ? Theme.brand : Color.secondary)
+                    }
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(mediaTab == item ? Theme.brand : Color.secondary)
+                    .padding(.horizontal, 14).padding(.vertical, 7)
+                    .background(mediaTab == item ? Theme.brand.opacity(0.15) : Color.clear,
+                                in: Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(.regularMaterial)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Color.primary.opacity(0.12)).frame(height: 0.5)
+        }
+    }
+
+    private func tabCount(_ item: MediaTab) -> String {
+        switch item {
+        case .photos: return "\(totalCount)"
+        case .videos: return "\(videos.count)"
+        }
+    }
+
+    /// 照片 tab：网格原样保留，分页 / 看图器 / 封面计数一个都不动
+    private var photosTab: some View {
+        PhotoGrid(
+            photos: photos,
+            columns: columns,
+            onColumnsChange: { columns = $0; PhotoGridPrefs.save("albumPhotos", $0) },
+            onSelect: { photo in
+                guard let i = photos.firstIndex(where: { $0.id == photo.id }) else { return }
+                // 全局 overlay 呈现（见 PhotoViewerPresenter 注释）。
+                // 网格翻页后要把新数组同步给看图器，否则翻不到新加载的图
+                PhotoViewerPresenter.shared.show(photos, index: i, hasMore: hasMore, onLoadMore: {
+                    Task {
+                        await loadMore()
+                        PhotoViewerPresenter.shared.updatePhotos(photos)
+                    }
+                })
+            },
+            onReachEnd: { Task { await loadMore() } }
+        )
+        // 根视图模式的 PhotoGrid 自己滚；在 VStack 里要明确吃满 tab 下方的剩余高度
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// 视频 tab：后端一次性全量返回，横滑轨足够（与老拍摄集同量级）
+    @ViewBuilder
+    private var videosTab: some View {
+        if !videos.isEmpty {
+            VStack(spacing: 0) {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 10) {
+                        ForEach(videos) { video in
+                            albumVideoCard(video)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 12)
+                }
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private func albumVideoCard(_ video: AlbumVideo) -> some View {
+        // 卡宽约屏宽 60%：一屏露出一个半，暗示可以横滑
+        let width: CGFloat = 232
+        return VStack(alignment: .leading, spacing: 6) {
+            Button {
+                Task { await play(video) }
+            } label: {
+                ZStack {
+                    LinearGradient(colors: [Theme.brand.opacity(0.45), Theme.brand.opacity(0.08)],
+                                   startPoint: .top, endPoint: .bottom)
+                    Image(systemName: "play.fill")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(.white)
+                }
+                .frame(width: width, height: width * 9 / 16)
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(alignment: .bottomTrailing) {
+                    if let duration = video.durationText {
+                        Text(duration)
+                            .font(.caption2.weight(.medium)).monospacedDigit()
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 6).padding(.vertical, 3)
+                            .background(.black.opacity(0.55), in: Capsule())
+                            .padding(6)
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+
+            Text(video.title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1).truncationMode(.tail)
+                .frame(width: width, alignment: .leading)
+        }
+    }
+
+    @MainActor
+    private func loadVideos() async {
+        guard let client else { return }
+        do {
+            videos = try await client.fetchAlbumVideos(albumID: album.id)
+            videoErrorMessage = nil
+        } catch {
+            videos = []
+            videoErrorMessage = "加载视频失败 · \(((error as? LocalizedError)?.errorDescription) ?? error.localizedDescription)"
+        }
+    }
+
+    /// 按容器/编码选最优路线：MP4 直连 / 非 MP4 走 HLS，hev1 与解不出的编码自动降级。
+    /// 已知时长一起带进去，补 HLS 会话跑完前没有 ENDLIST 导致的 duration 洞。
+    @MainActor
+    private func play(_ video: AlbumVideo) async {
+        guard let client else { return }
+        do {
+            playTarget = try await client.resolvePlayback(
+                path: video.filePath,
+                startAt: nil,
+                title: video.title,
+                assetType: nil,
+                assetID: nil,
+                knownDuration: video.duration
+            )
+        } catch {
+            playError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
     }
 }
