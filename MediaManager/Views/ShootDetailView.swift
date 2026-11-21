@@ -2,18 +2,27 @@ import SwiftUI
 import UIKit
 
 // MARK: - 拍摄集详情页
-// 视频横滑轨(播放) + 照片瀑布流(看图器) + 无限滚动；信息全部收进导航栏。
-// ⚠️ 2026-10-14 两次改版：
-// 1. 从「全部/视频/照片 三段 tab」改成「视频横滑轨 + 照片瀑布流」—— 库里的
-//    形状是每个拍摄集 1-2 个视频、100+ 张照片（全库 134 视频 vs 13900 照片），
-//    视频不配占一个 tab；整页只有照片流一种滚动节奏
-// 2. 去掉 172pt Hero 大图头 —— 照片是主体，进场就该直接看到网格；标题和
-//    数量/体积/时长收进导航栏 principal（两行）
-// 网页端 ShootDetailPage 仍是 tab + 大头图结构，待对齐。
+// 「图片 / 视频」两个 tab + 无限滚动；信息全部收进导航栏。
+// ⚠️ 改版轨迹：
+// 1. 最早是「全部/视频/照片 三段 tab」→ 改成「视频横滑轨 + 照片瀑布流」
+//    （库里每个拍摄集 1-2 个视频、100+ 张照片，全库 134 视频 vs 13900 照片）。
+// 2. 去掉 172pt Hero 大图头 —— 照片是主体，标题和数量收进导航栏 principal。
+// 3. 2026-11-21 按用户要求拆成「图片 / 视频」两个 tab，各自独占一屏：
+//    图片 tab 是照片网格，视频 tab 是视频横滑轨（1-2 个视频，改动最小）。
+// 网页端 ShootDetailPage 仍是 tab + 大头图结构。
 struct ShootDetailView: View {
     let shoot: Shoot
 
+    /// 详情内容 tab。照片是全库主体（13900 张 vs 134 视频），默认落在图片。
+    private enum MediaTab: String, CaseIterable, Identifiable {
+        case photos = "图片"
+        case videos = "视频"
+        var id: String { rawValue }
+        var icon: String { self == .photos ? "photo" : "film" }
+    }
+
     @StateObject private var viewModel: ShootDetailViewModel
+    @State private var mediaTab: MediaTab = .photos
     /// 同 ShortsView：地址挂 item 上，不用 isPresented + 分离 URL 状态
     @State private var playTarget: PlayerTarget?
     /// 照片瀑布流列数：双指捏合缩放，按「拍摄集照片」记忆
@@ -31,59 +40,18 @@ struct ShootDetailView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ScrollView {
-                // 视频横滑轨。1-2 个视频时就是固定一行，横滑只为视频变多留余量；
-                // 一个视频都没有时整节不渲染，不留空标题
-                if !viewModel.videos.isEmpty {
-                    videoStrip
-                }
+            mediaTabBar
 
-                if !viewModel.photos.isEmpty {
-                    // ⚠️ fitsContent 必须按 PhotoGrid 的声明顺序传（onColumnsChange
-                    // 等闭包参数之前）—— Swift 不允许实参乱序
-                    PhotoGrid(photos: viewModel.viewerPhotos, columns: photoColumns,
-                              fitsContent: true,
-                              onColumnsChange: { photoColumns = $0; PhotoGridPrefs.save("shootPhotos", $0) },
-                              onSelect: { photo in
-                        guard let idx = viewModel.viewerPhotos.firstIndex(where: { $0.id == photo.id }) else { return }
-                        PhotoViewerPresenter.shared.show(
-                            viewModel.viewerPhotos, index: idx,
-                            hasMore: viewModel.photoHasMore, onLoadMore: {
-                                Task {
-                                    await viewModel.loadMorePhotos()
-                                    PhotoViewerPresenter.shared.updatePhotos(viewModel.viewerPhotos)
-                                }
-                            })
-                    }, onReachEnd: {
-                        Task { await viewModel.loadMorePhotos() }
-                    })
-                        // 🔧 fitsContent：UICollectionView 没有 intrinsicContentSize，
-                        // 直接塞 ScrollView 高度会塌成 0 —— 照片整块不显示的根因。
-                        // 开启后网格不自己滚，高度=内容总高，由外层 ScrollView 统管。
-                        .padding(.horizontal, 16)
-                        .padding(.top, viewModel.videos.isEmpty ? 12 : 18)
-                } else if let e = viewModel.photoErrorMessage {
-                    // 照片加载失败：明确说出来，不留一片空白让人以为是布局问题
-                    VStack(spacing: 6) {
-                        Image(systemName: "exclamationmark.triangle").foregroundStyle(.secondary)
-                        Text("照片加载失败：\(e)")
-                            .font(.caption).foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-                    }
-                    .frame(maxWidth: .infinity).padding(.top, 24)
-                } else if !viewModel.videos.isEmpty {
-                    // 有视频、没照片（库里有 3 个集是这样）：说清楚，别留白
-                    Text("暂无照片")
-                        .font(.caption).foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity).padding(.top, 24)
+            ScrollView {
+                switch mediaTab {
+                case .videos:
+                    videosTab
+                case .photos:
+                    photosTab
                 }
 
                 if viewModel.isLoading {
                     ProgressView().frame(maxWidth: .infinity).padding()
-                }
-                if viewModel.photos.isEmpty && viewModel.videos.isEmpty && !viewModel.isLoading {
-                    ContentUnavailableView("暂无内容", systemImage: "photo.on.rectangle.angled")
-                        .padding(.top, 60)
                 }
 
                 // 底部净空：滑到底时最后的内容不被底栏盖住
@@ -139,6 +107,102 @@ struct ShootDetailView: View {
             Button("好", role: .cancel) {}
         } message: {
             Text(vidHub.error ?? "")
+        }
+    }
+
+    // MARK: 内容 tab
+
+    /// 顶栏下方的分段 tab：图片 / 视频，带各自数量。样式对齐 PeopleHub 的分段胶囊。
+    private var mediaTabBar: some View {
+        HStack(spacing: 8) {
+            ForEach(MediaTab.allCases) { tab in
+                Button(action: { withAnimation(.easeInOut(duration: 0.18)) { mediaTab = tab } },
+                       label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: tab.icon).font(.system(size: 12, weight: .semibold))
+                        Text(tab.rawValue)
+                        Text(tabCount(tab))
+                            .font(.caption2).monospacedDigit()
+                            .foregroundStyle(mediaTab == tab ? Theme.brand : Color.secondary)
+                    }
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(mediaTab == tab ? Theme.brand : Color.secondary)
+                    .padding(.horizontal, 14).padding(.vertical, 7)
+                    .background(mediaTab == tab ? Theme.brand.opacity(0.15) : Color.clear,
+                                in: Capsule())
+                })
+                .buttonStyle(.plain)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(.regularMaterial)
+        .overlay(alignment: .bottom) { barDivider }
+    }
+
+    private var barDivider: some View {
+        Rectangle().fill(Color.primary.opacity(0.12)).frame(height: 0.5)
+    }
+
+    private func tabCount(_ tab: MediaTab) -> String {
+        switch tab {
+        case .videos: return "\(viewModel.videos.isEmpty ? shoot.videoCount : viewModel.videos.count)"
+        case .photos: return "\(viewModel.photoTotal > 0 ? viewModel.photoTotal : shoot.photoCount)"
+        }
+    }
+
+    // MARK: 图片 tab
+
+    @ViewBuilder
+    private var photosTab: some View {
+        if !viewModel.photos.isEmpty {
+            // ⚠️ fitsContent 必须按 PhotoGrid 的声明顺序传（onColumnsChange
+            // 等闭包参数之前）—— Swift 不允许实参乱序
+            PhotoGrid(photos: viewModel.viewerPhotos, columns: photoColumns,
+                      fitsContent: true,
+                      onColumnsChange: { photoColumns = $0; PhotoGridPrefs.save("shootPhotos", $0) },
+                      onSelect: { photo in
+                guard let idx = viewModel.viewerPhotos.firstIndex(where: { $0.id == photo.id }) else { return }
+                PhotoViewerPresenter.shared.show(
+                    viewModel.viewerPhotos, index: idx,
+                    hasMore: viewModel.photoHasMore, onLoadMore: {
+                        Task {
+                            await viewModel.loadMorePhotos()
+                            PhotoViewerPresenter.shared.updatePhotos(viewModel.viewerPhotos)
+                        }
+                    })
+            }, onReachEnd: {
+                Task { await viewModel.loadMorePhotos() }
+            })
+                // 🔧 fitsContent：UICollectionView 没有 intrinsicContentSize，
+                // 直接塞 ScrollView 高度会塌成 0 —— 照片整块不显示的根因。
+                // 开启后网格不自己滚，高度=内容总高，由外层 ScrollView 统管。
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+        } else if let e = viewModel.photoErrorMessage {
+            VStack(spacing: 6) {
+                Image(systemName: "exclamationmark.triangle").foregroundStyle(.secondary)
+                Text("照片加载失败：\(e)")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity).padding(.top, 24)
+        } else if !viewModel.isLoading {
+            ContentUnavailableView("暂无照片", systemImage: "photo")
+                .padding(.top, 40)
+        }
+    }
+
+    // MARK: 视频 tab
+
+    @ViewBuilder
+    private var videosTab: some View {
+        if !viewModel.videos.isEmpty {
+            videoStrip
+        } else if !viewModel.isLoading {
+            ContentUnavailableView("暂无视频", systemImage: "film")
+                .padding(.top, 40)
         }
     }
 
