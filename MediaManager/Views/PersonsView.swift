@@ -1182,7 +1182,9 @@ struct PersonPhotosView: View {
         }
         .padding(.horizontal, panePadding)
         .padding(.vertical, 5)
-        .background(topBarColor)
+        // 这一行属于右侧数据区，不是顶 bar：让下面那层内容背景（含自定义背景图）
+        // 直接透上来，不再跟系统导航栏同色连成一片。底部分隔线保留，用来区分
+        // 固定工具行和可滚动网格。
         .overlay(alignment: .bottom) { barDivider }
     }
 
