@@ -34,13 +34,7 @@ jobs:
             -configuration Debug \
             -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO \
-            build 2>&1 | tee build.log
-
-      # 临时调试：把 swiftc 错误转成公开 annotation（无 token 也能读到）
-      - name: 输出编译错误注解
-        if: failure()
-        run: |
-          grep -E ': error:' build.log | head -80 | sed 's/^/::error::/' || true
+            build
 
       # 模拟器的安装阶段才会报 missing CFBundleExecutable / missing bundle id，
       # 编译阶段发现不了，所以这里提前校验产物 plist 的关键键都已解析出真值
