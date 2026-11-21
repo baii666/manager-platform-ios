@@ -240,8 +240,7 @@ final class VidHubLauncher: ObservableObject {
     @AppStorage("vidhub.autoplay") var autoplay: Bool = false
 
     private struct Prepared {
-        /// nil = 无进度归属（拍摄集视频：后端 asset_type=shoot 不支持 progress，
-        /// ShootFile 也不返回文件路径、抽不了字幕）→ 不查进度、不写进度。
+        /// nil = 无进度归属（比如外链片源没有本地 media_id）→ 不查进度、不写进度。
         /// ⚠️ 但仍要带 x-success 等回调地址，否则跳进 VidHub 后回不来。
         let mediaId: Int?
         let mediaURL: URL

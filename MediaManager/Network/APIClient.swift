@@ -247,10 +247,9 @@ final class APIClient: DataProviding, @unchecked Sendable {
 
     func fetchStats() async throws -> HomeStats {
         async let libsReq: [Library] = request("/api/libraries")
-        async let shootsReq: ShootListResponse = request("/api/shoots?page=1&limit=1")
         async let shortsReq: ShortsCountResponse = request("/api/shorts/count")
 
-        let (libs, shoots, shorts) = try await (libsReq, shootsReq, shortsReq)
+        let (libs, shorts) = try await (libsReq, shortsReq)
 
         var stats = HomeStats()
         stats.libraryCount = libs.count
@@ -260,11 +259,9 @@ final class APIClient: DataProviding, @unchecked Sendable {
             case "movie": stats.movieCount += lib.itemCount
             case "tv", "series": stats.seriesCount += lib.itemCount
             case "photo": stats.photoCount += lib.itemCount
-            case "shoot": stats.shootCount += lib.itemCount
             default: break
             }
         }
-        stats.shootCount = shoots.total
         stats.shortCount = shorts.total
         return stats
     }
@@ -359,9 +356,9 @@ final class APIClient: DataProviding, @unchecked Sendable {
 
     func search(query: String) async throws -> [UnifiedAsset] {
         // ⚠️ 别再请求 type=all：后端 all 分支返回的是分组 map
-        //（{movie:[...], tv:[...], album:[...], shoot:[...], library:[...]}），
+        //（{movie:[...], tv:[...], album:[...], library:[...]}），
         // 既没有 items/total 也没有 photo。跨类型统一走客户端并发聚合。
-        let page = try await searchGrouped(query: query, types: ["movie", "tv", "album", "photo", "shoot"],
+        let page = try await searchGrouped(query: query, types: ["movie", "tv", "album", "photo"],
                                            page: 1, size: 20)
         return page.items.compactMap { resolveSearchItem($0) }
     }
@@ -566,65 +563,6 @@ final class APIClient: DataProviding, @unchecked Sendable {
         return x
     }
 
-    // MARK: - 拍摄集
-
-    func fetchShoots(libraryId: Int? = nil, page: Int = 1, size: Int = 30,
-                     sort: String = "mtime", descending: Bool = true, search: String? = nil) async throws -> ([Shoot], Int) {
-        var qi: [URLQueryItem] = [
-            URLQueryItem(name: "page", value: "\(page)"),
-            URLQueryItem(name: "limit", value: "\(size)"),
-            URLQueryItem(name: "sort", value: sort),
-            // 后端只认 asc；其余（含不传）一律按 DESC 处理
-            URLQueryItem(name: "order", value: descending ? "desc" : "asc"),
-        ]
-        if let libraryId, libraryId > 0 { qi.append(URLQueryItem(name: "libraryId", value: "\(libraryId)")) }
-        if let search, !search.isEmpty { qi.append(URLQueryItem(name: "search", value: search)) }
-        let resp: ShootsPageResponse = try await request("/api/shoots", queryItems: qi)
-        return (resp.shoots, resp.total)
-    }
-
-    func fetchShootDetail(id: Int) async throws -> ShootDetail {
-        try await request("/api/shoots/\(id)")
-    }
-
-    /// GET /api/shoots/:id/photos 一页照片。
-    /// ⚠️ 返回整个 page（含 total）而不是只给数组：tab 上的「照片 (N)」要的是
-    /// 后端 COUNT(*) 的权威总数。以前只返回数组、调用方拿 photos.count 近似，
-    /// 第一页回来之前数字只能是 0。
-    func fetchShootPhotos(id: Int, page: Int = 1, size: Int = 50) async throws -> ShootPhotosPage {
-        try await request(
-            "/api/shoots/\(id)/photos", queryItems: [
-                URLQueryItem(name: "page", value: "\(page)"),
-                URLQueryItem(name: "limit", value: "\(size)"),
-            ]
-        )
-    }
-
-    func shootCoverURL(_ id: Int, size: Int = 600) -> URL? {
-        makeURL("/api/shoots/\(id)/cover", queryItems: [URLQueryItem(name: "size", value: "\(size)")])
-    }
-    func shootFileURL(_ fileId: Int) -> URL? {
-        makeURL("/api/shoot-file/\(fileId)")
-    }
-    /// VidHub 外播用的拍摄集文件地址。
-    /// ⚠️ 必须带 ?token=：/api/shoot-file 不在 AuthMiddleware 的白名单里，
-    /// 而 VidHub 是自己来拉的，带不上我们的 cookie —— 不带 token 它会拿到 401。
-    /// 内置播放器用上面那个（走 URLSession，cookie 在，不需要 token）。
-    func shootFileExternalURL(_ fileId: Int) -> URL? {
-        var items: [URLQueryItem] = []
-        if let tok = AppSession.shared.sessionToken, !tok.isEmpty {
-            items.append(URLQueryItem(name: "token", value: tok))
-        }
-        return makeURL("/api/shoot-file/\(fileId)", queryItems: items)
-    }
-    /// 拍摄集内照片走统一的 /photo?id= 接口（与网页端一致）
-    func shootPhotoURL(_ id: Int, size: Int? = nil) -> URL? {
-        var qi: [URLQueryItem] = [URLQueryItem(name: "id", value: "\(id)")]
-        if let size { qi.append(URLQueryItem(name: "size", value: "\(size)")) }
-        else { qi.append(URLQueryItem(name: "size", value: "original")) }
-        return makeURL("/photo", queryItems: qi)
-    }
-
     // MARK: - 短视频
 
     func fetchShortVideos(poolId: Int? = nil, page: Int = 1, size: Int = 60,
@@ -672,9 +610,9 @@ final class APIClient: DataProviding, @unchecked Sendable {
 
     // MARK: - 搜索（分类）
 
-    /// 按类型分页搜索。type: movie/tv/album/photo/shoot
+    /// 按类型分页搜索。type: movie/tv/album/photo
     /// ⚠️ 不要传 "all"：后端 type=all 走的是 searchAll，返回的是
-    /// `{movie:[...], tv:[...], album:[...], shoot:[...], library:[...]}` 的**分组 map**，
+    /// `{movie:[...], tv:[...], album:[...], library:[...]}` 的**分组 map**，
     /// 既没有 items/total，也不含 photo —— 用 items 解必然空/失败。
     /// 需要「全部 / 影视」这种跨类型的，用 searchGrouped 自己并发聚合。
     func searchItems(query: String, type: String, page: Int = 1, size: Int = 60) async throws -> SearchPage {
@@ -878,7 +816,7 @@ final class APIClient: DataProviding, @unchecked Sendable {
         return (resp.items, resp.total)
     }
 
-    /// 指定类型的媒体库（movie / tv / photo / shoot），用于列表页的库筛选
+    /// 指定类型的媒体库（movie / tv / photo），用于列表页的库筛选
     func libraries(ofType type: String) async throws -> [Library] {
         let libs: [Library] = try await request("/api/libraries")
         return libs.filter { $0.type == type }
@@ -1120,10 +1058,6 @@ private struct ActionListResponse: Decodable {
     let total: Int
 }
 
-private struct ShootListResponse: Decodable {
-    let total: Int
-}
-
 private struct ShortsCountResponse: Decodable {
     let total: Int
 }
@@ -1231,17 +1165,6 @@ private struct ActionStatusResponse: Decodable {
 
 private struct FavoriteResponse: Decodable {
     let favorite: Bool
-}
-
-private struct ShootsPageResponse: Decodable {
-    let shoots: [Shoot]
-    let total: Int
-}
-
-/// GET /api/shoots/:id/photos 的响应：一页照片 + 后端 COUNT(*) 权威总数
-struct ShootPhotosPage: Decodable, Sendable {
-    let photos: [ShootFile]
-    let total: Int
 }
 
 private struct ShortVideosResponse: Decodable {

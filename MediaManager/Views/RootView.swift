@@ -282,10 +282,10 @@ extension View {
     }
 }
 
-// MARK: - 媒体库页（顶 bar 切换电影 / 相册 / 拍摄集）
+// MARK: - 媒体库页（顶 bar 切换电影 / 相册）
 struct LibraryHomeView: View {
     enum Category: String, CaseIterable, Identifiable {
-        case movie, photo, shoot
+        case movie, photo
 
         var id: String { rawValue }
 
@@ -293,7 +293,6 @@ struct LibraryHomeView: View {
             switch self {
             case .movie: return "电影"
             case .photo: return "相册"
-            case .shoot: return "拍摄集"
             }
         }
 
@@ -303,12 +302,11 @@ struct LibraryHomeView: View {
             switch self {
             case .movie: return "film.fill"
             case .photo: return "photo.fill"
-            case .shoot: return "camera.fill"
             }
         }
     }
 
-    /// 当前二级分类：由根视图持有（binding），首页「拍摄集」卡跨 tab 落准分类用
+    /// 当前二级分类：由根视图持有（binding）
     @Binding var category: Category
     /// 本 tab 的导航路径：列表页点卡片 / 演员 chip 都往里 append value。
     /// ⚠️ 不能让列表页自己用绑定型 destination —— 不写 path 会和详情页的
@@ -317,7 +315,7 @@ struct LibraryHomeView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // 顶 bar：电影 / 相册 / 拍摄集（居中）
+            // 顶 bar：电影 / 相册（居中）
             // ⚠️ 旧样式是「灰色实心底板 + 品牌色实心选中」，三颗大胶囊压在顶栏很笨重。
             //    改成和「人物」页 / 搜索页分类同一套语言：品牌色 15% 淡底 + 图标，
             //    未选中透明底；字重恒定，切分类时整排不会左右晃。
@@ -350,7 +348,7 @@ struct LibraryHomeView: View {
             // 只给胶囊上色加动画；不包 category 赋值，避免和 TabView(.page) 的翻页动画打架
             .animation(.easeInOut(duration: 0.18), value: category)
 
-            // 三个分类可左右滑动切换（顶 bar 点击与滑动双向同步）
+            // 两个分类可左右滑动切换（顶 bar 点击与滑动双向同步）
             TabView(selection: $category) {
                 ForEach(Category.allCases) { c in
                     LibraryPickerView(type: c.type)
@@ -360,13 +358,12 @@ struct LibraryHomeView: View {
             .tabViewStyle(.page(indexDisplayMode: .never))
         }
         // navigationDestination 统一挂在这里（而不是每个 LibraryPickerView 各挂一个）。
-        // TabView(.page) 会同时挂载三个 page，三个 page 各自声明同类型 destination
+        // TabView(.page) 会同时挂载两个 page，两个 page 各自声明同类型 destination
         // 会互相冲突 → NavigationLink push 失效（卡片点了没反应）。这里只声明一次。
         .navigationDestination(for: Library.self) { lib in
             switch category {
             case .movie: MediaListView(type: "movie", library: lib, path: $path)
             case .photo: AlbumListView(library: lib)
-            case .shoot: ShootListView(library: lib)
             }
         }
         // 影视卡片 / 工具栏「演员」chip 的路由，与 Library 并列只声明一次。

@@ -3,12 +3,11 @@ import CoreGraphics
 
 // MARK: - 资产类型
 // 与后端 asset_type 对齐：四类内容共用一套资产模型
-// media=影视 / photo=写真 / short=短视频 / shoot=拍摄集
+// media=影视 / photo=写真 / short=短视频
 enum AssetType: String, Codable, CaseIterable, Identifiable, Sendable {
     case media
     case photo
     case short
-    case shoot
 
     var id: String { rawValue }
 
@@ -23,7 +22,6 @@ enum AssetType: String, Codable, CaseIterable, Identifiable, Sendable {
         case .media: return "影视"
         case .photo: return "写真"
         case .short: return "短视频"
-        case .shoot: return "拍摄集"
         }
     }
 
@@ -32,7 +30,6 @@ enum AssetType: String, Codable, CaseIterable, Identifiable, Sendable {
         case .media: return "film"
         case .photo: return "camera"
         case .short: return "play.rectangle.fill"
-        case .shoot: return "photo.on.rectangle.angled"
         }
     }
 }
@@ -46,7 +43,7 @@ struct UnifiedAsset: Identifiable, Codable, Sendable {
     let type: AssetType
     let title: String
     var subtitle: String? = nil
-    /// 文件路径（media=video_file、short=file_path、photo=file_path、shoot=folder_path）
+    /// 文件路径（media=video_file、short=file_path、photo=file_path）
     var path: String? = nil
     var coverURL: URL? = nil
     var backdropURL: URL? = nil
@@ -218,7 +215,7 @@ struct RecentItem: Identifiable, Codable, Sendable, Hashable {
 struct Library: Identifiable, Codable, Sendable, Hashable {
     let id: Int
     let name: String
-    let type: String // movie / series / photo / shoot / mixed
+    let type: String // movie / series / photo / mixed
     var itemCount: Int = 0
     var albumCount: Int? = nil
     var thumbURL: URL? = nil
@@ -232,7 +229,6 @@ struct Library: Identifiable, Codable, Sendable, Hashable {
         case "movie": return "电影"
         case "tv", "series": return "剧集"
         case "photo": return "相册"
-        case "shoot": return "拍摄集"
         default: return type
         }
     }
@@ -295,10 +291,9 @@ struct HomeStats: Sendable {
     var movieCount: Int = 0
     var seriesCount: Int = 0
     var photoCount: Int = 0
-    var shootCount: Int = 0
     var shortCount: Int = 0
 
-    var totalContent: Int { movieCount + seriesCount + photoCount + shootCount }
+    var totalContent: Int { movieCount + seriesCount + photoCount }
 }
 
 // MARK: - 照片
@@ -1268,117 +1263,6 @@ struct MediaDetail: Identifiable, Decodable, Sendable {
     }
 }
 
-// MARK: - 拍摄集
-struct Shoot: Identifiable, Codable, Sendable, Hashable {
-    let id: Int
-    var libraryId: Int = 0
-    var folderName: String = ""
-    var displayName: String? = nil
-    var hasCover: Bool = false
-    var videoCount: Int = 0
-    var photoCount: Int = 0
-    var totalSize: Int64 = 0
-    /// ⚠️ SQLite 里 total_duration 是 REAL（ffprobe 给的是浮点秒），
-    /// 必须按 Double 解码 —— 声明成 Int 会因为 893.74 这种值直接 typeMismatch 整页挂掉
-    var totalDuration: Double = 0
-    var folderMtime: Int64 = 0
-
-    var title: String { displayName?.isEmpty == false ? displayName! : folderName }
-
-    /// 尾部统计标记，如 "[104P1V-5.11G]" / "[104P+1V／7.44GB]"（原样含方括号）。
-    /// 站点目录名把张数/视频数/体积塞在末尾，摘出来当徽标比混在标题里好读。
-    /// 没有（或不是以 [ 开头的尾部标记）返回 nil。
-    var specTag: String? {
-        let t = title
-        // 尾部标记：以 ] 结尾，且最后一个 [ 在它前面
-        guard t.hasSuffix("]"),
-              let close = t.lastIndex(of: "]"),
-              let open = t.lastIndex(of: "["),
-              open < close else { return nil }
-        return String(t[open...close])
-    }
-
-    /// 展示用标题：站点目录名直接上屏很难读
-    ///（"www.98T.la@森萝财团 写真 内部 蜃楼-02E4K [104P1V-5.11G]"）。
-    /// 剥掉「站点@」前缀 + 尾部统计标记，剩下的才是内容名。
-    /// 用户手动改过名（display_name）的不受影响：规则很保守，不带 @ / 不带
-    /// 尾部方括号的名字原样返回。
-    var displayTitle: String {
-        var name = title.strippingSitePrefix
-        if let tag = specTag {
-            name = name.replacingOccurrences(of: tag, with: "")
-        }
-        return name.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case id
-        case libraryId = "library_id"
-        case folderName = "folder_name"
-        case displayName = "display_name"
-        case hasCover = "has_cover"
-        case videoCount = "video_count"
-        case photoCount = "photo_count"
-        case totalSize = "total_size"
-        case totalDuration = "total_duration"
-        case folderMtime = "folder_mtime"
-    }
-}
-
-struct ShootFile: Identifiable, Codable, Sendable, Hashable {
-    let id: Int
-    var shootId: Int = 0
-    var libraryId: Int = 0
-    var filename: String = ""
-    var fileSize: Int64 = 0
-    var mediaType: String = "video"  // video / image
-    var width: Int? = nil
-    var height: Int? = nil
-    /// ⚠️ 同 Shoot.totalDuration：shoot_files.duration 在库里 100% 是 REAL，按 Double 解
-    var duration: Double? = nil
-    var hasThumb: Int = 0
-
-    var isVideo: Bool { mediaType == "video" }
-    var sizeText: String {
-        if fileSize < 1024 { return "\(fileSize) B" }
-        if fileSize < 1024*1024 { return String(format: "%.1f KB", Double(fileSize)/1024) }
-        if fileSize < 1024*1024*1024 { return String(format: "%.1f MB", Double(fileSize)/(1024*1024)) }
-        return String(format: "%.2f GB", Double(fileSize)/(1024*1024*1024))
-    }
-    var durationText: String? {
-        guard let d = duration, d > 0 else { return nil }
-        let t = Int(d)
-        let h = t/3600, m = (t%3600)/60, s = t%60
-        return h > 0 ? "\(h):\(String(format: "%02d:%02d", m, s))" : "\(m):\(String(format: "%02d", s))"
-    }
-    var dimensionText: String? {
-        guard let w = width, let h = height, w > 0, h > 0 else { return nil }
-        return "\(w)×\(h)"
-    }
-    /// 卡片标题 / 播放器标题：剥掉站点目录名前缀、去掉扩展名。
-    /// 原来这串逻辑内联在 ShootDetailView 里；加了 VidHub 外播后有两处要用
-    /// （内置播放 + 外播的 filename），提到模型上免得两处走偏。
-    var displayName: String {
-        filename.strippingSitePrefix.deletingPathExtension
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case id
-        case shootId = "shoot_id"
-        case libraryId = "library_id"
-        case filename
-        case fileSize = "file_size"
-        case mediaType = "media_type"
-        case width, height, duration
-        case hasThumb = "has_thumb"
-    }
-}
-
-struct ShootDetail: Decodable, Sendable {
-    let shoot: Shoot
-    let videos: [ShootFile]
-}
-
 // MARK: - 短视频
 struct ShortVideo: Identifiable, Codable, Sendable, Hashable {
     let id: Int
@@ -1386,7 +1270,7 @@ struct ShortVideo: Identifiable, Codable, Sendable, Hashable {
     var fileName: String = ""
     var title: String? = nil
     var year: Int? = nil
-    /// ⚠️ 同 Shoot.totalDuration：short_videos.duration 在库里 100% 是 REAL，按 Double 解
+    /// ⚠️ short_videos.duration 在库里 100% 是 REAL，按 Double 解
     var duration: Double? = nil
     var fileSize: Int64 = 0
     var width: Int? = nil
@@ -1399,8 +1283,7 @@ struct ShortVideo: Identifiable, Codable, Sendable, Hashable {
     var hasPreview: Bool = false
 
     /// 展示层统一剥掉「站点@」水印（`WWW.98T.LA@…`、`www.98t.la@…` 都命中）：
-    /// 复用已有的 `String.strippingSitePrefix`（规则见 ShootDetailView.swift，
-    /// 与影片 / 拍摄集标题同一套），不另写一套判据。
+    /// 复用已有的 `String.strippingSitePrefix`（和影视标题同一套规则），不另写一套判据。
     /// ⚠️ fileName / filePath 保留原值：播放路径、related 同目录匹配、搜索都依赖它们。
     static func displayName(_ raw: String) -> String { raw.strippingSitePrefix }
 
@@ -1457,12 +1340,11 @@ struct ShortPool: Identifiable, Codable, Sendable, Hashable {
 }
 
 // MARK: - 搜索结果项
-// 对应 /api/search 返回的单条；type 区分 movie/tv/album/photo/shoot
+// 对应 /api/search 返回的单条；type 区分 movie/tv/album/photo
 //
 // ⚠️⚠️ 后端各类型返回的字段差别极大，解码必须全部容错：
 //   · media（movie/tv）→ 有 title / type / year / rating / poster_image_id
 //   · 相册 photo_albums   → 只有 folder_name / display_name / cover_photo_id / photo_count，**没有 title、type**
-//   · 拍摄集 shoots       → 同上，也没有 title、type
 //   · 照片（Meili / LIKE）→ 只有 file_name / folder_path / has_thumb / album_id，**没有 title、type**
 // 用自动合成的 init(from:) 时，任何一个缺失的非 Optional 字段都会让整批结果解码失败
 //（表现为「搜索失败」或结果恒空），所以这里手写 decodeIfPresent 兜底。
@@ -1569,8 +1451,8 @@ struct SearchItem: Identifiable, Codable, Sendable {
 }
 
 // MARK: - 搜索结果 → 浏览页模型
-// 搜索接口只返回一套扁平字段，而四类内容的展示卡（MediaCard / AlbumCard /
-// ShootCard / 照片瀑布流）分别吃 MediaItem / Album / Shoot / Photo。
+// 搜索接口只返回一套扁平字段，而三类内容的展示卡（MediaCard / AlbumCard /
+// 照片瀑布流）分别吃 MediaItem / Album / Photo。
 // 转换集中放在这里，搜索页就能**直接复用浏览页的卡片组件**，
 // 不用再维护一版「搜索专用卡」—— 那正是两边观感分叉的根源。
 extension SearchItem {
@@ -1594,14 +1476,6 @@ extension SearchItem {
         a.coverPhotoId = coverPhotoId
         a.coverPhotoIdPortrait = coverPhotoIdPortrait
         return a
-    }
-
-    func asShoot() -> Shoot {
-        var s = Shoot(id: id)
-        s.folderName = folderName ?? titleText
-        s.displayName = titleText
-        s.libraryId = libraryId ?? 0
-        return s
     }
 }
 
@@ -1646,5 +1520,19 @@ struct SemanticPhotoResult: Identifiable, Decodable, Sendable {
         albumId = try? c.decodeIfPresent(Int.self, forKey: .albumId)
         similarity = try? c.decodeIfPresent(Double.self, forKey: .similarity)
         aestheticScore = try? c.decodeIfPresent(Double.self, forKey: .aestheticScore)
+    }
+}
+
+// MARK: - 字符串清理
+// ⚠️ 原定义在 ShootDetailView.swift，拍摄集下掉删文件时必须把这段搬过来 ——
+// 短视频 ShortVideo.displayName 还在用，不能跟着删。
+extension String {
+    /// 剥掉站点目录名前缀："www.98T.la@蜃楼-02E4K MP4.mp4" → "蜃楼-02E4K MP4.mp4"。
+    /// 规则保守：第一个 @ 左边「含点且不含空格」才剥，正常文案原样返回。
+    var strippingSitePrefix: String {
+        guard let at = firstIndex(of: "@"), at > startIndex else { return self }
+        let prefix = self[startIndex..<at]
+        guard prefix.contains(".") && !prefix.contains(" ") else { return self }
+        return String(self[index(after: at)...])
     }
 }

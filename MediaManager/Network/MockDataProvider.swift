@@ -13,7 +13,6 @@ struct MockDataProvider: DataProviding {
             movieCount: 1284,
             seriesCount: 356,
             photoCount: 20_480,
-            shootCount: 65,
             shortCount: 512
         )
     }
@@ -89,8 +88,6 @@ struct MockDataProvider: DataProviding {
                      position: 1220, duration: 2820, playbackURL: Self.demoHLS),
         UnifiedAsset(id: 3, type: .short, title: "短视频 · 街头掠影", subtitle: "短视频",
                      position: 18, duration: 45, playbackURL: Self.demoHLS),
-        UnifiedAsset(id: 4, type: .shoot, title: "2026-10-02 外景拍摄", subtitle: "拍摄集 · 128 张",
-                     position: 12, duration: 60),
         UnifiedAsset(id: 5, type: .photo, title: "写真 · 京都之秋", subtitle: "相册 · 96 张",
                      position: 24, duration: 120),
         UnifiedAsset(id: 6, type: .media, title: "银翼杀手 2049", subtitle: "电影 · 2h43m",
@@ -105,7 +102,6 @@ struct MockDataProvider: DataProviding {
     static var historyAssets: [UnifiedAsset] {
         Array(resumeAssets.reversed()) + [
             UnifiedAsset(id: 301, type: .photo, title: "写真 · 镰仓高校前", subtitle: "相册 · 64 张"),
-            UnifiedAsset(id: 302, type: .shoot, title: "2026-08-21 旅拍", subtitle: "拍摄集 · 210 张"),
             UnifiedAsset(id: 303, type: .media, title: "降临", subtitle: "电影 · 2016"),
         ]
     }
@@ -114,7 +110,6 @@ struct MockDataProvider: DataProviding {
         UnifiedAsset(id: 101, type: .media, title: "盗梦空间", subtitle: "电影 · 2010"),
         UnifiedAsset(id: 102, type: .media, title: "切尔诺贝利", subtitle: "剧集 · 2019"),
         UnifiedAsset(id: 103, type: .photo, title: "写真 · 北海道", subtitle: "相册 · 214 张"),
-        UnifiedAsset(id: 104, type: .shoot, title: "2026-09-18 棚拍", subtitle: "拍摄集 · 45 张"),
         UnifiedAsset(id: 105, type: .media, title: "搏击俱乐部", subtitle: "电影 · 1999"),
         UnifiedAsset(id: 106, type: .media, title: "黑镜", subtitle: "剧集 · 2011"),
         UnifiedAsset(id: 107, type: .short, title: "短视频 · 海边", subtitle: "短视频"),

@@ -97,28 +97,27 @@ struct SearchView: View {
     enum SearchResultRoute: Hashable {
         case movie(MediaItem)
         case album(Album, Int)
-        case shoot(Shoot)
     }
 
     private var client: APIClient? { AppSession.shared.client }
 
     enum Tab: String, CaseIterable {
-        case all, movie, album, photo, shoot
+        case all, movie, album, photo
 
         var label: String {
             switch self {
             case .all: return "全部"; case .movie: return "影视"
-            case .album: return "相册"; case .photo: return "照片"; case .shoot: return "拍摄集"
+            case .album: return "相册"; case .photo: return "照片"
             }
         }
 
         /// 该 Tab 对应的**后端 type 列表**。
         /// ⚠️ 不能请求 type=all：后端 type=all 是 searchAll，返回的是分组 map
-        ///（`{movie:[...], tv:[...], album:[...], shoot:[...], library:[...]}`），
+        ///（`{movie:[...], tv:[...], album:[...], library:[...]}`），
         /// 既没有 items/total，也不含 photo，按 items 解必然空。跨类型由客户端并发聚合。
         var requestTypes: [String] {
             switch self {
-            case .all: return ["movie", "tv", "album", "photo", "shoot"]
+            case .all: return ["movie", "tv", "album", "photo"]
             case .movie: return ["movie", "tv"]   // 影视 = 电影 + 剧集
             default: return [rawValue]
             }
@@ -127,7 +126,7 @@ struct SearchView: View {
         /// 计数取自 /api/search/totals 的哪些键（影视要 movie+tv；全部要排除 library）
         var totalKeys: [String] {
             switch self {
-            case .all: return ["movie", "tv", "album", "photo", "shoot"]
+            case .all: return ["movie", "tv", "album", "photo"]
             case .movie: return ["movie", "tv"]
             default: return [rawValue]
             }
@@ -231,7 +230,6 @@ struct SearchView: View {
             switch route {
             case .movie(let item): MediaDetailView(media: item)
             case .album(let album, let libID): AlbumPhotosView(album: album, libID: libID)
-            case .shoot(let shoot): ShootDetailView(shoot: shoot)
             }
         }
     }
@@ -609,7 +607,7 @@ struct SearchView: View {
         })
     }
 
-    // MARK: 卡片结果（复用 MediaCard / AlbumCard / ShootCard）
+    // MARK: 卡片结果（复用 MediaCard / AlbumCard）
 
     /// 分组横滑里的卡片宽度：与列表页默认竖版宽度一致（150）
     private static let previewCardWidth: CGFloat = 150
@@ -668,8 +666,6 @@ struct SearchView: View {
                           width: width, landscape: false, showInfo: showInfo)
             }
             .buttonStyle(.plain)
-        case "shoot":
-            ShootCard(shoot: item.asShoot(), client: client) { route(item) }
         case "photo":
             // 兜底：单类型结果里混进照片时不留空白格
             SearchPhotoThumb(photo: makeBadgedPhoto(item), size: width) { route(item) }
@@ -705,7 +701,6 @@ struct SearchView: View {
             case "tv": return "剧集"
             case "album": return "相册"
             case "photo": return "照片"
-            case "shoot": return "拍摄集"
             default: return "其他"
             }
         }
@@ -713,7 +708,7 @@ struct SearchView: View {
 
     /// 分组头「查看全部」跳到哪个分类：
     /// · tv 不是 Tab 的 case，「剧集」分组落到「影视」
-    /// ⚠️ 只管**关键词分组**（movie/tv/album/photo/shoot）。语义组不走这里 ——
+    /// ⚠️ 只管**关键词分组**（movie/tv/album/photo）。语义组不走这里 ——
     /// 它有自己的 tab（语义视图），跳照片分类会把语义结果整个丢掉
     private func targetTab(_ section: ResultSection) -> Tab {
         if section.type == "tv" { return .movie }
@@ -724,7 +719,7 @@ struct SearchView: View {
     /// ⚠️ 语义命中的照片**单独成一组，排最后**：它异步回来得慢，
     /// 放最后既不挡前面的结果，也不会在追加时把上面的组顶下去。
     private var sections: [ResultSection] {
-        let order = ["movie", "tv", "album", "photo", "shoot"]
+        let order = ["movie", "tv", "album", "photo"]
         var map: [String: [SearchItem]] = [:]
         for item in results { map[item.type, default: []].append(item) }
         // ⚠️ 显式写 [ResultSection] 和闭包返回类型：闭包里两个语句（guard + return），
@@ -1059,7 +1054,7 @@ struct SearchView: View {
     }
 
     private func route(_ item: SearchItem) {
-        // 各类型都用 Models.swift 里那一份转换（asMediaItem / asAlbum / asShoot），
+        // 各类型都用 Models.swift 里那一份转换（asMediaItem / asAlbum），
         // 卡片和详情拿到的模型完全一致，不会出现「卡片和详情对不上」
         switch item.type {
         case "movie", "series", "tv":
@@ -1072,8 +1067,6 @@ struct SearchView: View {
             // 全局 overlay 挂在 RootView 最外层，盖得住整个 App（含底栏）；
             // 用 fullScreenCover 的话底层页面会被移出窗口层级 → 退出闪白屏。
             openViewer(photos: viewerPhotos, id: item.id)
-        case "shoot":
-            path.append(SearchResultRoute.shoot(item.asShoot()))
         default:
             break
         }

@@ -1,10 +1,10 @@
 import SwiftUI
 
-// MARK: - 媒体库选择页（电影 / 相册 / 拍摄集 共用）
-// 这三个 tab 现在先进来看到「有哪些媒体库」的卡片墙，
+// MARK: - 媒体库选择页（电影 / 相册 共用）
+// 这两个 tab 现在先进来看到「有哪些媒体库」的卡片墙，
 // 点某张库卡片再进该库的具体内容，而不是一进来就铺开全部内容。
 struct LibraryPickerView: View {
-    /// movie / photo / shoot
+    /// movie / photo
     let type: String
 
     @State private var libraries: [Library] = []
@@ -52,7 +52,6 @@ struct LibraryPickerView: View {
         switch type {
         case "movie": return "film"
         case "photo": return "camera"
-        case "shoot": return "photo.on.rectangle.angled"
         default: return "externaldrive"
         }
     }
@@ -111,7 +110,6 @@ private struct LibraryCard: View {
     private var fallbackColors: [Color] {
         switch library.type {
         case "photo": return Theme.placeholderGradient(for: .photo)
-        case "shoot": return Theme.placeholderGradient(for: .shoot)
         default: return Theme.placeholderGradient(for: .media)
         }
     }
@@ -119,7 +117,6 @@ private struct LibraryCard: View {
     private var typeIcon: String {
         switch library.type {
         case "photo": return "camera"
-        case "shoot": return "photo.on.rectangle.angled"
         default: return "film"
         }
     }
@@ -127,7 +124,6 @@ private struct LibraryCard: View {
     private var countText: String {
         switch library.type {
         case "photo": return "\(library.itemCount) 张照片"
-        case "shoot": return "\(library.itemCount) 个拍摄集"
         default: return "\(library.itemCount) 部"
         }
     }

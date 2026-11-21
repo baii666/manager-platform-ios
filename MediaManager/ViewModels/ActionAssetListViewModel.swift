@@ -2,14 +2,14 @@ import Foundation
 
 // MARK: - 收藏 / 观看记录全量列表
 // 「我的」tab 里的横滑行只放一屏，点「查看全部」进来翻全量。
-// 走统一行为层 GET /api/actions/list?action=…&page=&size=，四类内容混排。
+// 走统一行为层 GET /api/actions/list?action=…&page=&size=，三类内容混排。
 //
 // 后端契约（task-service/internal/modules/unifiedactions/api.go · hList）：
 //   GET /api/actions/list?action=favorite|history&type=all&page=1&size=60
 //   → { items: [{type,id,title,subtitle,cover_url,backdrop_url,path,duration,at}],
 //       total, page, size }
 //   · action 只有 favorite / history 两种，写别的会静默按 favorite 处理
-//   · type=all 展开成 media/photo/short/shoot 四类（AllTypes()），与 AssetType 一一对应
+//   · type=all 展开成 media/photo/short 三类（AllTypes()），与 AssetType 一一对应
 //   · size 上限 200，越界回落到 30；total 是**全部**条数不是本页条数
 //   · ⚠️ 与 /api/actions/resume 的关键差别：list **不返回 position**。
 //     所以这里的条目没有播放进度（asset.progress 恒为 0），点进去从头播 ——
