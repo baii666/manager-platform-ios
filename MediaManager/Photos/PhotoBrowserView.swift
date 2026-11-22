@@ -127,8 +127,10 @@ struct CloudBrowserView: View {
                                         PhotoViewerPresenter.shared.updatePhotos(vm.imagePhotos)
                                     }
                                 }
-                            },
-                            onReachEnd: { Task { await vm.loadMore() } }
+                            }
+                            // 🔴 不接 onReachEnd：fitsContent 模式下所有 cell 都在 bounds 内、
+                            // willDisplay 会在 reload 时一次性全触发 → 连锁翻页直到拉完整个库
+                            // （3.2 万张），又慢又乱。翻页只走下方「加载更多」按钮，用户可控。
                         )
                     }
                     if vm.filter != "image" && !vm.videoItems.isEmpty {
@@ -234,6 +236,10 @@ final class CloudBrowserViewModel: ObservableObject {
     private let client: APIClient?
     private let pageSize = 100
     private var total = 0
+    /// 🔴 请求代次：切 tab/搜索/下拉刷新都会 reset 并 +1。旧请求返回时若代次已变，
+    /// 结果直接丢弃——否则「先切图片再切回全部」会把上一次的残页 append 进新列表，
+    /// 表现为排序错乱 + 内容混杂（实测必现）。
+    private var epoch = 0
 
     init(client: APIClient? = nil) {
         self.client = client ?? AppSession.shared.client
@@ -269,15 +275,23 @@ final class CloudBrowserViewModel: ObservableObject {
     }
 
     private func load(reset: Bool) async {
-        if reset { items = []; total = 0; hasMore = true; error = "" }
-        guard !isLoading, hasMore else { return }
+        if reset {
+            epoch += 1
+            items = []; total = 0; hasMore = true; error = ""
+            isLoading = false   // 强制放开：切 tab 时旧请求还在飞，不能让它挡住新一轮
+        }
+        let myEpoch = epoch
+        guard hasMore else { return }
+        // 翻页（非 reset）才需要 isLoading 去重；reset 已经靠 epoch 作废了旧请求
+        if !reset && isLoading { return }
         guard let client else { error = "未连接服务器"; hasMore = false; return }
         isLoading = true
-        defer { isLoading = false }
+        defer { if myEpoch == epoch { isLoading = false } }
         do {
             let resp = try await client.fetchCloudItems(
                 type: filter, q: query.isEmpty ? nil : query,
                 limit: pageSize, offset: items.count)
+            guard myEpoch == epoch else { return }   // 代次已变：丢弃旧 tab 的残页
             if resp.ok || !resp.items.isEmpty {
                 total = resp.total
                 items.append(contentsOf: resp.items)
@@ -287,6 +301,7 @@ final class CloudBrowserViewModel: ObservableObject {
                 hasMore = false
             }
         } catch {
+            guard myEpoch == epoch else { return }
             self.error = error.localizedDescription
             hasMore = false
         }
