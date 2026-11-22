@@ -129,8 +129,9 @@ final class KSPlaybackBridge: NSObject {
         }
 
         // 就绪后采集一次音轨：回吐给 UI，并自动避开纯音乐轨。
-        // 必须等 duration 有效（≈tracks 已就绪）再做，太早 tracks 还是空的。
-        if !audioTracksHandled, total.isFinite, total > 0 {
+        // 用 tracks 是否就绪作判据，不再等 duration——部分片源 duration 一直无效，
+        // 旧判据会导致音轨永远采不到、UI 上的「音轨」按钮因此不出现。
+        if !audioTracksHandled, !player.tracks(mediaType: .audio).isEmpty {
             audioTracksHandled = true
             collectAudioTracks(player)
         }

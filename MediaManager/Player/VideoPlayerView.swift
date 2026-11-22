@@ -553,8 +553,8 @@ struct VideoPlayerView: View {
                 if faceProbeMedium != nil, faceProbeMediaID != nil, !usesKSPlayer {
                     faceProbeButton
                 }
-                // 音轨切换独立按钮：仅 KS 内核 + 多音轨时出现，点击弹自绘毛玻璃面板。
-                if engine.usesKSPlayer, engine.audioTracks.count > 1 {
+                // 音轨切换独立按钮：KS 内核下常驻显示（不再依赖音轨数量，避免采集慢时按钮消失）。
+                if engine.usesKSPlayer {
                     audioTrackButton
                 }
                 rateMenu
