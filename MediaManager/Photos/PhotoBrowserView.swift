@@ -151,27 +151,12 @@ struct CloudBrowserView: View {
         .navigationTitle("云端浏览器")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    ForEach([("image", "图片"), ("video", "视频")], id: \.0) { key, label in
-                        Button {
-                            vm.setFilter(key)   // 🔴 纯本地过滤，不重新请求
-                        } label: {
-                            if vm.filter == key {
-                                Label(label, systemImage: "checkmark")
-                            } else {
-                                Text(label)
-                            }
-                        }
-                    }
-                } label: {
-                    HStack(spacing: 4) {
-                        Text(vm.filter == "image" ? "图片" : "视频")
-                        Image(systemName: "chevron.down").font(.caption2)
-                    }
-                    .font(.subheadline.weight(.medium))
-                }
+            // 🔴 与相册详情页一致：图片/视频 tab 放系统顶栏正中（principal），
+            // 不是下拉框，也不占内容区一条高度。切换仍是纯本地过滤、零请求。
+            ToolbarItem(placement: .principal) {
+                cloudTabBar
             }
+            .withoutGlass()
         }
         .refreshable { await vm.reload() }   // 🔴 只有下拉才重新请求
         .searchable(text: $vm.query, prompt: "搜索云端文件名")
@@ -182,6 +167,38 @@ struct CloudBrowserView: View {
             PlayerHostView(request: request)
         }
         .task { await vm.loadInitial() }
+    }
+
+    /// 顶栏正中的分段胶囊，样式对齐相册详情页（品牌色淡底 + 图标 + 数量）。
+    /// 🔴 字重恒定，避免切换时中文字重变化让胶囊宽度跳动。
+    private var cloudTabBar: some View {
+        HStack(spacing: 8) {
+            ForEach([
+                ("image", "图片", "photo", vm.imageItems.count),
+                ("video", "视频", "film", vm.videoItems.count),
+            ], id: \.0) { key, label, icon, count in
+                Button {
+                    withAnimation(.easeInOut(duration: 0.18)) { vm.setFilter(key) }
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: icon)
+                            .font(.system(size: 12, weight: .semibold))
+                        Text(label)
+                        Text("\(count)")
+                            .font(.caption2).monospacedDigit()
+                            .foregroundStyle(vm.filter == key ? Theme.brand : Color.secondary)
+                    }
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(vm.filter == key ? Theme.brand : Color.secondary)
+                    .padding(.horizontal, 14).padding(.vertical, 7)
+                    .background(vm.filter == key ? Theme.brand.opacity(0.15) : Color.clear,
+                                in: Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+            Spacer(minLength: 0)
+        }
+        .fixedSize(horizontal: true, vertical: false)
     }
 
     private var videoSection: some View {
