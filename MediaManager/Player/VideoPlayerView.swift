@@ -567,6 +567,7 @@ struct VideoPlayerView: View {
                     Button {
                         engine.selectAudioTrack(id: track.id)
                         hud = "音轨：" + (track.name.isEmpty ? track.detail : track.name)
+                        scheduleHudClear()   // 横条 4 秒后自动收起（之前漏了，导致常驻）
                         scheduleHide()
                     } label: {
                         if track.isEnabled {
