@@ -78,7 +78,11 @@ final class KSPlaybackBridge: NSObject {
         // firstPlayerType 只有静态版，必须设在 KSOptions 静态属性上。
         KSOptions.firstPlayerType = KSAVPlayer.self
         KSOptions.secondPlayerType = KSMEPlayer.self
-        options.isLoopPlay = loop
+        // 不交给 KSPlayer 自己循环：两个内核 isLoopPlay=true 时都不置 .finished
+        // （只走 delegate 的 playBack(loopCount:)，而 delegate 为避开 @MainActor 隔离设为 nil），
+        // 轮询就永远抓不到播完 → 短视频自动连播失效。改由下面 poll 检测 .finished 后
+        // 主动 seek(0) 重播，与 AVPlayer 路径行为一致（循环照播，同时通知外层连播）。
+        options.isLoopPlay = false
         options.startPlayRate = rate
         options.registerRemoteControll = false  // 不让 KSPlayer 接管系统控制中心
         if let s = startAt, s.isFinite, s > 0 {
@@ -144,14 +148,14 @@ final class KSPlaybackBridge: NSObject {
             onPlaying?(playing)
         }
 
-        // 播完：loop 交给 KSPlayer 的 isLoopPlay 自己处理，这里只在非循环时通知外层。
+        // 播完：与 AVPlayer 路径对齐——无论是否循环都通知外层（连播靠 onEnd），
+        // 循环时主动 seek(0) 重播（KSPlayer 的 isLoopPlay 已关闭，finished 会如实出现）。
         let finished = player.playbackState == .finished
         if finished && !wasFinished {
             wasFinished = true
-            if !loop {
-                onPlaying?(false)
-                onEnd?()
-            }
+            if !loop { onPlaying?(false) }
+            onEnd?()
+            if loop { seek(to: 0) }
         } else if !finished {
             wasFinished = false
         }

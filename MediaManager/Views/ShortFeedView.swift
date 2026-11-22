@@ -100,7 +100,7 @@ final class ShortFeedControls: ObservableObject {
 // MARK: - 刷流预加载池（地址 + 首帧缓冲）
 // 目标：播当前条时就把「下一条」备好，滑过去零等待。分两层：
 //   1. 地址层：提前解析并缓存 PlaybackTarget。直连 MP4 只是同步拼 URL（零成本）；
-//      非直连容器要开 HLS 会话（服务端会起 ffmpeg），**只给紧邻下一条**开，一次最多一个。
+//      非直连容器要先探一次编码（走统一缓存）才能定内核，**只给紧邻下一条**探，一次最多一个。
 //   2. 缓冲层：PlayerEngine 给离屏页设 preferredForwardBufferDuration + preroll，
 //      AVPlayer 在暂停态也会把首段数据与首帧准备好（见 PlayerEngine）。
 // ⚠️ 旧实现的「±2 窗口」只在 currentIndex 更新后（滚动停稳）才解析地址，等于没提前；
@@ -119,8 +119,8 @@ final class ShortFeedPrefetcher: ObservableObject {
     private var resolved: [Int: PlaybackTarget] = [:]
     /// 正在进行的完整解析（非直连容器要发请求 / 开 HLS 会话），按 id 去重
     private var inflight: [Int: Task<PlaybackTarget?, Never>] = [:]
-    /// 最近一个非直连预解析的 id。快速连滑时旧的会话还没用上就过期了，
-    /// 起新的之前把旧的取消，保证服务端同时最多只有一个为预加载开的转码会话。
+    /// 最近一个非直连预解析的 id。快速连滑时旧解析还没用上就过期了，
+    /// 起新的之前把旧的取消，保证同时最多只有一个为预加载发的探测请求。
     private var hlsInflightID: Int? = nil
 
     /// 当前页一确定就调用。顺序按「下滑方向优先」：下一条 > 下两条 > 上一条 > 上两条。
@@ -973,7 +973,11 @@ private struct ShortFeedPage: View {
                                     showsBottomProgressBar: false,
                                     // 非当前页提前缓冲 10s + 预卷首帧（暂停态、不出声）。
                                     // 成为当前页后 VideoPlayerView 会调回 0（系统默认），省带宽。
-                                    prefetchSeconds: isActive ? 0 : 10)
+                                    prefetchSeconds: isActive ? 0 : 10,
+                                    // 必须按声明顺序补齐中间两个默认参数，才能传最后的内核标志。
+                                    // 不传的话 KS 地址会被 AVPlayer 去解 → 黑屏无声。
+                                    faceProbeMedium: nil, faceProbeMediaID: nil,
+                                    usesKSPlayer: playTarget.usesKSPlayer)
                 } else {
                     placeholder
                 }
@@ -1055,8 +1059,7 @@ private struct ShortFeedPage: View {
             } else {
                 resolved = try await client.resolvePlayback(
                     path: path, startAt: nil, title: video.titleText,
-                    assetType: nil, assetID: nil, knownDuration: video.duration,
-                    allowKSPlayer: false)  // 刷流保持系统内核 + HLS
+                    assetType: nil, assetID: nil, knownDuration: video.duration)
             }
             target = resolved
             // 回填预取池：滑走再滑回来不用重新解析（非直连容器尤其省一次 HLS 会话）
@@ -1068,8 +1071,9 @@ private struct ShortFeedPage: View {
 }
 
 // MARK: - 短视频播放地址解析（共用）
-// 刷流页 ShortFeedPage 与下方关联页 ShortRelatedPlayer 同一套口径：
-// MP4/M4V/MOV 直连零等待，其余走 HLS 会话。
+// 刷流页 ShortFeedPage 与下方关联页 ShortRelatedPlayer 同一套口径，
+// 且与长视频共用 resolvePlayback 分流（统一探测缓存 + KSPlayer 直连）：
+// MP4/M4V/MOV 直连零等待，AVPlayer 解不了的容器/编码自动走 KSPlayer。
 @MainActor
 func resolveShortPlayback(_ video: ShortVideo, path: String, client: APIClient) async throws -> PlaybackTarget {
     if let url = client.streamURL(path: path) {
@@ -1080,8 +1084,7 @@ func resolveShortPlayback(_ video: ShortVideo, path: String, client: APIClient) 
     }
     return try await client.resolvePlayback(
         path: path, startAt: nil, title: video.titleText,
-        assetType: nil, assetID: nil, knownDuration: video.duration,
-        allowKSPlayer: false)  // 刷流保持系统内核 + HLS，与改动前一致
+        assetType: nil, assetID: nil, knownDuration: video.duration)
 }
 
 // MARK: - 同文件夹关联视频页（刷流底栏标题入口）
@@ -1268,7 +1271,9 @@ private struct ShortRelatedPlayer: View {
                                 showsBottomProgressBar: true,
                                 // 短视频也支持检测当前画面人脸（后端按 short_videos 表查路径）
                                 faceProbeMedium: "short_video",
-                                faceProbeMediaID: video.id)
+                                faceProbeMediaID: video.id,
+                                // 内核标志必须透传：KS 直连地址不能交给 AVPlayer 去解
+                                usesKSPlayer: target.usesKSPlayer)
             } else {
                 placeholder
             }

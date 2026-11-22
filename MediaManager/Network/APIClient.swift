@@ -172,16 +172,15 @@ final class APIClient: DataProviding, @unchecked Sendable {
                               knownDuration: knownDuration, sourcePath: path)
     }
 
-    /// 决定播放方式并给出最终地址。非直连容器要发两次请求（探测 + 开会话），所以是 async。
+    /// 决定播放方式并给出最终地址。短视频与长视频共用这一套分流，不再有 allowKSPlayer 开关：
+    /// 探测结果走统一缓存（客户端 5min + 服务端 playback_info 落库），
+    /// AVPlayer 解不了的容器/编码统一交给 KSPlayer 直连，不再为刷流单独开 HLS 会话烧 CPU。
     func resolvePlayback(path: String,
                          startAt: Double?,
                          title: String,
                          assetType: String?,
                          assetID: Int?,
-                         knownDuration: Double? = nil,
-                         // 短视频刷流强依赖 AVPlayer 语义（预取/连播/PiP），不走 KS 分流。
-                         // 传 false 时保留改动前的 HLS 行为，零回归。
-                         allowKSPlayer: Bool = true) async throws -> PlaybackTarget {
+                         knownDuration: Double? = nil) async throws -> PlaybackTarget {
         let ext = (path as NSString).pathExtension.lowercased()
 
         let info = try? await playbackInfo(path: path)
@@ -192,8 +191,7 @@ final class APIClient: DataProviding, @unchecked Sendable {
         // AVPlayer 播不了的容器/编码 → KSPlayer(FFmpeg) 直连原始流。
         // 不再开 HLS 会话烧服务端 CPU，也绕开了 hev1 / 开放 GOP seek 黑屏等一堆封装坑。
         // KSPlayer 解不了时引擎会报 failure（界面有错误面板），此版不做 HLS 兜底。
-        if allowKSPlayer,
-           Self.shouldUseKSPlayer(ext: ext, codec: codec, tag: tag),
+        if Self.shouldUseKSPlayer(ext: ext, codec: codec, tag: tag),
            let url = ksStreamURL(path: path) {
             return PlaybackTarget(url: url, title: title, assetType: assetType, assetID: assetID,
                                   startAt: startAt ?? 0, timeOffset: 0,
