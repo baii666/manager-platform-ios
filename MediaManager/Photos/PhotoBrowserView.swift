@@ -114,7 +114,7 @@ struct CloudBrowserView: View {
                     // 切 tab 回顶锚点（避免切换后停在半截，也避免哨兵误触发）
                     Color.clear.frame(height: 0).id("cloudTop")
 
-                    if vm.visibleItems.isEmpty && !vm.isLoading && !vm.hasMore {
+                    if vm.items.isEmpty && !vm.isLoading {
                         emptyState
                     } else {
                         if vm.filter == "image" && !vm.imageItems.isEmpty {
@@ -142,13 +142,30 @@ struct CloudBrowserView: View {
                         if vm.isLoading && vm.visibleItems.isEmpty {
                             ProgressView().padding()
                         }
+                        // 🔴 失败凭证：列表非空时错误也要看得见，给一个点一下就重试的入口，
+                        // 不必依赖下拉刷新（超时后用户往往以为「刷新没用了」）。
+                        if !vm.error.isEmpty && !vm.isLoading {
+                            Button {
+                                Task { await vm.retry() }
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "exclamationmark.triangle")
+                                    Text("\(vm.error) · 点击重试")
+                                }
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.bottom, 8)
+                        }
                     }
 
                     // 🔴 自动翻页哨兵：放在内容最底下，滚到才进入可视区触发；
                     // 它不是 PhotoGrid 的 cell，不受 fitsContent 连锁翻页影响。
                     // id 带 items.count：每翻一页哨兵都是新视图 → onAppear 会重新触发，
                     // 这样「视频 tab 当前页一条视频都没有」时也能继续翻，不会卡在空页。
-                    if vm.hasMore {
+                    // 出错时让位给上面的重试按钮，避免自动翻页把错误刷掉。
+                    if vm.hasMore && vm.error.isEmpty {
                         HStack(spacing: 6) {
                             ProgressView()
                             Text("加载更多…")
@@ -256,9 +273,18 @@ struct CloudBrowserView: View {
             if vm.error.isEmpty {
                 Text("在网页端点「同步目录树」后即可在此浏览")
                     .font(.caption2).foregroundStyle(.tertiary)
+            } else {
+                Button {
+                    Task { await vm.retry() }
+                } label: {
+                    Label("重试", systemImage: "arrow.clockwise")
+                        .font(.subheadline).foregroundStyle(Theme.brand)
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 4)
             }
         }
-        .padding(.top, 80)
+        .frame(maxWidth: .infinity, minHeight: 320)
     }
 
     private func startPlay(_ item: CloudItem) {
@@ -304,7 +330,8 @@ final class CloudBrowserViewModel: ObservableObject {
     }
 
     func loadInitial() async {
-        guard items.isEmpty, error.isEmpty else { return }
+        // 🔴 不再被 error 挡住：超时后 error 非空，切 tab 回来必须能自动重试首屏
+        guard items.isEmpty, !isLoading else { return }
         await load(offset: 0, replace: true)
     }
 
@@ -343,6 +370,14 @@ final class CloudBrowserViewModel: ObservableObject {
         await load(offset: items.count, replace: false)
     }
 
+    /// 错误后的显式重试：清掉 error 再从 0 拉一次。
+    /// 🔴 不清空 items（保留旧列表不白屏），靠 replace 整体替换；
+    /// error 一清，底部哨兵重新出现，又能继续自动翻页。
+    func retry() async {
+        error = ""
+        await load(offset: 0, replace: true)
+    }
+
     /// offset=0+replace=true → 刷新（保留旧数据直到新数据到）；否则翻页 append。
     /// type 恒为 nil：一次拉混合数据，图片/视频本地分组，切 tab 才零请求。
     private func load(offset: Int, replace: Bool) async {
@@ -372,13 +407,14 @@ final class CloudBrowserViewModel: ObservableObject {
                 hasMore = (replace ? resp.items.count : items.count) < total
                 error = ""
             } else {
+                // 真的查完了才知道到底有没有下一页；这里仍有数据，保持 hasMore 不动
                 error = resp.error ?? "查询失败"
-                if replace { hasMore = false }
             }
         } catch {
             guard myEpoch == epoch else { return }
+            // 🔴 超时/网络失败 ≠ 数据加载完：绝不能动 hasMore，否则底部哨兵消失，
+            // 之后下拉刷新就算成功也只有一页、再也没法自动翻页。只记错误，留重试入口。
             self.error = error.localizedDescription
-            if replace { hasMore = false }
         }
     }
 }
