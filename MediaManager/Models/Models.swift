@@ -139,6 +139,10 @@ struct PlaybackTarget: Identifiable, Sendable {
     let knownDuration: Double?
     /// 源文件路径。画面解不出来时要拿它去服务端开重编码会话
     let sourcePath: String?
+    /// 是否走 KSPlayer(FFmpeg) 内核。MKV/AVI/WMV 等 AVPlayer 不认的容器、
+    /// 以及 hev1/DTS/AC3 等解不了的编码走 KSPlayer 直连原始流；其余走系统硬解。
+    /// ⚠️ 带默认值：既有构造点全部不用改，只有 KS 分流那一处显式传 true。
+    let usesKSPlayer: Bool = false
 }
 
 // decodeIfPresent 再包 try? 会产生 String?? / Double??（双层可选），

@@ -81,6 +81,10 @@ struct VideoPlayerView: View {
     /// 追加在末尾才不影响既有调用点（见 prefetchSeconds 注释）。
     var faceProbeMedium: String? = nil
     var faceProbeMediaID: Int? = nil
+    /// 是否走 KSPlayer(FFmpeg) 内核。由 PlaybackTarget 按容器/编码决定后传入。
+    /// ⚠️ 放在末尾带默认值：既有调用点全部不受影响。画面层据此选渲染 view，
+    ///    必须在 view 构造时就知道（makeUIView 早于 onAppear 的 setup）。
+    var usesKSPlayer: Bool = false
 
     @StateObject private var engine = PlayerEngine()
     @Environment(\.dismiss) private var dismiss
@@ -149,7 +153,11 @@ struct VideoPlayerView: View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            PlayerLayerView(engine: engine)
+            if usesKSPlayer {
+                KSPlayerLayerView(engine: engine)
+            } else {
+                PlayerLayerView(engine: engine)
+            }
 
             // 必须真实存在于视图层级，MPVolumeView 才会创建内部 slider
             VolumeHijack()
@@ -530,8 +538,9 @@ struct VideoPlayerView: View {
                 Spacer()
                 playerButton("gobackward.10") { seekTo(absolute: displayPosition - 10) }
                 playerButton("goforward.10") { seekTo(absolute: displayPosition + 10) }
-                // 人脸检测：与快进/倍速同排，所有接入 faceProbe 参数的播放器都能点
-                if faceProbeMedium != nil, faceProbeMediaID != nil {
+                // 人脸检测：与快进/倍速同排，所有接入 faceProbe 参数的播放器都能点。
+                // ⚠️ KSPlayer(FFmpeg) 内核没有 AVPlayer/AVAsset，抓帧接口用不了 → 隐藏按钮。
+                if faceProbeMedium != nil, faceProbeMediaID != nil, !usesKSPlayer {
                     faceProbeButton
                 }
                 rateMenu
@@ -583,7 +592,7 @@ struct VideoPlayerView: View {
         configureAudioSession()
         engine.prefetchSeconds = prefetchSeconds
         engine.load(url: activeURL, startAt: fallback?.startAt ?? startPosition,
-                    autoplay: autoplay, loop: loop)
+                    autoplay: autoplay, loop: loop, usesKSPlayer: usesKSPlayer)
         scheduleHide()
         startProgressReporting()
     }
@@ -841,6 +850,32 @@ private struct PlayerLayerView: UIViewRepresentable {
 
     func updateUIView(_ uiView: VideoView, context: Context) {
         uiView.playerLayer.player = engine.player
+    }
+}
+
+// MARK: - KSPlayer 画面承载（FFmpeg 内核）
+// KSPlayer 提供的是纯画面 UIView（无控制栏），挂进来即可复用现有自绘控制层。
+// 这里只做容器：真正的画面 view 由 engine.ksBridge 在 load 后创建并塞进来。
+private struct KSPlayerLayerView: UIViewRepresentable {
+    let engine: PlayerEngine
+
+    final class RenderContainer: UIView {}
+
+    func makeUIView(context: Context) -> RenderContainer {
+        let container = RenderContainer()
+        container.backgroundColor = .black
+        // load 在 onAppear(setup) 里触发，会回调 onRenderViewReady；这里先注册监听。
+        // 若 view 已经载好（重建场景），updateUIView 里也会兜底挂一次。
+        engine.ksBridge.onRenderViewReady = { [weak container, weak engine] in
+            guard let container, let engine else { return }
+            engine.ksBridge.attachRenderView(into: container)
+        }
+        engine.ksBridge.attachRenderView(into: container)
+        return container
+    }
+
+    func updateUIView(_ uiView: RenderContainer, context: Context) {
+        engine.ksBridge.attachRenderView(into: uiView)
     }
 }
 

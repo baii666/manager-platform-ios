@@ -37,6 +37,17 @@ final class PlayerEngine: ObservableObject {
     /// ⚠️ 只影响离屏页；成为当前页时由 setPrefetchBuffer(0) 调回系统默认，省带宽。
     var prefetchSeconds: Double = 0
 
+    /// === 渐进式双内核 ===
+    /// true = 走 KSPlayer（FFmpeg 兜底内核），用于 AVPlayer 播不了的容器/编码。
+    /// false = 走系统 AVPlayer（默认，VideoToolbox 硬解），行为与改动前完全一致。
+    /// 由 VideoPlayerView 在 setup 时按 PlaybackTarget.usesKSPlayer 设置。
+    private(set) var usesKSPlayer = false
+    /// KSPlayer 桥接：与 AVPlayer 平行的第二内核，只在 usesKSPlayer 时使用。
+    /// 对外状态（isPlaying/currentTime/duration…）由它的回调写回本引擎的同名 @Published，
+    /// 这样 UI 层完全不感知内核差异。
+    let ksBridge = KSPlaybackBridge()
+    private var ksBindings: KSPlaybackBridge? = nil  // 强持有，确保回调闭包存活
+
     /// 用户正在拖动进度条 / 快进手势中。为 true 时屏蔽时间回调，避免进度条回跳。
     var isScrubbing = false
 
@@ -78,7 +89,11 @@ final class PlayerEngine: ObservableObject {
     var pipController: AVPictureInPictureController?
 
     var isPiPSupported: Bool {
-        AVPictureInPictureController.isPictureInPictureSupported()
+        // KSPlayer(FFmpeg 软解) 路径走的是 Metal 渲染 view，不是 AVPlayerLayer，
+        // AVPictureInPictureController 无法接管 → 让 UI 自动隐藏 PiP 按钮。
+        // 这些片源本就是全屏长视频，PiP 损失可接受。
+        if usesKSPlayer { return false }
+        return AVPictureInPictureController.isPictureInPictureSupported()
     }
 
     var isPiPActive: Bool {
@@ -98,7 +113,8 @@ final class PlayerEngine: ObservableObject {
 
     // MARK: 装载
 
-    func load(url: URL, startAt: Double?, autoplay: Bool = true, loop: Bool = false) {
+    func load(url: URL, startAt: Double?, autoplay: Bool = true, loop: Bool = false,
+              usesKSPlayer: Bool = false) {
         teardown()
         currentURL = url
         self.loop = loop
@@ -107,6 +123,15 @@ final class PlayerEngine: ObservableObject {
         videoTrackDisabled = false
         trackCheckWork?.cancel()
         isReady = false
+
+        // 渐进分流：MKV/HEVC/DTS 等走 KSPlayer(FFmpeg)，其余走系统 AVPlayer。
+        if usesKSPlayer {
+            self.usesKSPlayer = true
+            bindKS(loop: loop, rate: rate)
+            ksBridge.load(url: url, startAt: startAt, autoplay: autoplay, loop: loop, rate: rate)
+            return
+        }
+
         let item = AVPlayerItem(url: url)
         if prefetchSeconds > 0 {
             // 暂停态也要把前向缓冲填到目标长度（0 = 系统默认，通常只有几秒）。
@@ -142,7 +167,8 @@ final class PlayerEngine: ObservableObject {
     /// 失败后重试：默认从断点续播
     func retry() {
         guard let url = currentURL else { return }
-        load(url: url, startAt: currentTime > 1 ? currentTime : nil, loop: loop)
+        load(url: url, startAt: currentTime > 1 ? currentTime : nil, loop: loop,
+             usesKSPlayer: usesKSPlayer)
     }
 
     /// tracks 不一定在 readyToPlay 那一刻就填充好，所以要复查一次 ——
@@ -188,6 +214,50 @@ final class PlayerEngine: ObservableObject {
         bufferObservation?.invalidate(); bufferObservation = nil
         playStateObservation?.invalidate(); playStateObservation = nil
         player.pause()
+        // KSPlayer 内核：清掉回调绑定并停机。ksBridge 本身常驻（画面层要挂它的 view），
+        // 但回调闭包每次 load 重绑，避免持有旧的 self 状态。
+        ksBindings = nil
+        ksBridge.teardown()
+        usesKSPlayer = false
+    }
+
+    /// 把 KSPlayer 桥接的状态回调接到本引擎的 @Published 上。
+    /// UI 只读这些 @Published，所以完全不用改控制栏/进度条/手势那套代码。
+    private func bindKS(loop: Bool, rate: Float) {
+        // KSPlayer 每 0.1s 报一次时间；这里节流到和 AVPlayer 一致的 0.5s，
+        // 并沿用 isScrubbing 屏蔽逻辑，避免拖进度条时回跳。
+        var lastTick = Date.distantPast
+        ksBridge.onTime = { [weak self] current, total in
+            guard let self else { return }
+            let now = Date()
+            guard now.timeIntervalSince(lastTick) >= 0.5 else { return }
+            lastTick = now
+            if self.isScrubbing { return }
+            if total.isFinite, total > 0 { self.duration = total }
+            self.currentTime = current
+        }
+        ksBridge.onReady = { [weak self] total in
+            guard let self else { return }
+            self.isReady = true
+            if total.isFinite, total > 0 { self.duration = total }
+            // 续播位置已由 KSOptions.startPlayTime 处理，这里不再重复 seek
+        }
+        ksBridge.onPlaying = { [weak self] playing in
+            self?.isPlaying = playing
+        }
+        ksBridge.onBuffered = { [weak self] seconds in
+            self?.loadedRange = seconds
+        }
+        ksBridge.onFailure = { [weak self] msg in
+            self?.failure = msg
+        }
+        ksBridge.onEnd = { [weak self] in
+            guard let self, self.loop else { return }
+            self.onPlaybackEnd?()
+        }
+        // 强持有桥接，确保闭包存活（ksBridge 本身是 let 常驻，这里主要是语义清晰）。
+        ksBindings = ksBridge
+        self.rate = rate
     }
 
     // MARK: KVO
@@ -270,10 +340,12 @@ final class PlayerEngine: ObservableObject {
     }
 
     func play() {
+        if usesKSPlayer { ksBridge.play(); return }
         player.rate = rate
     }
 
     func pause() {
+        if usesKSPlayer { ksBridge.pause(); return }
         player.pause()
     }
 
@@ -288,6 +360,11 @@ final class PlayerEngine: ObservableObject {
     ///    画面却还是 1x。player.rate > 0 是同步可读的，能覆盖这个窗口。
     func setRate(_ newRate: Float) {
         rate = newRate
+        if usesKSPlayer {
+            // KS 路径下直接设内核速率（无需判断 rate>0：KSMEPlayer 暂停时也能设）
+            ksBridge.setRate(newRate)
+            return
+        }
         guard player.rate > 0 else { return }
         player.rate = newRate
     }
@@ -297,7 +374,7 @@ final class PlayerEngine: ObservableObject {
         guard isPlaying, !isSpeedHolding else { return }
         holdBaseRate = rate
         rate = Self.holdRate
-        player.rate = Self.holdRate
+        if usesKSPlayer { ksBridge.setRate(Self.holdRate) } else { player.rate = Self.holdRate }
         isSpeedHolding = true
     }
 
@@ -305,13 +382,20 @@ final class PlayerEngine: ObservableObject {
     func endSpeedHold() {
         guard isSpeedHolding else { return }
         rate = holdBaseRate
-        if isPlaying { player.rate = holdBaseRate }
+        if isPlaying {
+            if usesKSPlayer { ksBridge.setRate(holdBaseRate) } else { player.rate = holdBaseRate }
+        }
         isSpeedHolding = false
     }
 
     func seek(to seconds: Double) {
         guard seconds.isFinite, seconds >= 0 else { return }
         let target = duration > 0 ? min(seconds, duration) : seconds
+        if usesKSPlayer {
+            ksBridge.seek(to: target)
+            currentTime = target
+            return
+        }
         let time = CMTime(seconds: target, preferredTimescale: 600)
         player.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
             DispatchQueue.main.async { self?.currentTime = target }

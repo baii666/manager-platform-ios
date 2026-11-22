@@ -1055,7 +1055,8 @@ private struct ShortFeedPage: View {
             } else {
                 resolved = try await client.resolvePlayback(
                     path: path, startAt: nil, title: video.titleText,
-                    assetType: nil, assetID: nil, knownDuration: video.duration)
+                    assetType: nil, assetID: nil, knownDuration: video.duration,
+                    allowKSPlayer: false)  // 刷流保持系统内核 + HLS
             }
             target = resolved
             // 回填预取池：滑走再滑回来不用重新解析（非直连容器尤其省一次 HLS 会话）
@@ -1079,7 +1080,8 @@ func resolveShortPlayback(_ video: ShortVideo, path: String, client: APIClient) 
     }
     return try await client.resolvePlayback(
         path: path, startAt: nil, title: video.titleText,
-        assetType: nil, assetID: nil, knownDuration: video.duration)
+        assetType: nil, assetID: nil, knownDuration: video.duration,
+        allowKSPlayer: false)  // 刷流保持系统内核 + HLS，与改动前一致
 }
 
 // MARK: - 同文件夹关联视频页（刷流底栏标题入口）

@@ -102,6 +102,27 @@ final class APIClient: DataProviding, @unchecked Sendable {
         return makeURL("/stream", queryItems: [URLQueryItem(name: "path", value: path)])
     }
 
+    /// KSPlayer 直连原始流地址：不受扩展名过滤，MKV/AVI/TS 等一律放行。
+    /// 网关 /stream 支持 Range(206)，KSPlayer(FFmpeg) 自己解容器/编码，不需要服务端开 HLS 会话。
+    /// 借鉴 VidHubBridge 的做法（VidHub 自带解码器时也是绕开 streamURL 直接拼 /stream）。
+    func ksStreamURL(path: String) -> URL? {
+        guard !path.isEmpty else { return nil }
+        return makeURL("/stream", queryItems: [URLQueryItem(name: "path", value: path)])
+    }
+
+    /// 该片源是否要走 KSPlayer(FFmpeg) 内核。
+    /// 判据（与 VidHub / 现有 HLS 分流同源）：
+    ///   - 容器不是 MP4/M4V/MOV → AVPlayer 不认，走 KSPlayer
+    ///   - MP4 但视频编码是 hev1 tag / 非硬解编码（VC-1、MPEG-2、VP8…）→ 走 KSPlayer
+    /// 探不到编码时按容器判断（宁可让 KSPlayer 兜底，也不退化回烧 CPU 的 HLS）。
+    private static func shouldUseKSPlayer(ext: String, codec: String, tag: String) -> Bool {
+        if !directPlayExts.contains(ext) { return true }
+        if tag == "hev1" { return true }
+        if codec.isEmpty { return false }  // 探不到就信容器，MP4 走系统
+        // iPad 硬解吃得下的编码保持系统路径；其余交给 FFmpeg 软解
+        return !nativeVideoCodecs.contains(codec)
+    }
+
     /// 开一个 HLS 会话拿 m3u8 地址。
     /// 两步：GET /hls 返回 {"sessionId","m3u8Url":"/hls/<id>/index.m3u8"}，
     /// m3u8Url 是**相对路径**，必须拼到 baseURL 上再交给 AVPlayer。
@@ -157,12 +178,28 @@ final class APIClient: DataProviding, @unchecked Sendable {
                          title: String,
                          assetType: String?,
                          assetID: Int?,
-                         knownDuration: Double? = nil) async throws -> PlaybackTarget {
+                         knownDuration: Double? = nil,
+                         // 短视频刷流强依赖 AVPlayer 语义（预取/连播/PiP），不走 KS 分流。
+                         // 传 false 时保留改动前的 HLS 行为，零回归。
+                         allowKSPlayer: Bool = true) async throws -> PlaybackTarget {
         let ext = (path as NSString).pathExtension.lowercased()
 
         let info = try? await playbackInfo(path: path)
         let codec = info?.videoCodec?.lowercased() ?? ""
         let tag = info?.videoTag?.lowercased() ?? ""
+
+        // === 渐进分流 ===
+        // AVPlayer 播不了的容器/编码 → KSPlayer(FFmpeg) 直连原始流。
+        // 不再开 HLS 会话烧服务端 CPU，也绕开了 hev1 / 开放 GOP seek 黑屏等一堆封装坑。
+        // KSPlayer 解不了时引擎会报 failure（界面有错误面板），此版不做 HLS 兜底。
+        if allowKSPlayer,
+           Self.shouldUseKSPlayer(ext: ext, codec: codec, tag: tag),
+           let url = ksStreamURL(path: path) {
+            return PlaybackTarget(url: url, title: title, assetType: assetType, assetID: assetID,
+                                  startAt: startAt ?? 0, timeOffset: 0,
+                                  knownDuration: knownDuration, sourcePath: path,
+                                  usesKSPlayer: true)
+        }
 
         // MP4 里装 HEVC 有两种 sample entry：`hvc1` 才是 Apple 要的那种。
         // ffmpeg / 部分封装工具写出来的是 `hev1`，AVFoundation 碰上会**直接禁用视频轨** ——

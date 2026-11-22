@@ -51,7 +51,8 @@ struct PlayerHostView: View {
                                     assetType: target.assetType ?? request.assetType,
                                     assetID: target.assetID ?? request.assetID,
                                     faceProbeMedium: request.faceProbeMedium,
-                                    faceProbeMediaID: request.faceProbeMediaID)
+                                    faceProbeMediaID: request.faceProbeMediaID,
+                                    usesKSPlayer: target.usesKSPlayer)
                 } else {
                     PreparingOverlay(title: request.title,
                                      error: error,
