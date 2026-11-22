@@ -9,9 +9,11 @@ import KSPlayer
 // 与 PlayerEngine 平行：AVPlayer 播不了的容器（MKV/AVI/WMV）或编码（hev1/DTS/AC3）
 // 走这里，其余继续走 PlayerEngine 的系统硬解。
 //
-// @MainActor：KSPlayerLayerDelegate 本身标注 @MainActor，delegate 回调天然在主线程。
-// Swift 5.9 语言模式下跨隔离调用只是警告，不会编译失败。
-@MainActor
+// ⚠️ 不要给这个类标 @MainActor：PlayerEngine 是非隔离类，从它里面调用本类的
+//    init / load / play / teardown 会触发「main actor-isolated … from nonisolated
+//    context」的硬编译错误。KSPlayerLayerDelegate 协议本身是 @MainActor，
+//    编译器会自动把下面 4 个协议 witness 方法推断为 MainActor 隔离；
+//    delegate 回调本就在主线程，其余方法由 PlayerEngine 在主线程调用，运行时安全。
 final class KSPlaybackBridge: NSObject, KSPlayerLayerDelegate {
 
     // MARK: 对外状态（回吐给 PlayerEngine，转成它那套 @Published）
