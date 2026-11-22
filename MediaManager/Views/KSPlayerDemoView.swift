@@ -70,10 +70,12 @@ private struct KSPlayerContainer: UIViewRepresentable {
 
     func makeUIView(context: Context) -> IOSVideoPlayerView {
         // 让 KSPlayer 在 AVPlayer 解不了时自动切到 FFmpeg 内核（KSMEPlayer）——
-        // 这正是能播 MKV/HEVC/DTS 的关键。一次设置全局生效。
+        // 这正是能播 MKV/HEVC/DTS 的关键。默认值已是 KSMEPlayer.self，这里显式设一次更稳。
         KSOptions.secondPlayerType = KSMEPlayer.self
         let view = IOSVideoPlayerView()
-        view.set(url: url)
+        // ⚠️ 2.3.4 真实签名是 set(url:options:)（README 的单参数写法已过时）；
+        // options 必填，传默认 KSOptions() 即可。
+        view.set(url: url, options: KSOptions())
         return view
     }
 
