@@ -91,8 +91,6 @@ struct VideoPlayerView: View {
 
     @State private var showControls = true
     @State private var showRatePicker = false
-    /// KS 多音轨选择面板（缩小版磨砂卡片）
-    @State private var showAudioTrackPanel = false
 
     // 手势状态
     @State private var axis: DragAxis = .none
@@ -221,11 +219,6 @@ struct VideoPlayerView: View {
             // URL 错 / 404 / 编解码不支持全都表现成「无声无画面」。
             if let failure = engine.failure ?? fallbackError {
                 errorPanel(failure)
-            }
-
-            // 音轨选择面板：盖在最上层，点独立「音轨」按钮弹出
-            if showAudioTrackPanel {
-                audioTrackPanel
             }
         }
         .ignoresSafeArea()
@@ -572,77 +565,32 @@ struct VideoPlayerView: View {
             .background(Capsule().fill(Color.white.opacity(0.12)))
     }
 
-    /// 音轨切换独立按钮：与「倍速」同款白色胶囊，点击弹缩小版磨砂面板。
+    /// 音轨切换：与「倍速」完全同款——就地弹出的系统下拉，白字胶囊按钮。
+    /// 之前用居中磨砂面板，位置不对（用户要求像倍速那样就地弹）。
     private var audioTrackButton: some View {
-        Button { showAudioTrackPanel = true } label: {
+        Menu {
+            ForEach(engine.audioTracks) { track in
+                Button {
+                    engine.selectAudioTrack(id: track.id)
+                    hud = "音轨：" + (track.name.isEmpty ? track.detail : track.name)
+                    scheduleHudClear()
+                    scheduleHide()
+                } label: {
+                    let name = track.name.isEmpty ? track.detail : track.name
+                    if track.isEnabled {
+                        Label(name, systemImage: "checkmark")
+                    } else {
+                        Text(name)
+                    }
+                }
+            }
+        } label: {
             Text("音轨")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.white)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
                 .background(Capsule().fill(Color.white.opacity(0.2)))
-        }
-    }
-
-    /// 音轨选择面板：缩小版磨砂卡片，宽度只包内容(260)，不撑满屏、不遮画面。
-    private var audioTrackPanel: some View {
-        ZStack {
-            // 透明背景：视觉上不遮挡画面，点卡片外空白处收起
-            Color.clear
-                .contentShape(Rectangle())
-                .onTapGesture { showAudioTrackPanel = false }
-
-            VStack(spacing: 0) {
-                HStack {
-                    Text("音轨")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.white)
-                    Spacer()
-                    Button { showAudioTrackPanel = false } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 18))
-                            .foregroundStyle(.white.opacity(0.6))
-                    }
-                }
-                .padding(.horizontal, 14)
-                .padding(.top, 12)
-                .padding(.bottom, 8)
-
-                ForEach(engine.audioTracks) { track in
-                    Button {
-                        engine.selectAudioTrack(id: track.id)
-                        hud = "音轨：" + (track.name.isEmpty ? track.detail : track.name)
-                        scheduleHudClear()
-                        showAudioTrackPanel = false
-                    } label: {
-                        HStack(spacing: 10) {
-                            Image(systemName: track.isEnabled ? "checkmark.circle.fill" : "circle")
-                                .font(.system(size: 18))
-                                .foregroundStyle(track.isEnabled ? Color.accentColor : Color.white.opacity(0.4))
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(track.name.isEmpty ? "音轨 \(track.id)" : track.name)
-                                    .font(.system(size: 14, weight: .medium))
-                                    .foregroundStyle(track.isEnabled ? .white : .white.opacity(0.8))
-                                    .lineLimit(1)
-                                Text(track.detail)
-                                    .font(.system(size: 10))
-                                    .foregroundStyle(.white.opacity(0.55))
-                                    .lineLimit(1)
-                            }
-                            Spacer(minLength: 0)
-                        }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 9)
-                        .background(track.isEnabled ? Color.white.opacity(0.08) : Color.clear)
-                    }
-                    if track.id != engine.audioTracks.last?.id {
-                        Divider().background(Color.white.opacity(0.1)).padding(.leading, 42)
-                    }
-                }
-                .padding(.bottom, 8)
-            }
-            .frame(width: 260)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
     }
 
