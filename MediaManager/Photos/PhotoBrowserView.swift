@@ -202,7 +202,7 @@ struct CloudBrowserView: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: 10).padding(.top, 80) {
+        VStack(spacing: 10) {
             Image(systemName: "cloud").font(.system(size: 44)).foregroundStyle(.secondary)
             Text(vm.error.isEmpty ? "云端库为空或尚未同步" : vm.error)
                 .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
@@ -211,6 +211,7 @@ struct CloudBrowserView: View {
                     .font(.caption2).foregroundStyle(.tertiary)
             }
         }
+        .padding(.top, 80)
     }
 
     private func startPlay(_ item: CloudItem) {
