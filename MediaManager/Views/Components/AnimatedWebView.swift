@@ -16,7 +16,7 @@ struct AnimatedWebView: View {
     @State private var delays: [TimeInterval] = []
     @State private var index = 0
     /// 解码 / 轮播任务，URL 变化或视图消失时取消，避免旧图覆盖新图
-    @State private var loadTask: Task<Void, Never>?
+    @State private var loadTask: Task<DecodedFrames?, Never>?
     @State private var playTask: Task<Void, Never>?
 
     var body: some View {
