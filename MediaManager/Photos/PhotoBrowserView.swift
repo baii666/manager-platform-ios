@@ -107,29 +107,6 @@ struct CloudBrowserView: View {
 
     private let columns = [GridItem(.adaptive(minimum: 110), spacing: 8)]
 
-    /// 把 onScrollGeometryChange 的泛型闭包隔离到独立 ViewModifier：
-    /// 内联在 body 里会让表达式树过重，Swift 类型检查器直接超时。
-    private struct ScrollBottomDetector: ViewModifier {
-        let onReachBottom: () -> Void
-        @State private var wasAtBottom = false
-        func body(content: Content) -> some View {
-            content
-                .onScrollGeometryChange(for: Bool.self) { geo in
-                    geo.contentOffset.y + geo.visibleSize.height >= geo.contentSize.height - 120
-                } action: { _, reached in
-                    // 只在「没到底 → 到底」的边沿触发；翻页后内容变高、回到没到底。
-                    guard reached, !wasAtBottom else { return }
-                    wasAtBottom = reached
-                    onReachBottom()
-                    // 下一帧复位，让「滑到底再滑走再滑回」能再次触发
-                    Task {
-                        try? await Task.sleep(nanoseconds: 200_000_000)
-                        wasAtBottom = false
-                    }
-                }
-        }
-    }
-
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
@@ -157,10 +134,6 @@ struct CloudBrowserView: View {
                 .padding(.horizontal, 10)
                 .padding(.top, 8)
             }
-            // 🔴 自动翻页：按真实的 contentOffset / contentSize 判断触底（iOS 17+）。
-            // 只有「从没到底 → 到底」的边沿才翻一页；翻页后内容变高、回到没到底，
-            // 用户再滑到底才翻下一页 —— 不会像 onAppear 那样连锁，也不会空转。
-            .modifier(ScrollBottomDetector { Task { await vm.loadMore() } })
             .onChange(of: vm.filter) { _ in
                 withAnimation(.easeInOut(duration: 0.18)) {
                     proxy.scrollTo("cloudTop", anchor: .top)
@@ -200,7 +173,7 @@ struct CloudBrowserView: View {
             onSelect: openImage
         )
         // 不接 onReachEnd：fitsContent 下所有 cell 都在 bounds 内会连锁翻页，
-        // 自动翻页统一交给外层 ScrollView 的 onScrollGeometryChange。
+        // 自动翻页统一交给外层 ScrollView 底部哨兵（loadMoreFooter）。
     }
 
     private func openImage(_ photo: Photo) {
@@ -231,6 +204,9 @@ struct CloudBrowserView: View {
         }
     }
 
+    /// 底部哨兵：用 iOS 13+ 的 onAppear 触发自动翻页，避开 onScrollGeometryChange
+    /// （ScrollGeometry 成员在各 SDK 下不一致，编译老报错）。
+    /// 🔴 id 固定、不带 items.count：视图重建不会重新触发 onAppear，杜绝连锁翻页。
     @ViewBuilder
     private var loadMoreFooter: some View {
         if vm.hasMore && vm.error.isEmpty {
@@ -241,6 +217,7 @@ struct CloudBrowserView: View {
             .font(.caption)
             .foregroundStyle(.secondary)
             .padding(.vertical, 12)
+            .onAppear { vm.autoLoadMoreIfNeeded() }
         }
     }
 
@@ -349,6 +326,9 @@ final class CloudBrowserViewModel: ObservableObject {
     /// 🔴 请求代次：下拉刷新/搜索都 +1。旧请求返回时若代次已变直接丢弃，
     /// 避免残页 append 进新列表造成排序错乱。
     private var epoch = 0
+    /// 🔴 自动翻页冷却：每次成功 load 后记时间。哨兵 onAppear 若紧跟在加载完成
+    /// 之后触发（视图重建导致），因间隔太短直接忽略，杜绝「加载完立刻又触发」的连锁。
+    private var lastLoadFinish = Date.distantPast
 
     init(client: APIClient? = nil) {
         self.client = client ?? AppSession.shared.client
@@ -382,6 +362,15 @@ final class CloudBrowserViewModel: ObservableObject {
     func setFilter(_ key: String) {
         guard key != filter else { return }
         filter = key
+    }
+
+    /// 底部哨兵 onAppear 触发。🔴 必须距上次加载完成 > 0.6s 才翻：
+    /// 加载成功后列表重建 → 哨兵若仍在可视区会立刻再 onAppear，这个冷却把它挡掉，
+    /// 用户真的再往下滚、哨兵重新出现才会翻下一页 → 不会连锁。
+    func autoLoadMoreIfNeeded() {
+        guard hasMore, !isLoading, error.isEmpty else { return }
+        guard Date().timeIntervalSince(lastLoadFinish) > 0.6 else { return }
+        Task { await loadMore() }
     }
 
     func loadMore() async {
@@ -427,11 +416,13 @@ final class CloudBrowserViewModel: ObservableObject {
                 // 真的查完了才知道到底有没有下一页；这里仍有数据，保持 hasMore 不动
                 error = resp.error ?? "查询失败"
             }
+            lastLoadFinish = Date()
         } catch {
             guard myEpoch == epoch else { return }
             // 🔴 超时/网络失败 ≠ 数据加载完：绝不能动 hasMore，否则底部哨兵消失，
             // 之后下拉刷新就算成功也只有一页、再也没法自动翻页。只记错误，留重试入口。
             self.error = error.localizedDescription
+            lastLoadFinish = Date()
         }
     }
 }
