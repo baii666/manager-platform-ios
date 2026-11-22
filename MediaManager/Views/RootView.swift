@@ -10,7 +10,7 @@ final class FullscreenOverlay: ObservableObject {
 
 // MARK: - 根 tab（底 bar）
 enum RootTab: String, CaseIterable, Identifiable {
-    case home, library, short, people, mine
+    case home, library, short, cloud, people, mine
 
     var id: String { rawValue }
 
@@ -19,6 +19,7 @@ enum RootTab: String, CaseIterable, Identifiable {
         case .home: return "首页"
         case .library: return "媒体库"
         case .short: return "短视频"
+        case .cloud: return "云端"
         case .people: return "人物"
         case .mine: return "我的"
         }
@@ -29,6 +30,7 @@ enum RootTab: String, CaseIterable, Identifiable {
         case .home: return "house.fill"
         case .library: return "square.grid.2x2.fill"
         case .short: return "play.rectangle.fill"
+        case .cloud: return "cloud.fill"
         // 「我的」已占 person.fill，这里用双人图标区分：一个是「找人的内容」，一个是账号
         case .people: return "person.2.fill"
         case .mine: return "person.fill"
@@ -76,6 +78,11 @@ struct RootView: View {
             NavigationStack { ShortsView() }
                 .opacity(tab == .short ? 1 : 0)
                 .allowsHitTesting(tab == .short)
+
+            // 云端浏览器：cloudlib 本地入库轻表的图片瀑布流 + 视频卡片
+            NavigationStack { CloudBrowserView() }
+                .opacity(tab == .cloud ? 1 : 0)
+                .allowsHitTesting(tab == .cloud)
 
             // 人物：照片人脸聚类 + 影视演员。页面没有标题顶栏，顶栏只放分段。
             NavigationStack(path: $peoplePath) { PeopleHubView() }

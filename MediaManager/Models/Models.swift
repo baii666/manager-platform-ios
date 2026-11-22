@@ -1692,3 +1692,61 @@ extension String {
         return String(self[index(after: at)...])
     }
 }
+
+// MARK: - 云端浏览器（cloudlib 本地入库轻表）
+/// 后端 GET /api/cloudlib/items 的条目。字段稳定，合成 Codable + CodingKeys 即可。
+/// 🔴 size 在目录树快照里恒为 0（快照文本只有路径），别用它做展示判断。
+struct CloudItem: Identifiable, Codable, Sendable {
+    let id: Int
+    var relPath: String = ""
+    var fileName: String = ""
+    var dirPath: String = ""
+    /// Windows 挂载路径 X:\115open\...，缩略图/原图/播放都用它（原样传给后端，不转义）
+    var localPath: String = ""
+    var ext: String = ""
+    var mediaType: String = "other"   // image / video / other
+    var size: Int64 = 0
+    var status: String = "active"
+    var rootKey: String = ""
+    var snapshotFile: String = ""
+
+    var isImage: Bool { mediaType == "image" }
+    var isVideo: Bool { mediaType == "video" }
+
+    /// 剥掉站点水印后的展示名（沿用全局 strippingSitePrefix）
+    var displayName: String { fileName.strippingSitePrefix }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case relPath = "rel_path"
+        case fileName = "file_name"
+        case dirPath = "dir_path"
+        case localPath = "local_path"
+        case ext
+        case mediaType = "media_type"
+        case size
+        case status
+        case rootKey = "root_key"
+        case snapshotFile = "snapshot_file"
+    }
+
+    /// 转成瀑布流 Photo：id 复用 cloudlib id（唯一），thumb/full URL 由 APIClient 填。
+    /// 云端快照无宽高 → aspectRatio 走 Photo 默认 2:3，图片加载后 cell 会按真实比例回填重排。
+    func asPhoto(thumb: URL?, full: URL?) -> Photo {
+        var p = Photo(id: id)
+        p.fileName = fileName
+        p.thumbURL = thumb
+        p.fullURL = full
+        return p
+    }
+}
+
+/// GET /api/cloudlib/items 响应
+struct CloudItemsResponse: Codable, Sendable {
+    var ok: Bool = false
+    var total: Int = 0
+    var limit: Int = 0
+    var offset: Int = 0
+    var items: [CloudItem] = []
+    var error: String? = nil
+}

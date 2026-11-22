@@ -1075,6 +1075,43 @@ final class APIClient: DataProviding, @unchecked Sendable {
         }
         return makeURL("/api/subtitle/extract/subtitle.\(asASS ? "ass" : "srt")", queryItems: items)
     }
+
+    // MARK: - 云端浏览器（cloudlib 本地入库轻表）
+    // 🔴 /thumb 与 /raw 都免认证；这里仍带 token 以兼容将来收紧认证的情况
+    //（外部播放器场景必须带 token，见 albumVideoExternalURL 的注释）。
+
+    /// 云端图片缩略图（后端 /thumb 直接读本地映射文件，零 115）。
+    func cloudThumbURL(path: String) -> URL? {
+        var items = [URLQueryItem(name: "path", value: path),
+                     URLQueryItem(name: "fast", value: "1")]
+        if let tok = AppSession.shared.sessionToken, !tok.isEmpty {
+            items.append(URLQueryItem(name: "token", value: tok))
+        }
+        return makeURL("/thumb", queryItems: items)
+    }
+
+    /// 云端原图 / 视频直链（后端 /raw，Range 流式返回）。
+    func cloudRawURL(path: String) -> URL? {
+        var items = [URLQueryItem(name: "path", value: path)]
+        if let tok = AppSession.shared.sessionToken, !tok.isEmpty {
+            items.append(URLQueryItem(name: "token", value: tok))
+        }
+        return makeURL("/raw", queryItems: items)
+    }
+
+    /// 分页查云端入库条目。type: nil / "image" / "video"；只取 active。
+    func fetchCloudItems(type: String? = nil, dir: String? = nil, q: String? = nil,
+                         limit: Int = 200, offset: Int = 0) async throws -> CloudItemsResponse {
+        var items: [URLQueryItem] = [
+            URLQueryItem(name: "status", value: "active"),
+            URLQueryItem(name: "limit", value: String(limit)),
+            URLQueryItem(name: "offset", value: String(offset)),
+        ]
+        if let type, type != "all" { items.append(URLQueryItem(name: "type", value: type)) }
+        if let dir, !dir.isEmpty { items.append(URLQueryItem(name: "dir", value: dir)) }
+        if let q, !q.isEmpty { items.append(URLQueryItem(name: "q", value: q)) }
+        return try await request("/api/cloudlib/items", queryItems: items)
+    }
 }
 
 /// GET /api/subtitle/streams 的响应

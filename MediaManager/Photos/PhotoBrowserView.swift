@@ -96,3 +96,198 @@ struct PhotoBrowserView: View {
         .appBackground()
     }
 }
+
+// MARK: - 云端浏览器（cloudlib 本地入库轻表：图片瀑布流 + 视频卡片）
+// 数据源 = GET /api/cloudlib/items（读本地 cloud_items，零 115、零 X 盘 stat）。
+// 图片缩略图走 /thumb、原图走 /raw（都免认证）；视频点开复用 PlayerHostView 全套播放链路。
+// 🔴 放在本文件（不新建 .swift）：Windows 无 xcodegen，新建文件要重新 generate 且冲掉手选 Team。
+struct CloudBrowserView: View {
+    @StateObject private var vm = CloudBrowserViewModel()
+    @State private var playRequest: PlaybackRequest?
+
+    private let columns = [GridItem(.adaptive(minimum: 110), spacing: 8)]
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 12) {
+                filterBar
+                if vm.items.isEmpty && !vm.isLoading {
+                    emptyState
+                } else {
+                    if vm.filter != "video" && !vm.imageItems.isEmpty {
+                        PhotoGrid(
+                            photos: vm.imagePhotos,
+                            columns: 3,
+                            fitsContent: true,
+                            onSelect: { photo in
+                                guard let idx = vm.imagePhotos.firstIndex(where: { $0.id == photo.id }) else { return }
+                                PhotoViewerPresenter.shared.show(vm.imagePhotos, index: idx, hasMore: true) {
+                                    Task {
+                                        await vm.loadMore()
+                                        PhotoViewerPresenter.shared.updatePhotos(vm.imagePhotos)
+                                    }
+                                }
+                            },
+                            onReachEnd: { Task { await vm.loadMore() } }
+                        )
+                    }
+                    if vm.filter != "image" && !vm.videoItems.isEmpty {
+                        videoSection
+                    }
+                    if vm.isLoading {
+                        ProgressView().padding()
+                    } else if vm.hasMore {
+                        Button { Task { await vm.loadMore() } } label: {
+                            Text("加载更多").font(.subheadline).foregroundStyle(.secondary)
+                        }
+                        .padding(.bottom, 8)
+                    }
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.top, 8)
+        }
+        .navigationTitle("云端浏览器")
+        .navigationBarTitleDisplayMode(.inline)
+        .searchable(text: $vm.query, prompt: "搜索云端文件名")
+        .onChange(of: vm.query) { _ in Task { await vm.reload() } }
+        .bottomBarClearance()
+        .appBackground()
+        .fullScreenCover(item: $playRequest) { request in
+            PlayerHostView(request: request)
+        }
+        .task { await vm.loadInitial() }
+    }
+
+    private var filterBar: some View {
+        HStack(spacing: 8) {
+            ForEach([("all", "全部"), ("image", "图片"), ("video", "视频")], id: \.0) { key, label in
+                Button { vm.setFilter(key) } label: {
+                    Text(label)
+                        .font(.subheadline.weight(.medium))
+                        .padding(.horizontal, 14).padding(.vertical, 6)
+                        .background(Capsule().fill(vm.filter == key ? Color.white.opacity(0.22) : Color.white.opacity(0.08)))
+                        .foregroundStyle(vm.filter == key ? .primary : .secondary)
+                }
+                .buttonStyle(.plain)
+            }
+            Spacer()
+        }
+    }
+
+    private var videoSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("视频 · \(vm.videoItems.count)").font(.caption).foregroundStyle(.secondary)
+            LazyVGrid(columns: columns, spacing: 8) {
+                ForEach(vm.videoItems) { item in
+                    Button { startPlay(item) } label: {
+                        VStack(spacing: 0) {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.08))
+                                    .aspectRatio(16 / 9, contentMode: .fit)
+                                Image(systemName: "play.circle.fill")
+                                    .font(.system(size: 30))
+                                    .foregroundStyle(.white.opacity(0.7))
+                            }
+                            Text(item.displayName)
+                                .font(.caption2).lineLimit(2).multilineTextAlignment(.leading)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .foregroundStyle(.primary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 10).padding(.top, 80) {
+            Image(systemName: "cloud").font(.system(size: 44)).foregroundStyle(.secondary)
+            Text(vm.error.isEmpty ? "云端库为空或尚未同步" : vm.error)
+                .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
+            if vm.error.isEmpty {
+                Text("在网页端点「同步目录树」后即可在此浏览")
+                    .font(.caption2).foregroundStyle(.tertiary)
+            }
+        }
+    }
+
+    private func startPlay(_ item: CloudItem) {
+        playRequest = PlaybackRequest(path: item.localPath,
+                                      title: item.displayName,
+                                      assetType: nil, assetID: nil,
+                                      startAt: nil, knownDuration: nil)
+    }
+}
+
+@MainActor
+final class CloudBrowserViewModel: ObservableObject {
+    @Published var items: [CloudItem] = []
+    @Published var isLoading = false
+    @Published var hasMore = true
+    @Published var filter: String = "all"
+    @Published var query: String = ""
+    @Published var error: String = ""
+
+    private let client: APIClient?
+    private let pageSize = 100
+    private var total = 0
+
+    init(client: APIClient? = nil) {
+        self.client = client ?? AppSession.shared.client
+    }
+
+    var imageItems: [CloudItem] { items.filter { $0.isImage } }
+    var videoItems: [CloudItem] { items.filter { $0.isVideo } }
+
+    /// 图片转瀑布流 Photo：thumb/full URL 由 APIClient 拼（带 token 兼容收紧认证）
+    var imagePhotos: [Photo] {
+        imageItems.map { item in
+            item.asPhoto(thumb: client?.cloudThumbURL(path: item.localPath),
+                         full: client?.cloudRawURL(path: item.localPath))
+        }
+    }
+
+    func loadInitial() async {
+        guard items.isEmpty, error.isEmpty else { return }
+        await load(reset: true)
+    }
+
+    func reload() async { await load(reset: true) }
+
+    func setFilter(_ key: String) {
+        guard key != filter else { return }
+        filter = key
+        Task { await load(reset: true) }
+    }
+
+    func loadMore() async {
+        guard hasMore, !isLoading else { return }
+        await load(reset: false)
+    }
+
+    private func load(reset: Bool) async {
+        if reset { items = []; total = 0; hasMore = true; error = "" }
+        guard !isLoading, hasMore else { return }
+        guard let client else { error = "未连接服务器"; hasMore = false; return }
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            let resp = try await client.fetchCloudItems(
+                type: filter, q: query.isEmpty ? nil : query,
+                limit: pageSize, offset: items.count)
+            if resp.ok || !resp.items.isEmpty {
+                total = resp.total
+                items.append(contentsOf: resp.items)
+                hasMore = items.count < total
+            } else {
+                error = resp.error ?? "查询失败"
+                hasMore = false
+            }
+        } catch {
+            self.error = error.localizedDescription
+            hasMore = false
+        }
+    }
+}
