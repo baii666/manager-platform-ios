@@ -107,6 +107,29 @@ struct CloudBrowserView: View {
 
     private let columns = [GridItem(.adaptive(minimum: 110), spacing: 8)]
 
+    /// 把 onScrollGeometryChange 的泛型闭包隔离到独立 ViewModifier：
+    /// 内联在 body 里会让表达式树过重，Swift 类型检查器直接超时。
+    private struct ScrollBottomDetector: ViewModifier {
+        let onReachBottom: () -> Void
+        @State private var wasAtBottom = false
+        func body(content: Content) -> some View {
+            content
+                .onScrollGeometryChange(for: Bool.self) { geo in
+                    geo.contentOffset.y + geo.visibleSize.height >= geo.contentSize.height - 120
+                } action: { _, reached in
+                    // 只在「没到底 → 到底」的边沿触发；翻页后内容变高、回到没到底。
+                    guard reached, !wasAtBottom else { return }
+                    wasAtBottom = reached
+                    onReachBottom()
+                    // 下一帧复位，让「滑到底再滑走再滑回」能再次触发
+                    Task {
+                        try? await Task.sleep(nanoseconds: 200_000_000)
+                        wasAtBottom = false
+                    }
+                }
+        }
+    }
+
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
@@ -137,9 +160,7 @@ struct CloudBrowserView: View {
             // 🔴 自动翻页：按真实的 contentOffset / contentSize 判断触底（iOS 17+）。
             // 只有「从没到底 → 到底」的边沿才翻一页；翻页后内容变高、回到没到底，
             // 用户再滑到底才翻下一页 —— 不会像 onAppear 那样连锁，也不会空转。
-            .onScrollGeometryChange(for: Bool.self,
-                                    of: cloudAtBottom,
-                                    action: cloudScrollBottomChanged)
+            .modifier(ScrollBottomDetector { Task { await vm.loadMore() } })
             .onChange(of: vm.filter) { _ in
                 withAnimation(.easeInOut(duration: 0.18)) {
                     proxy.scrollTo("cloudTop", anchor: .top)
@@ -221,15 +242,6 @@ struct CloudBrowserView: View {
             .foregroundStyle(.secondary)
             .padding(.vertical, 12)
         }
-    }
-
-    private func cloudAtBottom(_ geo: ScrollGeometry) -> Bool {
-        geo.contentOffset.y + geo.visibleSize.height >= geo.contentSize.height - 120
-    }
-
-    private func cloudScrollBottomChanged(_ old: Bool, _ new: Bool) {
-        guard new, !old else { return }
-        Task { await vm.loadMore() }
     }
 
     /// 顶栏正中的分段胶囊，样式对齐相册详情页（品牌色淡底 + 图标 + 数量）。
