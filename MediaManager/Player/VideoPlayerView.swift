@@ -91,6 +91,8 @@ struct VideoPlayerView: View {
 
     @State private var showControls = true
     @State private var showRatePicker = false
+    /// KS 多音轨选择面板（自绘毛玻璃卡片，代替系统原生丑下拉）
+    @State private var showAudioTrackPanel = false
 
     // 手势状态
     @State private var axis: DragAxis = .none
@@ -219,6 +221,11 @@ struct VideoPlayerView: View {
             // URL 错 / 404 / 编解码不支持全都表现成「无声无画面」。
             if let failure = engine.failure ?? fallbackError {
                 errorPanel(failure)
+            }
+
+            // 音轨选择面板：盖在最上层，点角标弹出
+            if showAudioTrackPanel {
+                audioTrackPanel
             }
         }
         .ignoresSafeArea()
@@ -537,12 +544,14 @@ struct VideoPlayerView: View {
                     .monospacedDigit()
                 // 播放内核角标：系统路径显示 AVPlayer，KS 路径显示 KSAVPlayer/KSMEPlayer，
                 // 内核自动切换时实时更新。只在内核 HUD 出现时随控制条一起显隐。
-                Text(engine.kernelLabel)
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.55))
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Capsule().fill(Color.white.opacity(0.1)))
+                // 内核角标：KS 内核有多条音轨时可点击，弹出自绘音轨选择面板。
+                if engine.usesKSPlayer, engine.audioTracks.count > 1 {
+                    Button { showAudioTrackPanel = true } label: {
+                        kernelBadgeText
+                    }
+                } else {
+                    kernelBadgeText
+                }
                 Spacer()
                 playerButton("gobackward.10") { seekTo(absolute: displayPosition - 10) }
                 playerButton("goforward.10") { seekTo(absolute: displayPosition + 10) }
@@ -551,41 +560,79 @@ struct VideoPlayerView: View {
                 if faceProbeMedium != nil, faceProbeMediaID != nil, !usesKSPlayer {
                     faceProbeButton
                 }
-                audioTrackMenu
                 rateMenu
             }
         }
     }
 
-    /// 音轨切换菜单。只在 KS 内核、且检测到多条音轨时出现（单轨/系统内核无意义）。
-    /// 视觉与「倍速」胶囊一致：白字 + 白色半透明底，下拉菜单交给系统原生样式。
-    @ViewBuilder
-    private var audioTrackMenu: some View {
-        if engine.usesKSPlayer, engine.audioTracks.count > 1 {
-            Menu {
+    /// 内核角标文字（白字半透明胶囊，全站统一配色）。
+    private var kernelBadgeText: some View {
+        Text(engine.kernelLabel)
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(.white.opacity(0.7))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Capsule().fill(Color.white.opacity(0.12)))
+    }
+
+    /// 音轨选择面板：点内核角标弹出。自绘毛玻璃卡片，避免系统原生 Menu 的丑下拉。
+    private var audioTrackPanel: some View {
+        ZStack {
+            // 遮罩：点空白处收起
+            Color.black.opacity(0.5)
+                .ignoresSafeArea()
+                .onTapGesture { showAudioTrackPanel = false }
+
+            VStack(spacing: 0) {
+                HStack {
+                    Text("音轨")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.white)
+                    Spacer()
+                    Button { showAudioTrackPanel = false } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 20))
+                            .foregroundStyle(.white.opacity(0.6))
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 18)
+                .padding(.bottom, 12)
+
                 ForEach(engine.audioTracks) { track in
                     Button {
                         engine.selectAudioTrack(id: track.id)
                         hud = "音轨：" + (track.name.isEmpty ? track.detail : track.name)
-                        scheduleHudClear()   // 横条 4 秒后自动收起
-                        scheduleHide()
+                        scheduleHudClear()
+                        showAudioTrackPanel = false
                     } label: {
-                        if track.isEnabled {
-                            Label(track.name.isEmpty ? track.detail : track.name,
-                                  systemImage: "checkmark")
-                        } else {
-                            Text(track.name.isEmpty ? track.detail : track.name)
+                        HStack(spacing: 12) {
+                            Image(systemName: track.isEnabled ? "checkmark.circle.fill" : "circle")
+                                .font(.system(size: 20))
+                                .foregroundStyle(track.isEnabled ? Color.accentColor : Color.white.opacity(0.4))
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(track.name.isEmpty ? "音轨 \(track.id)" : track.name)
+                                    .font(.system(size: 15, weight: .medium))
+                                    .foregroundStyle(track.isEnabled ? .white : .white.opacity(0.8))
+                                Text(track.detail)
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.white.opacity(0.55))
+                                    .lineLimit(1)
+                            }
+                            Spacer()
                         }
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 12)
+                        .background(track.isEnabled ? Color.white.opacity(0.08) : Color.clear)
+                    }
+                    if track.id != engine.audioTracks.last?.id {
+                        Divider().background(Color.white.opacity(0.1)).padding(.leading, 52)
                     }
                 }
-            } label: {
-                Text("音轨")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(Capsule().fill(Color.white.opacity(0.2)))
+                .padding(.bottom, 14)
             }
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .padding(.horizontal, 40)
         }
     }
 
