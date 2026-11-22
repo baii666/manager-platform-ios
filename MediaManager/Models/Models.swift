@@ -141,8 +141,23 @@ struct PlaybackTarget: Identifiable, Sendable {
     let sourcePath: String?
     /// 是否走 KSPlayer(FFmpeg) 内核。MKV/AVI/WMV 等 AVPlayer 不认的容器、
     /// 以及 hev1/DTS/AC3 等解不了的编码走 KSPlayer 直连原始流；其余走系统硬解。
-    /// ⚠️ 带默认值：既有构造点全部不用改，只有 KS 分流那一处显式传 true。
-    let usesKSPlayer: Bool = false
+    let usesKSPlayer: Bool
+
+    /// 显式初始化器：编译器合成的成员构造器对带默认值的 `let` 在跨文件调用不稳定，
+    /// 这里明确列出全部参数，usesKSPlayer 带默认值 false，既有构造点无需改动。
+    init(url: URL, title: String, assetType: String?, assetID: Int?,
+         startAt: Double, timeOffset: Double, knownDuration: Double?,
+         sourcePath: String?, usesKSPlayer: Bool = false) {
+        self.url = url
+        self.title = title
+        self.assetType = assetType
+        self.assetID = assetID
+        self.startAt = startAt
+        self.timeOffset = timeOffset
+        self.knownDuration = knownDuration
+        self.sourcePath = sourcePath
+        self.usesKSPlayer = usesKSPlayer
+    }
 }
 
 // decodeIfPresent 再包 try? 会产生 String?? / Double??（双层可选），
