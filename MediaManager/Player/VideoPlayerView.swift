@@ -535,6 +535,14 @@ struct VideoPlayerView: View {
                     .font(.system(size: 13))
                     .foregroundStyle(.white.opacity(0.7))
                     .monospacedDigit()
+                // 播放内核角标：系统路径显示 AVPlayer，KS 路径显示 KSAVPlayer/KSMEPlayer，
+                // 内核自动切换时实时更新。只在内核 HUD 出现时随控制条一起显隐。
+                Text(engine.kernelLabel)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(engine.usesKSPlayer ? Color.cyan : Color.white.opacity(0.55))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Capsule().fill(engine.usesKSPlayer ? Color.cyan.opacity(0.18) : Color.white.opacity(0.1)))
                 Spacer()
                 playerButton("gobackward.10") { seekTo(absolute: displayPosition - 10) }
                 playerButton("goforward.10") { seekTo(absolute: displayPosition + 10) }

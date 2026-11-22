@@ -18,6 +18,11 @@ final class PlayerEngine: ObservableObject {
     @Published private(set) var loadedRange: Double = 0
     @Published private(set) var isReady = false
     @Published private(set) var rate: Float = 1.0
+
+    /// 当前播放内核名，供底部状态栏角标显示。
+    /// 系统路径 = "AVPlayer"；KS 路径 = "KSAVPlayer" / "KSMEPlayer"，
+    /// 内核自动切换（解不了 → FFmpeg）时会实时更新。
+    @Published private(set) var kernelLabel: String = "AVPlayer"
     /// 是否正在「长按倍速」中。供播放器显示角标。
     @Published private(set) var isSpeedHolding = false
     /// 播放失败原因。之前播放器没有任何错误状态，任何失败都是「静默白屏」，无法定位
@@ -127,10 +132,12 @@ final class PlayerEngine: ObservableObject {
         // 渐进分流：MKV/HEVC/DTS 等走 KSPlayer(FFmpeg)，其余走系统 AVPlayer。
         if usesKSPlayer {
             self.usesKSPlayer = true
+            self.kernelLabel = "KSPlayer"  // 轮询拿到真实内核名后会刷新
             bindKS(loop: loop, rate: rate)
             ksBridge.load(url: url, startAt: startAt, autoplay: autoplay, loop: loop, rate: rate)
             return
         }
+        self.kernelLabel = "AVPlayer"
 
         let item = AVPlayerItem(url: url)
         if prefetchSeconds > 0 {
@@ -244,6 +251,10 @@ final class PlayerEngine: ObservableObject {
         }
         ksBridge.onPlaying = { [weak self] playing in
             self?.isPlaying = playing
+        }
+        ksBridge.onKernel = { [weak self] name in
+            guard let self, !name.isEmpty else { return }
+            if self.kernelLabel != name { self.kernelLabel = name }
         }
         ksBridge.onBuffered = { [weak self] seconds in
             self?.loadedRange = seconds

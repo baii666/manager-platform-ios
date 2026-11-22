@@ -30,6 +30,8 @@ final class KSPlaybackBridge: NSObject {
     var onBuffered: ((Double) -> Void)?       // 已缓冲秒数
     var onFailure: ((String) -> Void)?
     var onEnd: (() -> Void)?
+    /// 真实内核名（KSAVPlayer / KSMEPlayer）变化时回吐，供状态栏角标显示。
+    var onKernel: ((String) -> Void)?
     /// load 创建好画面 view 后触发，画面层据此把它挂进容器
     var onRenderViewReady: (() -> Void)?
 
@@ -42,6 +44,7 @@ final class KSPlaybackBridge: NSObject {
     private var readySent = false
     private var lastPlaying: Bool?
     private var wasFinished = false
+    private var lastKernelName = ""
 
     // MARK: 装载
     func load(url: URL, startAt: Double?, autoplay: Bool, loop: Bool, rate: Float) {
@@ -51,6 +54,7 @@ final class KSPlaybackBridge: NSObject {
         readySent = false
         lastPlaying = nil
         wasFinished = false
+        lastKernelName = ""
 
         let options = KSOptions()
         // 双内核：AVPlayer(KSAVPlayer) 优先，解不了自动切 FFmpeg(KSMEPlayer)。
@@ -91,6 +95,14 @@ final class KSPlaybackBridge: NSObject {
     private func poll() {
         guard !isTearingDown, let layer else { return }
         let player = layer.player
+
+        // 内核名变化就回吐：初次是 KSAVPlayer，解不了切到 KSMEPlayer 时这里能捕获到。
+        let name = String(describing: type(of: player))
+        if name != lastKernelName {
+            lastKernelName = name
+            onKernel?(name)
+        }
+
         let total = player.duration
         if total.isFinite, total > 0, !readySent {
             readySent = true
