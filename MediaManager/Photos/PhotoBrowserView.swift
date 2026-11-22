@@ -172,8 +172,15 @@ struct CloudBrowserView: View {
         LazyVGrid(columns: columns, spacing: 8) {
             ForEach(vm.imagePhotos) { photo in
                 Button { openImage(photo) } label: {
-                    CachedAsyncImage(url: photo.thumbURL)
-                        .aspectRatio(2.0 / 3.0, contentMode: .fill)
+                    // 先用 Color.clear 撑出确定的 2:3 盒子，再把图片 fill 进去裁切。
+                    // 直接给 CachedAsyncImage 加 aspectRatio(.fill) 在 LazyVGrid 里
+                    // 会取图片原始像素尺寸撑破 cell → 全部叠在一起。
+                    Color.clear
+                        .aspectRatio(2.0 / 3.0, contentMode: .fit)
+                        .overlay {
+                            CachedAsyncImage(url: photo.thumbURL)
+                                .aspectRatio(contentMode: .fill)
+                        }
                         .clipped()
                         .cornerRadius(6)
                 }
