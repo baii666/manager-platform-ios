@@ -34,7 +34,16 @@ jobs:
             -configuration Debug \
             -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO \
-            build
+            build 2>&1 | tee /tmp/xcodebuild.log | \
+            while IFS= read -r line; do
+              echo "$line"
+              case "$line" in
+                *"error:"*)
+                  msg=$(echo "$line" | sed 's/^.*error:/error:/' | sed 's/%/%25/g; s/\r/%0D/g; s/\n/%0A/g')
+                  echo "::error::$msg"
+                  ;;
+              esac
+            done
 
       # 模拟器的安装阶段才会报 missing CFBundleExecutable / missing bundle id，
       # 编译阶段发现不了，所以这里提前校验产物 plist 的关键键都已解析出真值
