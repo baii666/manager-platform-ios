@@ -165,15 +165,21 @@ struct CloudBrowserView: View {
     // 直接超时（"unable to type-check this expression"，报在 ViewBuilder 的某个 if 行上）。
     // 拆成具名计算属性后编译器分块检查，body 就轻了。
 
+    /// 原生懒加载网格：LazyVGrid 只创建可视区附近的 cell，配合底部哨兵 onAppear
+    /// 自动翻页是 SwiftUI 标准写法，不需要 PhotoGrid 的 fitsContent 套壳和连锁补丁。
+    /// 缩略图走现成的 CachedAsyncImage（同一个 ImageCache，云端 7 天缓存照旧）。
     private var imageGrid: some View {
-        PhotoGrid(
-            photos: vm.imagePhotos,
-            columns: 3,
-            fitsContent: true,
-            onSelect: openImage
-        )
-        // 不接 onReachEnd：fitsContent 下所有 cell 都在 bounds 内会连锁翻页，
-        // 自动翻页统一交给外层 ScrollView 底部哨兵（loadMoreFooter）。
+        LazyVGrid(columns: columns, spacing: 8) {
+            ForEach(vm.imagePhotos) { photo in
+                Button { openImage(photo) } label: {
+                    CachedAsyncImage(url: photo.thumbURL)
+                        .aspectRatio(2.0 / 3.0, contentMode: .fill)
+                        .clipped()
+                        .cornerRadius(6)
+                }
+                .buttonStyle(.plain)
+            }
+        }
     }
 
     private func openImage(_ photo: Photo) {
@@ -204,9 +210,8 @@ struct CloudBrowserView: View {
         }
     }
 
-    /// 底部哨兵：用 iOS 13+ 的 onAppear 触发自动翻页，避开 onScrollGeometryChange
-    /// （ScrollGeometry 成员在各 SDK 下不一致，编译老报错）。
-    /// 🔴 id 固定、不带 items.count：视图重建不会重新触发 onAppear，杜绝连锁翻页。
+    /// 底部哨兵：LazyVGrid 懒加载，滚到最后一个 cell 后这个 footer 才进入可视区，
+    /// onAppear 触发翻页——标准写法。loadMore 内部有 !isLoading 保护，不会并发重复拉。
     @ViewBuilder
     private var loadMoreFooter: some View {
         if vm.hasMore && vm.error.isEmpty {
@@ -217,7 +222,7 @@ struct CloudBrowserView: View {
             .font(.caption)
             .foregroundStyle(.secondary)
             .padding(.vertical, 12)
-            .onAppear { vm.autoLoadMoreIfNeeded() }
+            .onAppear { Task { await vm.loadMore() } }
         }
     }
 
@@ -326,9 +331,6 @@ final class CloudBrowserViewModel: ObservableObject {
     /// 🔴 请求代次：下拉刷新/搜索都 +1。旧请求返回时若代次已变直接丢弃，
     /// 避免残页 append 进新列表造成排序错乱。
     private var epoch = 0
-    /// 🔴 自动翻页冷却：每次成功 load 后记时间。哨兵 onAppear 若紧跟在加载完成
-    /// 之后触发（视图重建导致），因间隔太短直接忽略，杜绝「加载完立刻又触发」的连锁。
-    private var lastLoadFinish = Date.distantPast
 
     init(client: APIClient? = nil) {
         self.client = client ?? AppSession.shared.client
@@ -362,15 +364,6 @@ final class CloudBrowserViewModel: ObservableObject {
     func setFilter(_ key: String) {
         guard key != filter else { return }
         filter = key
-    }
-
-    /// 底部哨兵 onAppear 触发。🔴 必须距上次加载完成 > 0.6s 才翻：
-    /// 加载成功后列表重建 → 哨兵若仍在可视区会立刻再 onAppear，这个冷却把它挡掉，
-    /// 用户真的再往下滚、哨兵重新出现才会翻下一页 → 不会连锁。
-    func autoLoadMoreIfNeeded() {
-        guard hasMore, !isLoading, error.isEmpty else { return }
-        guard Date().timeIntervalSince(lastLoadFinish) > 0.6 else { return }
-        Task { await loadMore() }
     }
 
     func loadMore() async {
@@ -416,13 +409,11 @@ final class CloudBrowserViewModel: ObservableObject {
                 // 真的查完了才知道到底有没有下一页；这里仍有数据，保持 hasMore 不动
                 error = resp.error ?? "查询失败"
             }
-            lastLoadFinish = Date()
         } catch {
             guard myEpoch == epoch else { return }
             // 🔴 超时/网络失败 ≠ 数据加载完：绝不能动 hasMore，否则底部哨兵消失，
             // 之后下拉刷新就算成功也只有一页、再也没法自动翻页。只记错误，留重试入口。
             self.error = error.localizedDescription
-            lastLoadFinish = Date()
         }
     }
 }
