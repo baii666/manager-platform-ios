@@ -21,6 +21,15 @@ final class ImageCache: @unchecked Sendable {
     /// 海报，本地磁盘那份旧图会一直命中，App 永远显示旧封面。
     private let revalidateInterval: TimeInterval = 300
 
+    /// 云端浏览器的缩略图（`/thumb?...&fast=1`）单独用更长的校验间隔。
+    ///
+    /// 云端库是本地入库快照，路径即版本：新增条目是新的 path，原地换图几乎不发生，
+    /// 5 分钟一次的 ETag 校验纯属浪费 —— 200 张瀑布流每 5 分钟就排一串条件请求，
+    /// 切回云端 tab 时首屏要等校验完成才踏实。拉到 7 天，期间一次请求都不发；
+    /// 真要强刷还有设置里的「清除图片缓存」兜底。
+    /// 🔴 只认 path=/thumb 且带 fast=1 的云端缩略图；/photo、/media-image 等封面仍走 300s。
+    private let cloudRevalidateInterval: TimeInterval = 7 * 24 * 3600
+
     /// 缓存条目的校验信息（磁盘上存一份 `<sha>.meta`，跨会话保留）
     ///
     /// ⚠️ 必须是 class：NSCache 的 ObjectType 要求 AnyObject，struct 编不过。
@@ -177,10 +186,21 @@ final class ImageCache: @unchecked Sendable {
         saveMeta(m, for: url)
     }
 
-    /// 5 分钟内已向服务端确认过 → 直接用本地图，不再发请求
+    /// 距上次确认未超过该 URL 的校验间隔 → 直接用本地图，一个请求都不发
     private func metaIsFresh(for url: URL) -> Bool {
         guard let m = meta(for: url) else { return false }
-        return Date().timeIntervalSince(m.validatedAt) < revalidateInterval
+        return Date().timeIntervalSince(m.validatedAt) < revalidateInterval(for: url)
+    }
+
+    /// 云端缩略图（/thumb + fast=1）7 天，其余 5 分钟。
+    private func revalidateInterval(for url: URL) -> TimeInterval {
+        guard let comps = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              comps.path.hasSuffix("/thumb"),
+              let items = comps.queryItems,
+              items.contains(where: { $0.name == "fast" && $0.value == "1" }) else {
+            return revalidateInterval
+        }
+        return cloudRevalidateInterval
     }
 
     /// 正在后台校验的 URL
