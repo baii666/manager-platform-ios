@@ -12,7 +12,7 @@ options:
 packages:
   KSPlayer:
     url: https://github.com/kingslay/KSPlayer.git
-    exact: "2.3.4"
+    exactVersion: 2.3.4
 targets:
   MediaManager:
     type: application
