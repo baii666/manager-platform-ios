@@ -110,11 +110,10 @@ struct CloudBrowserView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 12) {
-                filterBar
-                if vm.items.isEmpty && !vm.isLoading {
+                if vm.visibleItems.isEmpty && !vm.isLoading {
                     emptyState
                 } else {
-                    if vm.filter != "video" && !vm.imageItems.isEmpty {
+                    if vm.filter == "image" && !vm.imageItems.isEmpty {
                         PhotoGrid(
                             photos: vm.imagePhotos,
                             columns: 3,
@@ -133,7 +132,7 @@ struct CloudBrowserView: View {
                             // （3.2 万张），又慢又乱。翻页只走下方「加载更多」按钮，用户可控。
                         )
                     }
-                    if vm.filter != "image" && !vm.videoItems.isEmpty {
+                    if vm.filter == "video" && !vm.videoItems.isEmpty {
                         videoSection
                     }
                     if vm.isLoading {
@@ -151,6 +150,30 @@ struct CloudBrowserView: View {
         }
         .navigationTitle("云端浏览器")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    ForEach([("image", "图片"), ("video", "视频")], id: \.0) { key, label in
+                        Button {
+                            vm.setFilter(key)   // 🔴 纯本地过滤，不重新请求
+                        } label: {
+                            if vm.filter == key {
+                                Label(label, systemImage: "checkmark")
+                            } else {
+                                Text(label)
+                            }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(vm.filter == "image" ? "图片" : "视频")
+                        Image(systemName: "chevron.down").font(.caption2)
+                    }
+                    .font(.subheadline.weight(.medium))
+                }
+            }
+        }
+        .refreshable { await vm.reload() }   // 🔴 只有下拉才重新请求
         .searchable(text: $vm.query, prompt: "搜索云端文件名")
         .onChange(of: vm.query) { _ in Task { await vm.reload() } }
         .bottomBarClearance()
@@ -159,22 +182,6 @@ struct CloudBrowserView: View {
             PlayerHostView(request: request)
         }
         .task { await vm.loadInitial() }
-    }
-
-    private var filterBar: some View {
-        HStack(spacing: 8) {
-            ForEach([("all", "全部"), ("image", "图片"), ("video", "视频")], id: \.0) { key, label in
-                Button { vm.setFilter(key) } label: {
-                    Text(label)
-                        .font(.subheadline.weight(.medium))
-                        .padding(.horizontal, 14).padding(.vertical, 6)
-                        .background(Capsule().fill(vm.filter == key ? Color.white.opacity(0.22) : Color.white.opacity(0.08)))
-                        .foregroundStyle(vm.filter == key ? .primary : .secondary)
-                }
-                .buttonStyle(.plain)
-            }
-            Spacer()
-        }
     }
 
     private var videoSection: some View {
@@ -229,16 +236,17 @@ final class CloudBrowserViewModel: ObservableObject {
     @Published var items: [CloudItem] = []
     @Published var isLoading = false
     @Published var hasMore = true
-    @Published var filter: String = "all"
+    /// 只有图片/视频两个 tab（无「全部」）：🔴 纯本地过滤，切换不发任何请求
+    @Published var filter: String = "image"
     @Published var query: String = ""
     @Published var error: String = ""
 
     private let client: APIClient?
-    private let pageSize = 100
+    /// 一次拉混合数据本地分组：视频占比小，页大一点减少「加载更多」点击
+    private let pageSize = 200
     private var total = 0
-    /// 🔴 请求代次：切 tab/搜索/下拉刷新都会 reset 并 +1。旧请求返回时若代次已变，
-    /// 结果直接丢弃——否则「先切图片再切回全部」会把上一次的残页 append 进新列表，
-    /// 表现为排序错乱 + 内容混杂（实测必现）。
+    /// 🔴 请求代次：下拉刷新/搜索都 +1。旧请求返回时若代次已变直接丢弃，
+    /// 避免残页 append 进新列表造成排序错乱。
     private var epoch = 0
 
     init(client: APIClient? = nil) {
@@ -247,6 +255,7 @@ final class CloudBrowserViewModel: ObservableObject {
 
     var imageItems: [CloudItem] { items.filter { $0.isImage } }
     var videoItems: [CloudItem] { items.filter { $0.isVideo } }
+    var visibleItems: [CloudItem] { filter == "video" ? videoItems : imageItems }
 
     /// 图片转瀑布流 Photo：thumb/full URL 由 APIClient 拼（带 token 兼容收紧认证）
     var imagePhotos: [Photo] {
@@ -258,52 +267,60 @@ final class CloudBrowserViewModel: ObservableObject {
 
     func loadInitial() async {
         guard items.isEmpty, error.isEmpty else { return }
-        await load(reset: true)
+        await load(offset: 0, replace: true)
     }
 
-    func reload() async { await load(reset: true) }
+    /// 下拉刷新 / 搜索：重新从 0 拉。🔴 不清空 items、成功后整体替换，
+    /// 这样刷新/搜索期间旧列表还在，不会白屏闪烁（refreshable 红线）。
+    func reload() async {
+        await load(offset: 0, replace: true)
+    }
 
+    /// 🔴 切 tab 纯本地过滤：不发任何请求，不动 items/epoch。
     func setFilter(_ key: String) {
         guard key != filter else { return }
         filter = key
-        Task { await load(reset: true) }
     }
 
     func loadMore() async {
         guard hasMore, !isLoading else { return }
-        await load(reset: false)
+        await load(offset: items.count, replace: false)
     }
 
-    private func load(reset: Bool) async {
-        if reset {
+    /// offset=0+replace=true → 刷新（保留旧数据直到新数据到）；否则翻页 append。
+    /// type 恒为 nil：一次拉混合数据，图片/视频本地分组，切 tab 才零请求。
+    private func load(offset: Int, replace: Bool) async {
+        if replace {
             epoch += 1
-            items = []; total = 0; hasMore = true; error = ""
-            isLoading = false   // 强制放开：切 tab 时旧请求还在飞，不能让它挡住新一轮
+            isLoading = false   // 放开：上一轮请求还在飞也不挡新一轮
         }
         let myEpoch = epoch
-        guard hasMore else { return }
-        // 翻页（非 reset）才需要 isLoading 去重；reset 已经靠 epoch 作废了旧请求
-        if !reset && isLoading { return }
-        guard let client else { error = "未连接服务器"; hasMore = false; return }
+        if !replace && isLoading { return }
+        guard let client else { error = "未连接服务器"; return }
         isLoading = true
         defer { if myEpoch == epoch { isLoading = false } }
         do {
             let resp = try await client.fetchCloudItems(
-                type: filter, q: query.isEmpty ? nil : query,
-                limit: pageSize, offset: items.count)
-            guard myEpoch == epoch else { return }   // 代次已变：丢弃旧 tab 的残页
+                type: nil, q: query.isEmpty ? nil : query,
+                limit: pageSize, offset: offset)
+            guard myEpoch == epoch else { return }   // 代次已变：丢弃过期结果
             if resp.ok || !resp.items.isEmpty {
                 total = resp.total
-                items.append(contentsOf: resp.items)
-                hasMore = items.count < total
+                if replace {
+                    items = resp.items               // 整体替换，不清空
+                } else {
+                    items.append(contentsOf: resp.items)
+                }
+                hasMore = (replace ? resp.items.count : items.count) < total
+                error = ""
             } else {
                 error = resp.error ?? "查询失败"
-                hasMore = false
+                if replace { hasMore = false }
             }
         } catch {
             guard myEpoch == epoch else { return }
             self.error = error.localizedDescription
-            hasMore = false
+            if replace { hasMore = false }
         }
     }
 }
