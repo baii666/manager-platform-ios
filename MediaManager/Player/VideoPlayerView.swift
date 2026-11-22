@@ -537,8 +537,12 @@ struct VideoPlayerView: View {
                     .monospacedDigit()
                 // 播放内核角标：系统路径显示 AVPlayer，KS 路径显示 KSAVPlayer/KSMEPlayer，
                 // 内核自动切换时实时更新。只在内核 HUD 出现时随控制条一起显隐。
-                // KS 内核且有多条音轨时，角标变成可点击的音轨切换菜单（解决「只有音乐没有人声」）。
-                kernelBadge
+                Text(engine.kernelLabel)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(engine.usesKSPlayer ? Color.cyan : Color.white.opacity(0.55))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Capsule().fill(engine.usesKSPlayer ? Color.cyan.opacity(0.18) : Color.white.opacity(0.1)))
                 Spacer()
                 playerButton("gobackward.10") { seekTo(absolute: displayPosition - 10) }
                 playerButton("goforward.10") { seekTo(absolute: displayPosition + 10) }
@@ -547,27 +551,23 @@ struct VideoPlayerView: View {
                 if faceProbeMedium != nil, faceProbeMediaID != nil, !usesKSPlayer {
                     faceProbeButton
                 }
+                audioTrackMenu
                 rateMenu
             }
         }
     }
 
-    /// 内核角标。KS 内核且检测到多条音轨时可点击，弹出音轨切换菜单。
+    /// 音轨切换菜单。只在 KS 内核、且检测到多条音轨时出现（单轨/系统内核无意义）。
+    /// 视觉与「倍速」胶囊一致：白字 + 白色半透明底，下拉菜单交给系统原生样式。
     @ViewBuilder
-    private var kernelBadge: some View {
-        let badge = Text(engine.kernelLabel)
-            .font(.system(size: 10, weight: .semibold))
-            .foregroundStyle(engine.usesKSPlayer ? Color.cyan : Color.white.opacity(0.55))
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(Capsule().fill(engine.usesKSPlayer ? Color.cyan.opacity(0.18) : Color.white.opacity(0.1)))
+    private var audioTrackMenu: some View {
         if engine.usesKSPlayer, engine.audioTracks.count > 1 {
             Menu {
                 ForEach(engine.audioTracks) { track in
                     Button {
                         engine.selectAudioTrack(id: track.id)
                         hud = "音轨：" + (track.name.isEmpty ? track.detail : track.name)
-                        scheduleHudClear()   // 横条 4 秒后自动收起（之前漏了，导致常驻）
+                        scheduleHudClear()   // 横条 4 秒后自动收起
                         scheduleHide()
                     } label: {
                         if track.isEnabled {
@@ -579,10 +579,16 @@ struct VideoPlayerView: View {
                     }
                 }
             } label: {
-                badge
+                HStack(spacing: 4) {
+                    Image(systemName: "waveform")
+                    Text("音轨")
+                }
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Capsule().fill(Color.white.opacity(0.2)))
             }
-        } else {
-            badge
         }
     }
 
