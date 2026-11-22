@@ -135,7 +135,9 @@ final class PlayerEngine: ObservableObject {
         // 渐进分流：MKV/HEVC/DTS 等走 KSPlayer(FFmpeg)，其余走系统 AVPlayer。
         if usesKSPlayer {
             self.usesKSPlayer = true
-            self.kernelLabel = "KSPlayer"  // 轮询拿到真实内核名后会刷新
+            // 首内核已固定为 KSMEPlayer，角标初值直接给对，避免先 KSAVPlayer 再跳
+            // （轮询回吐的真实名同为 KSMEPlayer，同值不触发视觉刷新）。
+            self.kernelLabel = "KSMEPlayer"
             bindKS(loop: loop, rate: rate)
             ksBridge.load(url: url, startAt: startAt, autoplay: autoplay, loop: loop, rate: rate)
             return

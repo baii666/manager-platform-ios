@@ -74,10 +74,13 @@ final class KSPlaybackBridge: NSObject {
         audioTracksHandled = false
 
         let options = KSOptions()
-        // 双内核：AVPlayer(KSAVPlayer) 优先，解不了自动切 FFmpeg(KSMEPlayer)。
+        // 双内核：FFmpeg(KSMEPlayer) 优先。走到这里的片源都是调用方已判定的
+        // MKV/HEVC/DTS/hev1 等系统 AVPlayer 解不了的格式，先起 KSAVPlayer 只是
+        // 一次注定失败的试解（还让内核角标先旧后跳）。直接以 ME 为首内核省掉这次
+        // 无效初始化；KSAVPlayer 留作 second 兜底。
         // firstPlayerType 只有静态版，必须设在 KSOptions 静态属性上。
-        KSOptions.firstPlayerType = KSAVPlayer.self
-        KSOptions.secondPlayerType = KSMEPlayer.self
+        KSOptions.firstPlayerType = KSMEPlayer.self
+        KSOptions.secondPlayerType = KSAVPlayer.self
         // 不交给 KSPlayer 自己循环：两个内核 isLoopPlay=true 时都不置 .finished
         // （只走 delegate 的 playBack(loopCount:)，而 delegate 为避开 @MainActor 隔离设为 nil），
         // 轮询就永远抓不到播完 → 短视频自动连播失效。改由下面 poll 检测 .finished 后
