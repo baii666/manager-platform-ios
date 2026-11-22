@@ -118,23 +118,7 @@ struct CloudBrowserView: View {
                         emptyState
                     } else {
                         if vm.filter == "image" && !vm.imageItems.isEmpty {
-                            PhotoGrid(
-                                photos: vm.imagePhotos,
-                                columns: 3,
-                                fitsContent: true,
-                                onSelect: { photo in
-                                    guard let idx = vm.imagePhotos.firstIndex(where: { $0.id == photo.id }) else { return }
-                                    PhotoViewerPresenter.shared.show(vm.imagePhotos, index: idx, hasMore: true) {
-                                        Task {
-                                            await vm.loadMore()
-                                            PhotoViewerPresenter.shared.updatePhotos(vm.imagePhotos)
-                                        }
-                                    }
-                                }
-                                // 🔴 不接 onReachEnd：fitsContent 模式下所有 cell 都在 bounds 内、
-                                // willDisplay 会在 reload 时一次性全触发 → 连锁翻页直到拉完整个库
-                                // （3.2 万张）。自动翻页改由外层 ScrollView 底部哨兵负责。
-                            )
+                            imageGrid
                         }
                         if vm.filter == "video" && !vm.videoItems.isEmpty {
                             videoSection
@@ -142,36 +126,10 @@ struct CloudBrowserView: View {
                         if vm.isLoading && vm.visibleItems.isEmpty {
                             ProgressView().padding()
                         }
-                        // 🔴 失败凭证：列表非空时错误也要看得见，给一个点一下就重试的入口，
-                        // 不必依赖下拉刷新（超时后用户往往以为「刷新没用了」）。
-                        if !vm.error.isEmpty && !vm.isLoading {
-                            Button {
-                                Task { await vm.retry() }
-                            } label: {
-                                HStack(spacing: 6) {
-                                    Image(systemName: "exclamationmark.triangle")
-                                    Text("\(vm.error) · 点击重试")
-                                }
-                                .font(.caption)
-                                .foregroundStyle(.orange)
-                            }
-                            .buttonStyle(.plain)
-                            .padding(.bottom, 8)
-                        }
+                        errorBanner
                     }
 
-                    // 🔴 底部状态：纯展示，不触发翻页（翻页改由 ScrollView 的真实滚动位置驱动）。
-                    // 绝不能挂 onAppear + 随 items.count 变的 id：eager VStack 里视图重建会
-                    // 立刻重触发 → 连锁翻页 + ProgressView 一直转（上一版就是这个 bug）。
-                    if vm.hasMore && vm.error.isEmpty {
-                        HStack(spacing: 6) {
-                            if vm.isLoading { ProgressView() }
-                            Text(vm.isLoading ? "加载更多…" : "上滑加载更多")
-                        }
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(.vertical, 12)
-                    }
+                    loadMoreFooter
                 }
                 .padding(.horizontal, 10)
                 .padding(.top, 8)
@@ -179,13 +137,9 @@ struct CloudBrowserView: View {
             // 🔴 自动翻页：按真实的 contentOffset / contentSize 判断触底（iOS 17+）。
             // 只有「从没到底 → 到底」的边沿才翻一页；翻页后内容变高、回到没到底，
             // 用户再滑到底才翻下一页 —— 不会像 onAppear 那样连锁，也不会空转。
-            .onScrollGeometryChange(for: Bool.self) { geo in
-                geo.contentOffset.y + geo.visibleSize.height >= geo.contentSize.height - 120
-            } action: { _, reachedBottom in
-                if reachedBottom {
-                    Task { await vm.loadMore() }
-                }
-            }
+            .onScrollGeometryChange(for: Bool.self,
+                                    of: cloudAtBottom,
+                                    action: cloudScrollBottomChanged)
             .onChange(of: vm.filter) { _ in
                 withAnimation(.easeInOut(duration: 0.18)) {
                     proxy.scrollTo("cloudTop", anchor: .top)
@@ -211,6 +165,71 @@ struct CloudBrowserView: View {
             PlayerHostView(request: request)
         }
         .task { await vm.loadInitial() }
+    }
+
+    // 🔴 下面这些视图/闭包单独拆出来：body 里内联太多复杂表达式会让 Swift 类型检查器
+    // 直接超时（"unable to type-check this expression"，报在 ViewBuilder 的某个 if 行上）。
+    // 拆成具名计算属性后编译器分块检查，body 就轻了。
+
+    private var imageGrid: some View {
+        PhotoGrid(
+            photos: vm.imagePhotos,
+            columns: 3,
+            fitsContent: true,
+            onSelect: openImage
+        )
+        // 不接 onReachEnd：fitsContent 下所有 cell 都在 bounds 内会连锁翻页，
+        // 自动翻页统一交给外层 ScrollView 的 onScrollGeometryChange。
+    }
+
+    private func openImage(_ photo: Photo) {
+        guard let idx = vm.imagePhotos.firstIndex(where: { $0.id == photo.id }) else { return }
+        PhotoViewerPresenter.shared.show(vm.imagePhotos, index: idx, hasMore: true) {
+            Task {
+                await vm.loadMore()
+                PhotoViewerPresenter.shared.updatePhotos(vm.imagePhotos)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var errorBanner: some View {
+        if !vm.error.isEmpty && !vm.isLoading {
+            Button {
+                Task { await vm.retry() }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle")
+                    Text("\(vm.error) · 点击重试")
+                }
+                .font(.caption)
+                .foregroundStyle(.orange)
+            }
+            .buttonStyle(.plain)
+            .padding(.bottom, 8)
+        }
+    }
+
+    @ViewBuilder
+    private var loadMoreFooter: some View {
+        if vm.hasMore && vm.error.isEmpty {
+            HStack(spacing: 6) {
+                if vm.isLoading { ProgressView() }
+                Text(vm.isLoading ? "加载更多…" : "上滑加载更多")
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .padding(.vertical, 12)
+        }
+    }
+
+    private func cloudAtBottom(_ geo: ScrollGeometry) -> Bool {
+        geo.contentOffset.y + geo.visibleSize.height >= geo.contentSize.height - 120
+    }
+
+    private func cloudScrollBottomChanged(_ old: Bool, _ new: Bool) {
+        guard new, !old else { return }
+        Task { await vm.loadMore() }
     }
 
     /// 顶栏正中的分段胶囊，样式对齐相册详情页（品牌色淡底 + 图标 + 数量）。
