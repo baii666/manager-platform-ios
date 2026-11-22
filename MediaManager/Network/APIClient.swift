@@ -123,6 +123,18 @@ final class APIClient: DataProviding, @unchecked Sendable {
         return !nativeVideoCodecs.contains(codec)
     }
 
+    /// 短视频 MP4 快车道守卫：有随片源下发的 hint 时，先用它判一次内核。
+    /// - 判 KS：不能走 AVPlayer 同步直连（hev1 / 非硬解编码会黑屏）→ 交给 resolvePlayback 走 KS。
+    /// - 判系统：保持零等待直连（快车道的意义）。
+    /// - 无 hint：维持旧行为直接直连（未回填片源回退，不改现状）。
+    func canFastPath(path: String, hintCodec: String?, hintTag: String?) -> Bool {
+        guard let hintCodec, !hintCodec.isEmpty else { return true }
+        let ext = (path as NSString).pathExtension.lowercased()
+        return !Self.shouldUseKSPlayer(ext: ext,
+                                       codec: hintCodec.lowercased(),
+                                       tag: (hintTag ?? "").lowercased())
+    }
+
     /// 开一个 HLS 会话拿 m3u8 地址。
     /// 两步：GET /hls 返回 {"sessionId","m3u8Url":"/hls/<id>/index.m3u8"}，
     /// m3u8Url 是**相对路径**，必须拼到 baseURL 上再交给 AVPlayer。
@@ -180,12 +192,26 @@ final class APIClient: DataProviding, @unchecked Sendable {
                          title: String,
                          assetType: String?,
                          assetID: Int?,
-                         knownDuration: Double? = nil) async throws -> PlaybackTarget {
+                         knownDuration: Double? = nil,
+                         hintCodec: String? = nil,
+                         hintTag: String? = nil) async throws -> PlaybackTarget {
         let ext = (path as NSString).pathExtension.lowercased()
 
-        let info = try? await playbackInfo(path: path)
-        let codec = info?.videoCodec?.lowercased() ?? ""
-        let tag = info?.videoTag?.lowercased() ?? ""
+        let codec: String
+        let tag: String
+        if let hintCodec, !hintCodec.isEmpty {
+            // 列表/详情接口随片源一起下发的 ffmpeg 口径探测结果（服务端只读缓存，零探测）。
+            // 命中就本地判内核，不再请求 /api/playback/info。
+            // 同时写进本地缓存，后续 restartHLS / 重进都用同一份结果，全程零请求。
+            codec = hintCodec.lowercased()
+            tag = (hintTag ?? "").lowercased()
+            PlaybackInfoStore.shared.set(path, PlaybackInfo(
+                container: nil, videoCodec: hintCodec, videoTag: hintTag, audioCodec: nil))
+        } else {
+            let info = try? await playbackInfo(path: path)
+            codec = info?.videoCodec?.lowercased() ?? ""
+            tag = info?.videoTag?.lowercased() ?? ""
+        }
 
         // === 渐进分流 ===
         // AVPlayer 播不了的容器/编码 → KSPlayer(FFmpeg) 直连原始流。

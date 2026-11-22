@@ -902,7 +902,9 @@ struct AlbumPhotosView: View {
                                       knownDuration: video.duration,
                                       // 相册视频有独立 id，后端按 album_videos 表查路径
                                       faceProbeMedium: "album_video",
-                                      faceProbeMediaID: video.id)
+                                      faceProbeMediaID: video.id,
+                                      hintCodec: video.probeCodec,
+                                      hintTag: video.probeTag)
     }
 
     /// VidHub 外播：带 ?token= 的直链，用它自己的解码器，格式杂时比内置快得多

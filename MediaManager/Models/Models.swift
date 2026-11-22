@@ -658,6 +658,9 @@ struct AlbumVideo: Identifiable, Codable, Sendable {
     /// /raw?path=... 相对地址，由 APIClient.resolve 转绝对 URL。has_thumb 不是封面判据。
     var coverUrl: String? = nil
     var motionUrl: String? = nil
+    /// 服务端随列表下发的 ffmpeg 口径探测结果（playback_info 缓存，零探测）。
+    var probeCodec: String? = nil
+    var probeTag: String? = nil
 
     /// 卡片标题：优先文件夹名（更像片名），没有才用文件名
     var title: String {
@@ -687,6 +690,8 @@ struct AlbumVideo: Identifiable, Codable, Sendable {
         case playUrl = "play_url"
         case coverUrl = "cover_url"
         case motionUrl = "motion_url"
+        case probeCodec = "probe_codec"
+        case probeTag = "probe_tag"
     }
 }
 
@@ -1325,6 +1330,10 @@ struct MediaDetail: Identifiable, Decodable, Sendable {
     var fanartImageId: Int? = nil
     var filePath: String? = nil
     var videoFiles: [String] = []
+    /// 服务端随详情下发的 ffmpeg 口径探测结果（playback_info 缓存，零探测）。
+    /// 对应 videoFiles 首个文件；有值可本地判内核，nil 回退实时探测。
+    var probeCodec: String? = nil
+    var probeTag: String? = nil
     var stills: [URL] = []       // 剧照（relative /raw?path=）
     var folderPath: String? = nil
     var issues: [String] = []
@@ -1370,6 +1379,8 @@ struct MediaDetail: Identifiable, Decodable, Sendable {
         fanartImageId = optInt(c, .fanartImageId)
         filePath = optString(c, .filePath)
         videoFiles = (try? c.decode([String].self, forKey: .videoFiles)) ?? []
+        probeCodec = optString(c, .probeCodec)
+        probeTag = optString(c, .probeTag)
         if let s = try? c.decode([String].self, forKey: .stills) {
             stills = s.compactMap { URL(string: $0) }
         }
@@ -1394,6 +1405,8 @@ struct MediaDetail: Identifiable, Decodable, Sendable {
         case fanartImageId = "fanart_image_id"
         case filePath = "file_path"
         case videoFiles = "video_files"
+        case probeCodec = "probe_codec"
+        case probeTag = "probe_tag"
         case stills, folderPath = "folder_path"
         case issues
     }
@@ -1417,6 +1430,11 @@ struct ShortVideo: Identifiable, Codable, Sendable, Hashable {
     var previewUrl: String? = nil
     var hasPoster: Bool = false
     var hasPreview: Bool = false
+
+    /// 服务端随列表下发的 ffmpeg 口径探测结果（playback_info 缓存，零探测）。
+    /// 有值即可本地判内核，不用再请求 /api/playback/info；nil = 未回填，回退实时探测。
+    var probeCodec: String? = nil
+    var probeTag: String? = nil
 
     /// 展示层统一剥掉「站点@」水印（`WWW.98T.LA@…`、`www.98t.la@…` 都命中）：
     /// 复用已有的 `String.strippingSitePrefix`（和影视标题同一套规则），不另写一套判据。
@@ -1450,6 +1468,8 @@ struct ShortVideo: Identifiable, Codable, Sendable, Hashable {
         case previewUrl = "previewUrl"
         case hasPoster = "hasPoster"
         case hasPreview = "hasPreview"
+        case probeCodec = "probe_codec"
+        case probeTag = "probe_tag"
     }
 }
 

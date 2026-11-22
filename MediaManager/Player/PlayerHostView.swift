@@ -22,6 +22,10 @@ struct PlaybackRequest: Identifiable {
     /// medium 取 media / album_video / short_video，决定后端去哪张表读文件路径。
     var faceProbeMedium: String? = nil
     var faceProbeMediaID: Int? = nil
+    /// 列表/详情随片源下发的 ffmpeg 口径探测结果（服务端 playback_info 缓存，零探测）。
+    /// 有值即本地判内核，省掉 /api/playback/info；nil = 回退实时探测。
+    var hintCodec: String? = nil
+    var hintTag: String? = nil
 }
 
 // MARK: - 播放宿主
@@ -77,8 +81,10 @@ struct PlayerHostView: View {
                 startAt: request.startAt,
                 title: request.title,
                 assetType: request.assetType,
-                assetID: request.assetID,
-                knownDuration: request.knownDuration)
+                                    assetID: request.assetID,
+                                    knownDuration: request.knownDuration,
+                                    hintCodec: request.hintCodec,
+                                    hintTag: request.hintTag)
         } catch {
             self.error = error.localizedDescription
         }

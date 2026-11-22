@@ -646,7 +646,10 @@ struct MediaDetailView: View {
                                       knownDuration: d.runtime.map { Double($0) * 60 },
                                       // 播放中点人脸按钮 → 检测当前画面入库（medium 决定后端查哪张表）
                                       faceProbeMedium: "media",
-                                      faceProbeMediaID: d.id)
+                                      faceProbeMediaID: d.id,
+                                      // 详情随片源下发的探测结果：本地判内核，省掉一次 /api/playback/info
+                                      hintCodec: d.probeCodec,
+                                      hintTag: d.probeTag)
     }
 
     // MARK: VidHub 外播

@@ -159,8 +159,11 @@ final class ShortFeedPrefetcher: ObservableObject {
         guard resolved[video.id] == nil, inflight[video.id] == nil,
               let path = video.filePath, !path.isEmpty else { return }
         // 99% 的短视频是 MP4/M4V/MOV：同步拼直连 URL，零网络、零服务端成本。
-        // 这里直接写字典、不逐条发变更，由 prefetch 末尾统一发一次。
-        if let url = client.streamURL(path: path) {
+        // 有 hint 时先判一次内核：判 KS（hev1/非硬解）就不能走 AVPlayer 直连，
+        // 交给下面的 resolveShortPlayback 走 KS；判系统才保留快车道。
+        // 无 hint 维持旧行为（未回填片源回退，不改现状）。
+        if let url = client.streamURL(path: path),
+           client.canFastPath(path: path, hintCodec: video.probeCodec, hintTag: video.probeTag) {
             resolved[video.id] = PlaybackTarget(url: url, title: video.titleText,
                                                 assetType: nil, assetID: nil,
                                                 startAt: 0, timeOffset: 0,
@@ -1049,9 +1052,12 @@ private struct ShortFeedPage: View {
             return
         }
         do {
-            // MP4/M4V/MOV 直接直连，同步拿到 URL、零等待；只有 AVI/MKV 才开会话
+            // MP4/M4V/MOV 直接直连，同步拿到 URL、零等待；只有 AVI/MKV 才开会话。
+            // 有 hint 时先判内核：KS 片源不能走快车道，交给 resolvePlayback 走 KS，
+            // 并把 hint 透传下去省掉一次探测。无 hint 维持旧行为。
             let resolved: PlaybackTarget
-            if let url = client.streamURL(path: path) {
+            if let url = client.streamURL(path: path),
+               client.canFastPath(path: path, hintCodec: video.probeCodec, hintTag: video.probeTag) {
                 resolved = PlaybackTarget(url: url, title: video.titleText,
                                           assetType: nil, assetID: nil,
                                           startAt: 0, timeOffset: 0,
@@ -1059,7 +1065,8 @@ private struct ShortFeedPage: View {
             } else {
                 resolved = try await client.resolvePlayback(
                     path: path, startAt: nil, title: video.titleText,
-                    assetType: nil, assetID: nil, knownDuration: video.duration)
+                    assetType: nil, assetID: nil, knownDuration: video.duration,
+                    hintCodec: video.probeCodec, hintTag: video.probeTag)
             }
             target = resolved
             // 回填预取池：滑走再滑回来不用重新解析（非直连容器尤其省一次 HLS 会话）
@@ -1076,7 +1083,8 @@ private struct ShortFeedPage: View {
 // MP4/M4V/MOV 直连零等待，AVPlayer 解不了的容器/编码自动走 KSPlayer。
 @MainActor
 func resolveShortPlayback(_ video: ShortVideo, path: String, client: APIClient) async throws -> PlaybackTarget {
-    if let url = client.streamURL(path: path) {
+    if let url = client.streamURL(path: path),
+       client.canFastPath(path: path, hintCodec: video.probeCodec, hintTag: video.probeTag) {
         return PlaybackTarget(url: url, title: video.titleText,
                               assetType: nil, assetID: nil,
                               startAt: 0, timeOffset: 0,
@@ -1084,7 +1092,8 @@ func resolveShortPlayback(_ video: ShortVideo, path: String, client: APIClient) 
     }
     return try await client.resolvePlayback(
         path: path, startAt: nil, title: video.titleText,
-        assetType: nil, assetID: nil, knownDuration: video.duration)
+        assetType: nil, assetID: nil, knownDuration: video.duration,
+        hintCodec: video.probeCodec, hintTag: video.probeTag)
 }
 
 // MARK: - 同文件夹关联视频页（刷流底栏标题入口）
