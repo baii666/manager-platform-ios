@@ -587,9 +587,9 @@ struct VideoPlayerView: View {
     /// 音轨选择面板：点独立「音轨」按钮弹出。自绘毛玻璃卡片，避免系统原生 Menu 的丑下拉。
     private var audioTrackPanel: some View {
         ZStack {
-            // 遮罩：点空白处收起
-            Color.black.opacity(0.5)
-                .ignoresSafeArea()
+            // 透明背景：视觉上不遮挡画面，点卡片外空白处收起
+            Color.clear
+                .contentShape(Rectangle())
                 .onTapGesture { showAudioTrackPanel = false }
 
             VStack(spacing: 0) {
