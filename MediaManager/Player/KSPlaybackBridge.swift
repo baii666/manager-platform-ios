@@ -1,7 +1,11 @@
 import Foundation
 import AVFoundation
 import UIKit
-import KSPlayer
+// @preconcurrency：KSPlayerLayerDelegate 协议标了 @MainActor，会让遵循它的类
+// （KSPlaybackBridge）连 init 都被推断为 main-actor-isolated，从非隔离的
+// PlayerEngine 调 KSPlaybackBridge() 就报「main actor-isolated initializer」。
+// 用 @preconcurrency 让编译器把第三方标注降级为警告，保留非隔离 init。
+@preconcurrency import KSPlayer
 
 // MARK: - KSPlayer 引擎桥接
 //
