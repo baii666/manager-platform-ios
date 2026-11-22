@@ -537,12 +537,8 @@ struct VideoPlayerView: View {
                     .monospacedDigit()
                 // 播放内核角标：系统路径显示 AVPlayer，KS 路径显示 KSAVPlayer/KSMEPlayer，
                 // 内核自动切换时实时更新。只在内核 HUD 出现时随控制条一起显隐。
-                Text(engine.kernelLabel)
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(engine.usesKSPlayer ? Color.cyan : Color.white.opacity(0.55))
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Capsule().fill(engine.usesKSPlayer ? Color.cyan.opacity(0.18) : Color.white.opacity(0.1)))
+                // KS 内核且有多条音轨时，角标变成可点击的音轨切换菜单（解决「只有音乐没有人声」）。
+                kernelBadge
                 Spacer()
                 playerButton("gobackward.10") { seekTo(absolute: displayPosition - 10) }
                 playerButton("goforward.10") { seekTo(absolute: displayPosition + 10) }
@@ -553,6 +549,39 @@ struct VideoPlayerView: View {
                 }
                 rateMenu
             }
+        }
+    }
+
+    /// 内核角标。KS 内核且检测到多条音轨时可点击，弹出音轨切换菜单。
+    @ViewBuilder
+    private var kernelBadge: some View {
+        let badge = Text(engine.kernelLabel)
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(engine.usesKSPlayer ? Color.cyan : Color.white.opacity(0.55))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Capsule().fill(engine.usesKSPlayer ? Color.cyan.opacity(0.18) : Color.white.opacity(0.1)))
+        if engine.usesKSPlayer, engine.audioTracks.count > 1 {
+            Menu {
+                ForEach(engine.audioTracks) { track in
+                    Button {
+                        engine.selectAudioTrack(id: track.id)
+                        hud = "音轨：" + (track.name.isEmpty ? track.detail : track.name)
+                        scheduleHide()
+                    } label: {
+                        if track.isEnabled {
+                            Label(track.name.isEmpty ? track.detail : track.name,
+                                  systemImage: "checkmark")
+                        } else {
+                            Text(track.name.isEmpty ? track.detail : track.name)
+                        }
+                    }
+                }
+            } label: {
+                badge
+            }
+        } else {
+            badge
         }
     }
 

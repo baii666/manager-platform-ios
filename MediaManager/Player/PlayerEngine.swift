@@ -23,6 +23,9 @@ final class PlayerEngine: ObservableObject {
     /// 系统路径 = "AVPlayer"；KS 路径 = "KSAVPlayer" / "KSMEPlayer"，
     /// 内核自动切换（解不了 → FFmpeg）时会实时更新。
     @Published private(set) var kernelLabel: String = "AVPlayer"
+    /// KS 内核的可用音轨列表。空 = 系统内核（AVPlayer 自己管音轨）或只有单轨。
+    /// 多音轨片源（如「日语原声 + 纯音乐轨」）用它显示切换菜单。
+    @Published private(set) var audioTracks: [KSAudioTrack] = []
     /// 是否正在「长按倍速」中。供播放器显示角标。
     @Published private(set) var isSpeedHolding = false
     /// 播放失败原因。之前播放器没有任何错误状态，任何失败都是「静默白屏」，无法定位
@@ -226,6 +229,7 @@ final class PlayerEngine: ObservableObject {
         ksBindings = nil
         ksBridge.teardown()
         usesKSPlayer = false
+        audioTracks = []
     }
 
     /// 把 KSPlayer 桥接的状态回调接到本引擎的 @Published 上。
@@ -255,6 +259,9 @@ final class PlayerEngine: ObservableObject {
         ksBridge.onKernel = { [weak self] name in
             guard let self, !name.isEmpty else { return }
             if self.kernelLabel != name { self.kernelLabel = name }
+        }
+        ksBridge.onAudioTracks = { [weak self] tracks in
+            self?.audioTracks = tracks
         }
         ksBridge.onBuffered = { [weak self] seconds in
             self?.loadedRange = seconds
@@ -416,6 +423,12 @@ final class PlayerEngine: ObservableObject {
     /// 相对快进 / 快退（秒），用于手势
     func seek(by delta: Double) {
         seek(to: currentTime + delta)
+    }
+
+    /// 切换到指定音轨（KS 内核多音轨片源用）。系统内核无此能力，忽略。
+    func selectAudioTrack(id: Int32) {
+        guard usesKSPlayer else { return }
+        ksBridge.selectAudioTrack(id: id)
     }
 }
 

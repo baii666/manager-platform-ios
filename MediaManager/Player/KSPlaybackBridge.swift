@@ -7,6 +7,18 @@ import UIKit
 // 避免某些 Xcode 配置下升级为 error。
 @preconcurrency import KSPlayer
 
+// MARK: - 音轨信息（值类型）
+/// KSPlayer 的音轨协议对象生命周期跟着 player 实例走，内核切换后会失效，
+/// 不适合直接丢给 SwiftUI。这里拍成纯值。
+/// detail 是 KSPlayer 的 description（含 codec / 采样率 / 声道 / 语言），
+/// UI 上据此区分「人声轨」和「纯音乐轨」。
+struct KSAudioTrack: Identifiable, Equatable {
+    let id: Int32
+    let name: String
+    let detail: String
+    let isEnabled: Bool
+}
+
 // MARK: - KSPlayer 引擎桥接
 //
 // 只负责「播得了吗、播到哪、什么状态」，不含任何 UI。
@@ -34,6 +46,8 @@ final class KSPlaybackBridge: NSObject {
     var onKernel: ((String) -> Void)?
     /// load 创建好画面 view 后触发，画面层据此把它挂进容器
     var onRenderViewReady: (() -> Void)?
+    /// 音轨列表（ready 后及切换内核后回吐，供 UI 显示/手动切换）
+    var onAudioTracks: (([KSAudioTrack]) -> Void)?
 
     private var layer: KSPlayerLayer?
     private(set) var renderView: UIView?
@@ -45,6 +59,8 @@ final class KSPlaybackBridge: NSObject {
     private var lastPlaying: Bool?
     private var wasFinished = false
     private var lastKernelName = ""
+    /// 是否已经处理过音轨（每次内核切换后重置，只处理一次）
+    private var audioTracksHandled = false
 
     // MARK: 装载
     func load(url: URL, startAt: Double?, autoplay: Bool, loop: Bool, rate: Float) {
@@ -55,6 +71,7 @@ final class KSPlaybackBridge: NSObject {
         lastPlaying = nil
         wasFinished = false
         lastKernelName = ""
+        audioTracksHandled = false
 
         let options = KSOptions()
         // 双内核：AVPlayer(KSAVPlayer) 优先，解不了自动切 FFmpeg(KSMEPlayer)。
@@ -101,12 +118,21 @@ final class KSPlaybackBridge: NSObject {
         if name != lastKernelName {
             lastKernelName = name
             onKernel?(name)
+            // 内核切换会换掉 player 实例，音轨也跟着变 → 重新采集
+            audioTracksHandled = false
         }
 
         let total = player.duration
         if total.isFinite, total > 0, !readySent {
             readySent = true
             onReady?(total)
+        }
+
+        // 就绪后采集一次音轨：回吐给 UI，并自动避开纯音乐轨。
+        // 必须等 duration 有效（≈tracks 已就绪）再做，太早 tracks 还是空的。
+        if !audioTracksHandled, total.isFinite, total > 0 {
+            audioTracksHandled = true
+            collectAudioTracks(player)
         }
         let current = player.currentPlaybackTime
         onTime?(current.isFinite ? current : 0, total.isFinite ? total : 0)
@@ -128,6 +154,54 @@ final class KSPlaybackBridge: NSObject {
         } else if !finished {
             wasFinished = false
         }
+    }
+
+    // MARK: 音轨
+    /// 采集音轨并回吐；多音轨时自动避开明显的纯音乐轨。
+    /// KSPlayer 的 FFmpeg 内核默认用 av_find_best_stream 选轨，番号/多语言片源
+    /// 常同时有「人声轨 + 纯音乐轨」，它会挑错 → 只有音乐没有人声。
+    private func collectAudioTracks(_ player: any MediaPlayerProtocol) {
+        let tracks = player.tracks(mediaType: .audio)
+        var snap = tracks.map { t in
+            KSAudioTrack(id: t.trackID, name: t.name,
+                         detail: t.description, isEnabled: t.isEnabled)
+        }
+        guard snap.count > 1 else {
+            onAudioTracks?(snap)
+            return
+        }
+        // 已经有启用轨且它不是"明显音乐轨"时，尊重 KSPlayer/片源的选择，不乱动。
+        // 只有当前启用轨明显是音乐轨、且存在另一条更像人声的轨时才切。
+        let currentIsMusic = snap.first(where: { $0.isEnabled }).map(Self.looksLikeMusic) ?? false
+        if currentIsMusic, let vocal = snap.first(where: { !$0.isEnabled && !Self.looksLikeMusic($0) }) {
+            if let real = tracks.first(where: { $0.trackID == vocal.id }) {
+                player.select(track: real)
+                snap = tracks.map { t in
+                    KSAudioTrack(id: t.trackID, name: t.name,
+                                 detail: t.description, isEnabled: t.isEnabled)
+                }
+            }
+        }
+        onAudioTracks?(snap)
+    }
+
+    /// 名字/描述/语言里出现这些词，基本可判定是纯音乐、伴奏、M&E 轨。
+    private static func looksLikeMusic(_ t: KSAudioTrack) -> Bool {
+        let text = (t.name + " " + t.detail).lowercased()
+        let markers = ["music", "bgm", "伴奏", "inst", "instrumental", "m&e", "score", "soundtrack", "ost"]
+        return markers.contains { text.contains($0) }
+    }
+
+    /// 手动切音轨：UI 菜单选中某条后调用。
+    func selectAudioTrack(id: Int32) {
+        guard let player = layer?.player else { return }
+        guard let track = player.tracks(mediaType: .audio).first(where: { $0.trackID == id }) else { return }
+        player.select(track: track)
+        let snap = player.tracks(mediaType: .audio).map { t in
+            KSAudioTrack(id: t.trackID, name: t.name,
+                         detail: t.description, isEnabled: t.isEnabled)
+        }
+        onAudioTracks?(snap)
     }
 
     /// 把 KSPlayer 的纯画面 view 铺满容器。
