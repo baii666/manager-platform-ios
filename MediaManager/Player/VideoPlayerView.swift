@@ -223,7 +223,7 @@ struct VideoPlayerView: View {
                 errorPanel(failure)
             }
 
-            // 音轨选择面板：盖在最上层，点角标弹出
+            // 音轨选择面板：盖在最上层，点独立「音轨」按钮弹出
             if showAudioTrackPanel {
                 audioTrackPanel
             }
@@ -543,15 +543,8 @@ struct VideoPlayerView: View {
                     .foregroundStyle(.white.opacity(0.7))
                     .monospacedDigit()
                 // 播放内核角标：系统路径显示 AVPlayer，KS 路径显示 KSAVPlayer/KSMEPlayer，
-                // 内核自动切换时实时更新。只在内核 HUD 出现时随控制条一起显隐。
-                // 内核角标：KS 内核有多条音轨时可点击，弹出自绘音轨选择面板。
-                if engine.usesKSPlayer, engine.audioTracks.count > 1 {
-                    Button { showAudioTrackPanel = true } label: {
-                        kernelBadgeText
-                    }
-                } else {
-                    kernelBadgeText
-                }
+                // 内核自动切换时实时更新。只在内核 HUD 出现时随控制条一起显隐。纯展示，不响应点击。
+                kernelBadgeText
                 Spacer()
                 playerButton("gobackward.10") { seekTo(absolute: displayPosition - 10) }
                 playerButton("goforward.10") { seekTo(absolute: displayPosition + 10) }
@@ -559,6 +552,10 @@ struct VideoPlayerView: View {
                 // ⚠️ KSPlayer(FFmpeg) 内核没有 AVPlayer/AVAsset，抓帧接口用不了 → 隐藏按钮。
                 if faceProbeMedium != nil, faceProbeMediaID != nil, !usesKSPlayer {
                     faceProbeButton
+                }
+                // 音轨切换独立按钮：仅 KS 内核 + 多音轨时出现，点击弹自绘毛玻璃面板。
+                if engine.usesKSPlayer, engine.audioTracks.count > 1 {
+                    audioTrackButton
                 }
                 rateMenu
             }
@@ -575,7 +572,19 @@ struct VideoPlayerView: View {
             .background(Capsule().fill(Color.white.opacity(0.12)))
     }
 
-    /// 音轨选择面板：点内核角标弹出。自绘毛玻璃卡片，避免系统原生 Menu 的丑下拉。
+    /// 音轨切换独立按钮：与「倍速」同款白色胶囊，点击弹出音轨选择面板。
+    private var audioTrackButton: some View {
+        Button { showAudioTrackPanel = true } label: {
+            Text("音轨")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(Capsule().fill(Color.white.opacity(0.2)))
+        }
+    }
+
+    /// 音轨选择面板：点独立「音轨」按钮弹出。自绘毛玻璃卡片，避免系统原生 Menu 的丑下拉。
     private var audioTrackPanel: some View {
         ZStack {
             // 遮罩：点空白处收起
