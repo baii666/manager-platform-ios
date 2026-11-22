@@ -160,25 +160,31 @@ struct CloudBrowserView: View {
                         }
                     }
 
-                    // 🔴 自动翻页哨兵：放在内容最底下，滚到才进入可视区触发；
-                    // 它不是 PhotoGrid 的 cell，不受 fitsContent 连锁翻页影响。
-                    // id 带 items.count：每翻一页哨兵都是新视图 → onAppear 会重新触发，
-                    // 这样「视频 tab 当前页一条视频都没有」时也能继续翻，不会卡在空页。
-                    // 出错时让位给上面的重试按钮，避免自动翻页把错误刷掉。
+                    // 🔴 底部状态：纯展示，不触发翻页（翻页改由 ScrollView 的真实滚动位置驱动）。
+                    // 绝不能挂 onAppear + 随 items.count 变的 id：eager VStack 里视图重建会
+                    // 立刻重触发 → 连锁翻页 + ProgressView 一直转（上一版就是这个 bug）。
                     if vm.hasMore && vm.error.isEmpty {
                         HStack(spacing: 6) {
-                            ProgressView()
-                            Text("加载更多…")
+                            if vm.isLoading { ProgressView() }
+                            Text(vm.isLoading ? "加载更多…" : "上滑加载更多")
                         }
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .padding(.vertical, 12)
-                        .id("cloudLoadMoreSentinel-\(vm.items.count)")
-                        .onAppear { Task { await vm.autoLoadMoreIfNeeded() } }
                     }
                 }
                 .padding(.horizontal, 10)
                 .padding(.top, 8)
+            }
+            // 🔴 自动翻页：按真实的 contentOffset / contentSize 判断触底（iOS 17+）。
+            // 只有「从没到底 → 到底」的边沿才翻一页；翻页后内容变高、回到没到底，
+            // 用户再滑到底才翻下一页 —— 不会像 onAppear 那样连锁，也不会空转。
+            .onScrollGeometryChange(for: Bool.self) { geo in
+                geo.contentOffset.y + geo.visibleSize.height >= geo.contentSize.height - 120
+            } action: { _, reachedBottom in
+                if reachedBottom {
+                    Task { await vm.loadMore() }
+                }
             }
             .onChange(of: vm.filter) { _ in
                 withAnimation(.easeInOut(duration: 0.18)) {
@@ -341,28 +347,10 @@ final class CloudBrowserViewModel: ObservableObject {
         await load(offset: 0, replace: true)
     }
 
-    /// 切 tab 的时间戳：底部哨兵在切换瞬间可能仍停在可视区，
-    /// 用它挡掉「切 tab 白捡一次翻页请求」，守住切 tab 零请求。
-    private var filterChangedAt = Date.distantPast
-
     /// 🔴 切 tab 纯本地过滤：不发任何请求，不动 items/epoch。
     func setFilter(_ key: String) {
         guard key != filter else { return }
         filter = key
-        filterChangedAt = Date()
-    }
-
-    /// 底部哨兵触发的自动翻页。切换 tab / 刷新后等一小段再翻：
-    /// 既能避开切换瞬间的抖动，又能让「视频 tab 当前页没视频」的空页自动补下一页。
-    /// 🔴 不能直接 return 丢掉这次触发（哨兵 id 不变就不会再 onAppear，空页会永久卡住），
-    /// 必须等过静默期后主动翻；期间又切了 tab 才放弃。
-    func autoLoadMoreIfNeeded() async {
-        let wait = 0.5 - Date().timeIntervalSince(filterChangedAt)
-        if wait > 0 {
-            try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
-        }
-        guard Date().timeIntervalSince(filterChangedAt) > 0.5 else { return }
-        await loadMore()
     }
 
     func loadMore() async {
@@ -399,8 +387,6 @@ final class CloudBrowserViewModel: ObservableObject {
                 total = resp.total
                 if replace {
                     items = resp.items               // 整体替换，不清空
-                    // 刷新/搜索/首屏替换后哨兵可能落到可视区，静默 0.5s 再允许自动翻页
-                    filterChangedAt = Date()
                 } else {
                     items.append(contentsOf: resp.items)
                 }
