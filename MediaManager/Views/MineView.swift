@@ -416,6 +416,33 @@ struct MineView: View {
                 }
                 .buttonStyle(.plain)
                 Divider().padding(.leading, 44)
+                // KSPlayer 内核验证 demo（临时）：验证 FFmpeg 内核能否真机编译、
+                // 能否播 MKV/HEVC/DTS。验证通过后再决定是否替换主播放器。
+                NavigationLink {
+                    KSPlayerDemoView()
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "film")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(Theme.brand)
+                            .frame(width: 20)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("KSPlayer 内核测试")
+                                .font(.subheadline)
+                            Text("验证 MKV / HEVC / DTS 播放（临时入口）")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 13)
+                }
+                .buttonStyle(.plain)
+                Divider().padding(.leading, 44)
                 // VidHub 外播方式。⚠️ /play 没有「定位后自动播放」的参数：
                 // 只要传了 position，VidHub 就 seek 到该帧并暂停，所以
                 //「打开即播」和「从上次位置继续」只能二选一。

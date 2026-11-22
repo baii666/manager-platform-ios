@@ -7,6 +7,12 @@ options:
   deploymentTarget:
     iOS: "17.0"
   createIntermediateGroups: true
+# KSPlayer 内核验证 demo 用。2.3.4 是 GPL 源码版（swift-tools 5.9、iOS 13+），
+# 真机可编译；5.6.2/main 的 GPL 版只有模拟器/Mac/tvOS 二进制且要 Swift 6.2，不可用。
+packages:
+  KSPlayer:
+    url: https://github.com/kingslay/KSPlayer.git
+    exact: "2.3.4"
 targets:
   MediaManager:
     type: application
@@ -14,6 +20,8 @@ targets:
     deploymentTarget: "17.0"
     sources:
       - path: MediaManager
+    dependencies:
+      - package: KSPlayer
     settings:
       base:
         # 必填：缺失会让模拟器安装时报 "missing bundle id"
