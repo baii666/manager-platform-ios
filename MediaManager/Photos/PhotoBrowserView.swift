@@ -97,17 +97,125 @@ struct PhotoBrowserView: View {
     }
 }
 
+// MARK: - 云端浏览器首页（配置目录列表）
+/// 进入云 tab 第一屏：列出 /api/cloudlib/status 的配置入库目录 + 每目录条目数。
+/// 点某个目录 push CloudBrowserView(root:) 按 root 筛选；「全部目录」root=nil。
+/// 🔴 放在本文件（不新建 .swift）：Windows 无 xcodegen，新建文件要重新 generate 且冲掉手选 Team。
+struct CloudRootListView: View {
+    /// 是否处于云 tab。RootView 的 ZStack 一次性创建全部 tab，
+    /// 本页的 .task 必须等真正切到云 tab 才加载，别在 App 启动瞬间发请求。
+    var active: Bool = true
+    @StateObject private var vm = CloudRootListViewModel()
+
+    var body: some View {
+        Group {
+            if vm.isLoading && vm.roots.isEmpty {
+                ProgressView("加载目录…")
+            } else if !vm.error.isEmpty, vm.roots.isEmpty {
+                VStack(spacing: 12) {
+                    Image(systemName: "exclamationmark.triangle").font(.title2).foregroundStyle(.orange)
+                    Text(vm.error).font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                    Button("重试") { Task { await vm.load() } }
+                }
+            } else {
+                List {
+                    // 全部目录：root=nil，走原来的全库瀑布流
+                    NavigationLink {
+                        CloudBrowserView(root: nil)
+                    } label: {
+                        rootRow(icon: "square.stack.3d.up.fill",
+                                title: "全部目录",
+                                detail: "\(vm.totalItems) 项 · 所有配置目录",
+                                color: .accentColor)
+                    }
+                    ForEach(vm.roots) { r in
+                        NavigationLink {
+                            CloudBrowserView(root: r)
+                        } label: {
+                            rootRow(icon: "folder.fill",
+                                    title: r.netPath.isEmpty ? "（未命名目录）" : r.netPath,
+                                    detail: "\(r.activeItems) 项 · \(r.mount)",
+                                    color: .orange)
+                        }
+                    }
+                }
+                .listStyle(.insetGrouped)
+                .scrollContentBackground(.hidden)
+            }
+        }
+        .navigationTitle("云端浏览器")
+        .navigationBarTitleDisplayMode(.inline)
+        .refreshable { await vm.load() }
+        // 🔴 只在云 tab 激活时首次加载；切到别的 tab 不发请求。
+        .task(id: active) {
+            if active { await vm.load() }
+        }
+        .bottomBarClearance()
+        .appBackground()
+    }
+
+    private func rootRow(icon: String, title: String, detail: String, color: Color) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon).font(.title3).foregroundStyle(color)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.subheadline.weight(.medium)).lineLimit(1)
+                Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+final class CloudRootListViewModel: ObservableObject {
+    @Published var roots: [CloudRoot] = []
+    @Published var totalItems: Int = 0
+    @Published var isLoading = false
+    @Published var error: String = ""
+
+    @MainActor
+    func load() async {
+        isLoading = true
+        error = ""
+        defer { isLoading = false }
+        guard let client = AppSession.shared.client else {
+            error = "未连接服务器"
+            return
+        }
+        do {
+            let resp = try await client.fetchCloudStatus()
+            roots = resp.roots
+            totalItems = resp.activeItems
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+}
+
 // MARK: - 云端浏览器（cloudlib 本地入库轻表：图片瀑布流 + 视频卡片）
 // 数据源 = GET /api/cloudlib/items（读本地 cloud_items，零 115、零 X 盘 stat）。
 // 图片缩略图走 /thumb、原图走 /raw（都免认证）；视频点开复用 PlayerHostView 全套播放链路。
 // 🔴 放在本文件（不新建 .swift）：Windows 无 xcodegen，新建文件要重新 generate 且冲掉手选 Team。
 struct CloudBrowserView: View {
-    @StateObject private var vm = CloudBrowserViewModel()
+    /// 选中的配置目录；nil = 全部。目录列表页点进来时传入。
+    var root: CloudRoot? = nil
+    @StateObject private var vm: CloudBrowserViewModel
     @State private var playRequest: PlaybackRequest?
     /// 瀑布流列数：捏合缩放 + 各页记忆（与相册/搜索/人物页同一套 PhotoGrid）。
     @State private var columns = PhotoGridPrefs.load("cloudBrowser", fallback: 3)
     /// 视频卡片用固定网格（条数少，不需要捏合缩放）
     private let videoColumns = [GridItem(.adaptive(minimum: 110), spacing: 8)]
+
+    init(root: CloudRoot? = nil) {
+        self.root = root
+        _vm = StateObject(wrappedValue: CloudBrowserViewModel(root: root))
+    }
+
+    /// 顶栏标题：全部=「全部目录」，单目录取路径最后一段（完整路径太长放不下）。
+    private var navTitle: String {
+        guard let r = root else { return "全部目录" }
+        let parts = r.netPath.split(separator: "/").map(String.init)
+        return parts.last ?? r.netPath
+    }
 
     var body: some View {
         Group {
@@ -117,7 +225,7 @@ struct CloudBrowserView: View {
                 cloudVideoGrid
             }
         }
-        .navigationTitle("云端浏览器")
+        .navigationTitle(navTitle)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             // 🔴 与相册详情页一致：图片/视频 tab 放系统顶栏正中（principal），
@@ -329,6 +437,8 @@ final class CloudBrowserViewModel: ObservableObject {
     @Published var error: String = ""
 
     private let client: APIClient?
+    /// 当前选中的配置目录（nil = 全部目录）。作为 root_key 筛选传给 items 接口。
+    let root: CloudRoot?
     /// 一次拉混合数据本地分组：视频占比小，页大一点减少「加载更多」点击
     private let pageSize = 200
     private var total = 0
@@ -336,7 +446,8 @@ final class CloudBrowserViewModel: ObservableObject {
     /// 避免残页 append 进新列表造成排序错乱。
     private var epoch = 0
 
-    init(client: APIClient? = nil) {
+    init(root: CloudRoot? = nil, client: APIClient? = nil) {
+        self.root = root
         self.client = client ?? AppSession.shared.client
     }
 
@@ -401,7 +512,7 @@ final class CloudBrowserViewModel: ObservableObject {
         defer { if myEpoch == epoch { isLoading = false } }
         do {
             let resp = try await client.fetchCloudItems(
-                type: nil, q: query.isEmpty ? nil : query,
+                type: nil, root: root?.key, q: query.isEmpty ? nil : query,
                 limit: pageSize, offset: offset)
             guard myEpoch == epoch else { return }   // 代次已变：丢弃过期结果
             if resp.ok || !resp.items.isEmpty {

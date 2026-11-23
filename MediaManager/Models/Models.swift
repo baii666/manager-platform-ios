@@ -1694,6 +1694,54 @@ extension String {
 }
 
 // MARK: - 云端浏览器（cloudlib 本地入库轻表）
+
+/// 后端 GET /api/cloudlib/status 里的一个配置入库目录（root）。
+/// net_path 是网盘绝对路径（如 /云下载/06_待归类），当作 root 筛选值传给 items 接口；
+/// active_items 来自 status.per_root，由 APIClient 按 root_net_path 合并进来。
+struct CloudRoot: Identifiable, Codable, Hashable, Sendable {
+    var netPath: String = ""
+    var mount: String = ""
+    var activeItems: Int = 0
+    var id: String { netPath }
+    var key: String { netPath.trimmingCharacters(in: CharacterSet(charactersIn: "/")) }
+
+    /// 🔴 后端 roots[] 没有 active_items（计数只在 per_root[]），
+    /// 这里绝不能声明该 key —— 否则 Codable 解码缺字段抛 keyNotFound，
+    /// 整个 fetchCloudStatus 失败 → 云端目录首页进错误态。
+    /// activeItems 由 APIClient 从 per_root 合并后手动赋值，保持默认值 0 即可。
+    enum CodingKeys: String, CodingKey {
+        case netPath = "net_path"
+        case mount
+    }
+}
+
+/// GET /api/cloudlib/status 响应（只取目录列表需要的字段）
+struct CloudStatusResponse: Codable, Sendable {
+    var ok: Bool = false
+    var roots: [CloudRoot] = []
+    var perRoot: [CloudPerRootCount] = []
+    var activeItems: Int = 0
+
+    enum CodingKeys: String, CodingKey {
+        case ok, roots
+        case perRoot = "per_root"
+        case activeItems = "active_items"
+    }
+}
+
+/// per_root 单项：按 rootNetPath 把条目数并到 CloudRoot.activeItems
+struct CloudPerRootCount: Codable, Sendable {
+    var rootNetPath: String = ""
+    var mount: String = ""
+    var activeItems: Int = 0
+
+    enum CodingKeys: String, CodingKey {
+        case rootNetPath = "root_net_path"
+        case mount
+        case activeItems = "active_items"
+    }
+}
+
 /// 后端 GET /api/cloudlib/items 的条目。字段稳定，合成 Codable + CodingKeys 即可。
 /// 🔴 size 在目录树快照里恒为 0（快照文本只有路径），别用它做展示判断。
 struct CloudItem: Identifiable, Codable, Sendable {

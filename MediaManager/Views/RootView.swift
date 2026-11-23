@@ -79,8 +79,10 @@ struct RootView: View {
                 .opacity(tab == .short ? 1 : 0)
                 .allowsHitTesting(tab == .short)
 
-            // 云端浏览器：cloudlib 本地入库轻表的图片瀑布流 + 视频卡片
-            NavigationStack { CloudBrowserView() }
+            // 云端浏览器：第一屏=配置目录列表，点进去=该目录的图片瀑布流 + 视频卡片
+            // 🔴 传 active：ZStack 会一次性创建全部 6 个 tab，不传的话目录页的 .task
+            // 会在 App 启动瞬间就发请求。只有真正切到云 tab 才加载。
+            NavigationStack { CloudRootListView(active: tab == .cloud) }
                 .opacity(tab == .cloud ? 1 : 0)
                 .allowsHitTesting(tab == .cloud)
 
