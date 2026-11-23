@@ -79,8 +79,8 @@ struct RootView: View {
                 .opacity(tab == .short ? 1 : 0)
                 .allowsHitTesting(tab == .short)
 
-            // 云端浏览器：cloudlib 本地入库轻表的图片瀑布流 + 视频卡片
-            NavigationStack { CloudBrowserView() }
+            // 云端浏览器：第一屏=配置目录列表，点进去=该目录的图片瀑布流 + 视频卡片
+            NavigationStack { CloudRootListView() }
                 .opacity(tab == .cloud ? 1 : 0)
                 .allowsHitTesting(tab == .cloud)
 
