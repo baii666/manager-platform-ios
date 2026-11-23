@@ -378,24 +378,14 @@ struct CloudBrowserView: View {
     }
 
     private var videoSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        // 封面映射只构建一次（vm.videoCoverURLs 是计算属性，别在 ForEach 里反复算）
+        let covers = vm.videoCoverURLs
+        return VStack(alignment: .leading, spacing: 8) {
             Text("视频 · \(vm.videoItems.count)").font(.caption).foregroundStyle(.secondary)
             LazyVGrid(columns: videoColumns, spacing: 8) {
                 ForEach(vm.videoItems) { item in
                     Button { startPlay(item) } label: {
-                        VStack(spacing: 0) {
-                            ZStack {
-                                RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.08))
-                                    .aspectRatio(16 / 9, contentMode: .fit)
-                                Image(systemName: "play.circle.fill")
-                                    .font(.system(size: 30))
-                                    .foregroundStyle(.white.opacity(0.7))
-                            }
-                            Text(item.displayName)
-                                .font(.caption2).lineLimit(2).multilineTextAlignment(.leading)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .foregroundStyle(.primary)
-                        }
+                        CloudVideoCard(item: item, coverURL: covers[item.id])
                     }
                     .buttonStyle(.plain)
                 }
@@ -430,6 +420,48 @@ struct CloudBrowserView: View {
                                       title: item.displayName,
                                       assetType: nil, assetID: nil,
                                       startAt: nil, knownDuration: nil)
+    }
+}
+
+/// 云端视频卡片：同目录预览图铺满 16:9 + 播放角标 + 底部渐变标题。
+/// 无封面/加载失败时 RemoteImage 自动降级到渐变 + 胶片图标占位，不会开天窗。
+private struct CloudVideoCard: View {
+    let item: CloudItem
+    let coverURL: URL?
+
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            // 封面铺满裁切；ImageCache 两层缓存，动图取第一帧静态显示（封面无需动）
+            RemoteImage(url: coverURL, fallbackIcon: "film",
+                        fallbackColors: [Color.purple.opacity(0.35), Color.blue.opacity(0.18)])
+                .aspectRatio(16 / 9, contentMode: .fill)
+                .frame(maxWidth: .infinity)
+                .clipped()
+
+            // 顶部中央播放角标（半透明圆底，任何封面颜色上都清晰）
+            Image(systemName: "play.fill")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 30, height: 30)
+                .background(.black.opacity(0.45), in: Circle())
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+
+            // 底部渐变 + 文件名（保证浅色封面上的文字可读）
+            LinearGradient(colors: [.clear, .black.opacity(0.72)], startPoint: .center, endPoint: .bottom)
+                .frame(height: 44)
+
+            Text(item.displayName)
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.white)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 6)
+                .padding(.bottom, 5)
+        }
+        .aspectRatio(16 / 9, contentMode: .fit)
+        .cornerRadius(7)
+        .clipped()
     }
 }
 
@@ -474,6 +506,24 @@ final class CloudBrowserViewModel: ObservableObject {
             let u = client?.cloudRawURL(path: item.localPath)
             return item.asPhoto(thumb: u, full: u)
         }
+    }
+
+    /// 视频卡片封面 = 同目录下第一张图片的 /raw URL。
+    /// jav 压制视频旁都有配套预览图（IMG_2725.mp4 ↔ IMG_2725_01.gif），
+    /// 图片/视频本来就在同一批 items 里 → 本地构建 dir→封面 映射，零额外请求。
+    /// 挂载盘在线时显示真实预览图，离线时 RemoteImage 自动降级到渐变占位。
+    var videoCoverURLs: [Int: URL] {
+        var coverByDir: [String: String] = [:]
+        for item in items where item.isImage && !item.localPath.isEmpty {
+            if coverByDir[item.dirPath] == nil { coverByDir[item.dirPath] = item.localPath }
+        }
+        var result: [Int: URL] = [:]
+        for item in items where item.isVideo {
+            if let p = coverByDir[item.dirPath], let u = client?.cloudRawURL(path: p) {
+                result[item.id] = u
+            }
+        }
+        return result
     }
 
     func loadInitial() async {
