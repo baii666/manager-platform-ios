@@ -336,9 +336,7 @@ final class VidHubLauncher: ObservableObject {
         // ⚠️ 不能用 client.streamURL(path:)：那个方法只放行 MP4/M4V/MOV
         //（AVPlayer 解不了的容器返回 nil）。VidHub 自带解码器，MKV/HEVC/DTS
         // 都能解，所以绕开扩展名过滤，直接给原始文件流地址。
-        guard let mediaURL = client.makeURL("/stream", queryItems: [
-            URLQueryItem(name: "path", value: path)
-        ]) else {
+        guard let mediaURL = client.streamURLStrict(path) else {
             error = "拼接播放地址失败"; return
         }
 

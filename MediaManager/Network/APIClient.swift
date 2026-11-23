@@ -57,6 +57,16 @@ final class APIClient: DataProviding, @unchecked Sendable {
         return comp?.url
     }
 
+    /// /stream 播放地址专用：同样要严格编码 `+`（后端 c.Query 会把 + 解成空格 →
+    /// 带 "+" 的目录（如 204M_14V+82P）视频路径匹配不上 → Cannot Open）。
+    /// /stream 免认证，不拼 token，保持与原来 makeURL 一致的行为。
+    func streamURLStrict(_ path: String) -> URL? {
+        var comp = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)
+        comp?.path = "/stream"
+        comp?.percentEncodedQuery = "path=" + encodedQueryValue(path)
+        return comp?.url
+    }
+
     /// 把后端返回的相对 URL（如 /media-image?id=1）解析成完整 URL
     func resolve(_ url: URL?) -> URL? {
         guard let url, !url.absoluteString.isEmpty else { return nil }
@@ -123,7 +133,7 @@ final class APIClient: DataProviding, @unchecked Sendable {
         guard !path.isEmpty else { return nil }
         let ext = (path as NSString).pathExtension.lowercased()
         guard Self.directPlayExts.contains(ext) else { return nil }
-        return makeURL("/stream", queryItems: [URLQueryItem(name: "path", value: path)])
+        return streamURLStrict(path)
     }
 
     /// KSPlayer 直连原始流地址：不受扩展名过滤，MKV/AVI/TS 等一律放行。
@@ -131,7 +141,7 @@ final class APIClient: DataProviding, @unchecked Sendable {
     /// 借鉴 VidHubBridge 的做法（VidHub 自带解码器时也是绕开 streamURL 直接拼 /stream）。
     func ksStreamURL(path: String) -> URL? {
         guard !path.isEmpty else { return nil }
-        return makeURL("/stream", queryItems: [URLQueryItem(name: "path", value: path)])
+        return streamURLStrict(path)
     }
 
     /// 该片源是否要走 KSPlayer(FFmpeg) 内核。
