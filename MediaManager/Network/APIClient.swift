@@ -33,6 +33,30 @@ final class APIClient: DataProviding, @unchecked Sendable {
         return comp?.url
     }
 
+    /// 🔴 严格 query 编码：URLQueryItem(name:value:) 会把 `+` 原样留在 query 里，
+    /// 后端 Gin 的 c.Query 把 `+` 解码成空格 → 路径匹配不上 → /raw 404。
+    /// 云端很多目录名带 `+`（如 "204M_14V+82P_1配额"），必须手动把 `+` 编成 %2B。
+    /// 用 RFC3986 严格 unreserved 字符集：字母数字 + -._~，其它（含中文/反斜杠/+）全编码。
+    private func encodedQueryValue(_ value: String) -> String {
+        // 🔴 不能用 CharacterSet.alphanumerics：它含中文汉字等 Unicode 字母，
+        // 中文就不会被编码，和后端已验证的 200 URL 不一致。用显式 ASCII unreserved。
+        let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~")
+        return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
+    }
+
+    /// 用 percentEncodedQuery 直接拼云端 URL（绕过 URLQueryItem 的 `+` 不编码坑）。
+    private func cloudURL(_ endpoint: String, path: String, extra: [(String, String)] = []) -> URL? {
+        var comp = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)
+        comp?.path = endpoint
+        var parts = ["path=" + encodedQueryValue(path)]
+        for (k, v) in extra { parts.append(k + "=" + encodedQueryValue(v)) }
+        if let tok = AppSession.shared.sessionToken, !tok.isEmpty {
+            parts.append("token=" + encodedQueryValue(tok))
+        }
+        comp?.percentEncodedQuery = parts.joined(separator: "&")
+        return comp?.url
+    }
+
     /// 把后端返回的相对 URL（如 /media-image?id=1）解析成完整 URL
     func resolve(_ url: URL?) -> URL? {
         guard let url, !url.absoluteString.isEmpty else { return nil }
@@ -1082,24 +1106,14 @@ final class APIClient: DataProviding, @unchecked Sendable {
 
     /// 云端图片缩略图（后端 /thumb 直接读本地映射文件，零 115）。
     func cloudThumbURL(path: String) -> URL? {
-        var items = [URLQueryItem(name: "path", value: path),
-                     URLQueryItem(name: "fast", value: "1")]
-        if let tok = AppSession.shared.sessionToken, !tok.isEmpty {
-            items.append(URLQueryItem(name: "token", value: tok))
-        }
-        return makeURL("/thumb", queryItems: items)
+        cloudURL("/thumb", path: path, extra: [("fast", "1")])
     }
 
     /// 云端原图 / 视频直链（后端 /raw，Range 流式返回）。
     /// `cloud=1` 是客户端标记（后端忽略），让 ImageCache 认出这是云端快照图，
     /// 套用 7 天校验间隔而非普通 /raw 的 5 分钟。
     func cloudRawURL(path: String) -> URL? {
-        var items = [URLQueryItem(name: "path", value: path),
-                     URLQueryItem(name: "cloud", value: "1")]
-        if let tok = AppSession.shared.sessionToken, !tok.isEmpty {
-            items.append(URLQueryItem(name: "token", value: tok))
-        }
-        return makeURL("/raw", queryItems: items)
+        cloudURL("/raw", path: path, extra: [("cloud", "1")])
     }
 
     /// 配置的入库目录列表（含每目录 active 条目数），用于云端浏览器首页。
