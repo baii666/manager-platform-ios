@@ -152,11 +152,33 @@ struct CloudBrowserView: View {
             onRefresh: { await vm.reload() }
         )
         .overlay {
-            if vm.items.isEmpty && !vm.isLoading { emptyState }
-            else if !vm.error.isEmpty && !vm.isLoading {
+            if vm.items.isEmpty && vm.isLoading {
+                ProgressView("加载中…")
+            } else if vm.items.isEmpty {
+                emptyState
+            } else if !vm.error.isEmpty && !vm.isLoading {
                 VStack { errorBanner; Spacer() }
             }
         }
+        // 翻页加载提示：悬浮在底部，不进 VStack、不占布局高度 ——
+        // PhotoGrid 自己滚，不能再塞 footer 进内容（那会走回 fitsContent 连锁老路）。
+        .overlay(alignment: .bottom) {
+            if vm.isLoading && !vm.items.isEmpty { loadingMoreIndicator }
+        }
+    }
+
+    /// 自动翻页时的转圈提示，悬浮胶囊，只在真正加载中显示。
+    private var loadingMoreIndicator: some View {
+        HStack(spacing: 8) {
+            ProgressView()
+            Text("加载更多…")
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(.regularMaterial, in: Capsule())
+        .padding(.bottom, 16)
     }
 
     /// 视频条数少，用普通 ScrollView + LazyVGrid（保留 SwiftUI 原生下拉刷新）。
@@ -168,7 +190,11 @@ struct CloudBrowserView: View {
         }
         .refreshable { await vm.reload() }
         .overlay {
-            if vm.videoItems.isEmpty && !vm.isLoading { emptyState }
+            if vm.videoItems.isEmpty && vm.isLoading {
+                ProgressView("加载中…")
+            } else if vm.videoItems.isEmpty {
+                emptyState
+            }
         }
     }
 
