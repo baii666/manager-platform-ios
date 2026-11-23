@@ -1365,6 +1365,14 @@ struct ViewerImageView: View {
             placeholder = ImageCache.shared.image(for: thumbURL)
         }
 
+        // 🔴 云端浏览器的 fast=1 图：缩略图 URL == 原图 URL，缓存里那份就是"能显示的最大档"
+        //（缓存缺失直出原图 / 命中出可显示档）。直接用它秒开，不另走 fullURL 下载 + 转圈。
+        // 只对"两个 URL 相同"的图生效，普通照片页 thumb(600) != full(original) 不受影响。
+        if let thumbURL = photo.thumbURL, photo.fullURL == thumbURL, let cached = placeholder {
+            finish(cached, newTier: .full)
+            return
+        }
+
         // 已决定退回缩略图：thumbURL 本身就是 600 标准缩略图（后端全局唯一档），直接普通加载
         if fallBackToThumb {
             guard let url = photo.thumbURL else { isLoading = false; return }

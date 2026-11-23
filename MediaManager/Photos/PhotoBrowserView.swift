@@ -347,8 +347,12 @@ final class CloudBrowserViewModel: ObservableObject {
     /// 图片转瀑布流 Photo：thumb/full URL 由 APIClient 拼（带 token 兼容收紧认证）
     var imagePhotos: [Photo] {
         imageItems.map { item in
-            item.asPhoto(thumb: client?.cloudThumbURL(path: item.localPath),
-                         full: client?.cloudRawURL(path: item.localPath))
+            // 🔴 fullURL 也用 /thumb?fast=1（与缩略图同 URL）：云端 fast=1 在缓存缺失时
+            // 直出原图、命中时出可显示档，本身就是"能显示的最大档"。若 fullURL 用 /raw，
+            // 看图器会按另一套缓存 key 重新下大原图 —— 占位图（缩略图=原图）已显示，
+            // 但 /raw 下载慢导致"加载原图"转圈一直不停。同 URL 后看图器走快速路径秒开。
+            let u = client?.cloudThumbURL(path: item.localPath)
+            return item.asPhoto(thumb: u, full: u)
         }
     }
 
