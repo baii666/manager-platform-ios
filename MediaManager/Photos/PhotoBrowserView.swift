@@ -458,20 +458,10 @@ final class CloudBrowserViewModel: ObservableObject {
     /// 图片转瀑布流 Photo：thumb/full URL 由 APIClient 拼（带 token 兼容收紧认证）
     var imagePhotos: [Photo] {
         imageItems.map { item in
-            // 🔴 按格式分流（实测 /raw 比 /thumb 慢 3~4 倍：/raw 实时读挂载盘无缓存，
-            // /thumb 命中本地 thumb_cache 直接读本地盘）：
-            // - 动图（gif/apng）：必须走 /raw 原图。/thumb 缓存缺失直吐 3MB gif（慢+灰块），
-            //   命中时出 webp 缩略图，都保不住动画。/raw + ImageCache 动图解码才能动。
-            // - 静态图（jpg/png/heic）：走 /thumb?fast=1 缩略图，秒开；它们本就无动画。
-            //   heic 后端 fast=1 有强制转码例外，能正常显示。
-            // 🔴 后端 ext 字段带前导点（实测 ".gif"/".jpg"），且部分脏数据
-            // （".41g_17v_1配额】"）—— 不能用 ext == "gif"，永远不匹配。
-            // 直接用 localPath 后缀判断最稳。
-            let lower = item.localPath.lowercased()
-            let isAnimated = lower.hasSuffix(".gif") || lower.hasSuffix(".apng")
-            let u = isAnimated
-                ? client?.cloudRawURL(path: item.localPath)
-                : client?.cloudThumbURL(path: item.localPath)
+            // 🔴 云端一律原图 /raw，不生成也不使用缩略图（用户明确要求）。
+            // 云端是入库的压缩快照，原图体积可控（实测 jpg 97KB / png 457KB / gif 3MB）。
+            // 动图走 /raw 才能保住动画（thumb 出来的 webp 会被压成静态第一帧）。
+            let u = client?.cloudRawURL(path: item.localPath)
             return item.asPhoto(thumb: u, full: u)
         }
     }
