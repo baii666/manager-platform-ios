@@ -61,6 +61,10 @@ final class ImageCache: @unchecked Sendable {
     func clearAll() {
         memory.removeAllObjects()
         metas.removeAllObjects()
+        // 🔴 必须连 URLSession 的系统级 NSURLCache 一起清。之前只清自己的磁盘目录，
+        // NSURLCache 里仍留着 /thumb 的 Last-Modified 响应；下次请求带 If-Modified-Since
+        // 拿到 304 后 load() 的 304 分支会 return image(for:)（本地已被清）→ nil → 满屏灰砖。
+        URLCache.shared.removeAllCachedResponses()
         guard let files = try? fileManager.contentsOfDirectory(at: diskDir,
                                                                includingPropertiesForKeys: nil) else { return }
         for f in files { try? fileManager.removeItem(at: f) }
@@ -124,9 +128,27 @@ final class ImageCache: @unchecked Sendable {
             let status = (response as? HTTPURLResponse)?.statusCode ?? 200
 
             if status == 304 {
-                // 服务端说没变：刷新「已确认」时刻，继续用本地这份
-                touchValidated(for: url)
-                return image(for: url)
+                // 服务端说没变：正常情况刷新确认时刻、继续用本地这份。
+                // 🔴 但 NSURLCache 可能仍缓存着旧响应（Last-Modified 条件请求命中），
+                // 而 ImageCache 自己的磁盘图已被 clearAll 清掉 —— 这时 image(for:) 返回 nil，
+                // 直接 return 就是灰砖。本地图没了就当没缓存处理：清掉系统缓存、忽略缓存强制回源重写一份。
+                if let local = image(for: url) {
+                    touchValidated(for: url)
+                    return local
+                }
+                URLCache.shared.removeCachedResponse(for: URLRequest(url: url))
+                do {
+                    let (data2, resp2) = try await URLSession.shared.data(
+                        for: URLRequest(url: url, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: 30))
+                    guard let img2 = UIImage(data: data2).map(forceDecoded) else { return nil }
+                    if cacheToDisk { store(img2, for: url) }
+                    else { memory.setObject(img2, forKey: url.absoluteString as NSString) }
+                    saveMeta(EntryMeta(etag: (resp2 as? HTTPURLResponse)?.value(forHTTPHeaderField: "ETag"),
+                                       validatedAt: Date()), for: url)
+                    return img2
+                } catch {
+                    return nil
+                }
             }
 
             // 惰性解码坑：UIImage(data:) 只标记数据，真正的位图解码发生在
