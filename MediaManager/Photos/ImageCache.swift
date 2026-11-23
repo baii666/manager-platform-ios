@@ -1,5 +1,6 @@
 import UIKit
 import CryptoKit
+import ImageIO
 
 // MARK: - 图片缓存（内存 NSCache + 磁盘）
 // 应对百万级照片的关键：内存命中极快、磁盘兜底、自动 LRU 淘汰。
@@ -77,8 +78,11 @@ final class ImageCache: @unchecked Sendable {
         let memKey = url.absoluteString as NSString
         if let img = memory.object(forKey: memKey) { return img }
         let file = diskDir.appendingPathComponent(key(for: url))
-        guard let data = try? Data(contentsOf: file),
-              let img = UIImage(data: data) else { return nil }
+        guard let data = try? Data(contentsOf: file) else { return nil }
+        // 🔴 磁盘里动图存的是原始字节，UIImage(data:) 只会解第一帧 → 重启后动图变静态。
+        // 和下载路径一样先走 ImageIO 解码。
+        let img = decodeAnimated(data) ?? UIImage(data: data)
+        guard let img else { return nil }
         memory.setObject(img, forKey: memKey)
         return img
     }
@@ -96,13 +100,45 @@ final class ImageCache: @unchecked Sendable {
         }
     }
 
-    /// 把下载到的字节解码成可显示图片：动图不 forceDecoded（渲染器只画第一帧，会把
-    /// gif/apng 压成静态），静态图照旧强制解码消除首帧主线程卡顿。
-    /// 返回 (图片, 是否动图)，调用方据此决定是否把原始字节交给 store 保住动画。
+    /// 把下载到的字节解码成可显示图片。
+    /// 🔴 关键：iOS 的 `UIImage(data:)` 对 GIF/APNG **只解第一帧**（`images` 为 nil）——
+    /// 这是本项目 AnimatedWebView 里已验证的事实。所以动图必须用 ImageIO 逐帧解出，
+    /// 生成 `UIImage.animatedImage`（SwiftUI `Image(uiImage:)` / UIImageView 都能直接播）。
+    /// 静态图照旧 forceDecoded 消除首帧主线程卡顿。
+    /// 返回 (图片, 是否动图)，调用方据此决定是否把原始字节交给 store。
     private func decode(_ data: Data) -> (UIImage, Bool)? {
+        if let animated = decodeAnimated(data) { return (animated, true) }
         guard let src = UIImage(data: data) else { return nil }
-        let animated = (src.images?.count ?? 0) > 1
-        return (animated ? src : forceDecoded(src), animated)
+        return (forceDecoded(src), false)
+    }
+
+    /// ImageIO 逐帧解码 GIF/APNG → 可播放的 animated UIImage；单帧/解码失败返回 nil。
+    /// 帧间隔从 GIF 的 kCGImagePropertyGIFDictionary 读，缺省 0.1s。
+    private func decodeAnimated(_ data: Data) -> UIImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        let count = CGImageSourceGetCount(source)
+        guard count > 1 else { return nil }
+        var frames: [UIImage] = []
+        var durations: [TimeInterval] = []
+        for i in 0..<count {
+            guard let cg = CGImageSourceCreateImageAtIndex(source, i, nil) else { continue }
+            frames.append(UIImage(cgImage: cg))
+            durations.append(gifDelay(at: i, in: source))
+        }
+        guard frames.count > 1 else { return nil }
+        // durations 仅在都有效时用于近似统一帧率；animatedImage 用单张 duration 表示总时长，
+        // 逐帧不等间隔无法精确表达，取平均即可（这批 GIF 实测都是恒定 0.1s）。
+        let avg = durations.reduce(0, +) / Double(durations.count)
+        let perFrame = avg > 0 && avg.isFinite ? avg : 0.1
+        return UIImage.animatedImage(with: frames, duration: perFrame * Double(frames.count))
+    }
+
+    private func gifDelay(at index: Int, in source: CGImageSource) -> TimeInterval {
+        guard let props = CGImageSourceCopyPropertiesAtIndex(source, index, nil) as? [CFString: Any],
+              let gif = props[kCGImagePropertyGIFDictionary] as? [CFString: Any],
+              let raw = gif[kCGImagePropertyGIFDelayTime] as? NSNumber else { return 0.1 }
+        let d = raw.doubleValue
+        return d > 0 && d.isFinite ? d : 0.1
     }
 
     /// 下载 + 缓存 + 返回；命中缓存则直接返回
