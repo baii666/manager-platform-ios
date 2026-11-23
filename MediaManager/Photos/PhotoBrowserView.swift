@@ -198,6 +198,9 @@ final class CloudRootListViewModel: ObservableObject {
 struct CloudBrowserView: View {
     /// 选中的配置目录；nil = 全部。目录列表页点进来时传入。
     var root: CloudRoot? = nil
+    /// 🔴 目录路径筛选（看图器「打开所在文件夹」用）。非 nil 时按 dir_path 精确列该目录，
+    /// root 忽略。复用本视图 = 图片+视频都能显示、都能继续点开（点图看图、点视频播放）。
+    var dir: String? = nil
     @StateObject private var vm: CloudBrowserViewModel
     @State private var playRequest: PlaybackRequest?
     /// 瀑布流列数：捏合缩放 + 各页记忆（与相册/搜索/人物页同一套 PhotoGrid）。
@@ -205,13 +208,17 @@ struct CloudBrowserView: View {
     /// 视频卡片用固定网格（条数少，不需要捏合缩放）
     private let videoColumns = [GridItem(.adaptive(minimum: 110), spacing: 8)]
 
-    init(root: CloudRoot? = nil) {
+    init(root: CloudRoot? = nil, dir: String? = nil) {
         self.root = root
-        _vm = StateObject(wrappedValue: CloudBrowserViewModel(root: root))
+        self.dir = dir
+        _vm = StateObject(wrappedValue: CloudBrowserViewModel(root: root, dir: dir))
     }
 
-    /// 顶栏标题：全部=「全部目录」，单目录取路径最后一段（完整路径太长放不下）。
+    /// 顶栏标题：文件夹模式取目录名，全部=「全部目录」，单目录取路径最后一段。
     private var navTitle: String {
+        if let dir, !dir.isEmpty {
+            return dir.split(separator: "/").map(String.init).last ?? dir
+        }
         guard let r = root else { return "全部目录" }
         let parts = r.netPath.split(separator: "/").map(String.init)
         return parts.last ?? r.netPath
@@ -439,6 +446,8 @@ final class CloudBrowserViewModel: ObservableObject {
     private let client: APIClient?
     /// 当前选中的配置目录（nil = 全部目录）。作为 root_key 筛选传给 items 接口。
     let root: CloudRoot?
+    /// 🔴 目录路径筛选（看图器「打开所在文件夹」）。非 nil 时按 dir_path 列该目录，忽略 root。
+    let dir: String?
     /// 一次拉混合数据本地分组：视频占比小，页大一点减少「加载更多」点击
     private let pageSize = 200
     private var total = 0
@@ -446,8 +455,9 @@ final class CloudBrowserViewModel: ObservableObject {
     /// 避免残页 append 进新列表造成排序错乱。
     private var epoch = 0
 
-    init(root: CloudRoot? = nil, client: APIClient? = nil) {
+    init(root: CloudRoot? = nil, dir: String? = nil, client: APIClient? = nil) {
         self.root = root
+        self.dir = dir
         self.client = client ?? AppSession.shared.client
     }
 
@@ -511,7 +521,8 @@ final class CloudBrowserViewModel: ObservableObject {
         defer { if myEpoch == epoch { isLoading = false } }
         do {
             let resp = try await client.fetchCloudItems(
-                type: nil, root: root?.key, q: query.isEmpty ? nil : query,
+                type: nil, dir: dir, root: dir != nil ? nil : root?.key,
+                q: query.isEmpty ? nil : query,
                 limit: pageSize, offset: offset)
             guard myEpoch == epoch else { return }   // 代次已变：丢弃过期结果
             if resp.ok || !resp.items.isEmpty {

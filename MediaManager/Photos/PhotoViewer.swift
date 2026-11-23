@@ -643,6 +643,18 @@ struct PhotoViewerView: View {
 
                 Spacer()
 
+                // 🔴 云端图片：打开所在文件夹（展示该目录的图片+视频，可继续点）。
+                // 仅 cloudDirPath 非空时显示 —— 本地照片不显示。
+                if let dir = photo?.cloudDirPath, !dir.isEmpty {
+                    Button { presenter.openCloudFolder(dirPath: dir) } label: {
+                        Image(systemName: "folder")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 34, height: 34)
+                            .background(.black.opacity(0.35), in: Circle())
+                    }
+                }
+
                 Button { close() } label: {
                     Image(systemName: "xmark")
                         .font(.system(size: 15, weight: .semibold))
@@ -1954,6 +1966,57 @@ struct PersonPageLayer: View {
         .onChange(of: path.count) { _, count in
             closeTask?.cancel()
             // 等系统 pop 动画（约 0.35s）结束再撤层，否则中途会闪白
+            guard count == 0 else { return }
+            closeTask = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 350_000_000)
+                onClose()
+            }
+        }
+        .onDisappear { closeTask?.cancel() }
+    }
+}
+
+// MARK: - 云端文件夹页层（盖在看图器之上）
+// 看图器顶栏「打开所在文件夹」→ 按当前图的 dir_path 列该目录下的图片+视频。
+// 与 AlbumPageLayer / PersonPageLayer 完全同构：自带 NavigationStack（看图器是全局
+// overlay、不在 tab 的导航栈里，不能直接用 NavigationLink），系统 push 带原生右滑返回；
+// pop 掉后撤层，下面的看图器 + 详情卡片原地可见，全程不重建、不重新弹出。
+//
+// 内容复用 CloudBrowserView(dir:)：图片/视频 tab、点图继续看图、点视频播放全套现成。
+struct CloudFolderPageLayer: View {
+    let target: CloudFolderOpenTarget
+    /// push/pop 过渡期的不透明根背景（openCloudFolder 时抓的整屏快照），
+    /// 避免系统过渡中透明根露出窗口底色（浅色模式 = 大白屏）。
+    let backdrop: UIImage?
+    var onClose: () -> Void
+
+    /// 文件夹页是本层内部 push 上去的，pop 掉它才算返回
+    @State private var path = NavigationPath()
+    @State private var closeTask: Task<Void, Never>?
+
+    var body: some View {
+        NavigationStack(path: $path) {
+            Group {
+                if let backdrop {
+                    Image(uiImage: backdrop).resizable()
+                } else {
+                    Color.clear
+                }
+            }
+            .ignoresSafeArea()
+            .toolbar(.hidden, for: .navigationBar)
+            .navigationDestination(for: CloudFolderOpenTarget.self) { t in
+                CloudBrowserView(dir: t.dirPath)
+            }
+        }
+        .ignoresSafeArea()
+        // pop 之后本层只剩静态快照，关掉交互让底下的看图器立即可用
+        .allowsHitTesting(!path.isEmpty)
+        .onAppear {
+            if path.isEmpty { path.append(target) }
+        }
+        .onChange(of: path.count) { _, count in
+            closeTask?.cancel()
             guard count == 0 else { return }
             closeTask = Task { @MainActor in
                 try? await Task.sleep(nanoseconds: 350_000_000)

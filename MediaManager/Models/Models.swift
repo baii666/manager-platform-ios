@@ -344,6 +344,11 @@ struct Photo: Identifiable, Codable, Sendable {
     /// 默认 nil → 瀑布流 cell 不画角标。⚠️ 纯客户端字段，不在 CodingKeys 里
     var badge: String? = nil
 
+    /// 🔴 云端图片所属目录（后端 cloud_items.dir_path），看图器「打开所在文件夹」用。
+    /// 仅 CloudItem.asPhoto 填入；本地照片为 nil → 看图器不显示文件夹按钮。
+    /// ⚠️ 纯客户端字段，不在 CodingKeys 里，不参与 Codable。
+    var cloudDirPath: String? = nil
+
     /// 人类可读的文件大小，信息面板用
     var sizeText: String? {
         guard let fileSize, fileSize > 0 else { return nil }
@@ -1785,6 +1790,7 @@ struct CloudItem: Identifiable, Codable, Sendable {
         p.fileName = fileName
         p.thumbURL = thumb
         p.fullURL = full
+        p.cloudDirPath = dirPath   // 看图器「打开所在文件夹」用
         return p
     }
 }

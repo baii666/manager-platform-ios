@@ -16,6 +16,13 @@ struct AlbumOpenTarget: Hashable, Identifiable {
     var id: Int { album.id }
 }
 
+/// 看图器「打开所在文件夹」的目标：云端目录的相对路径（dir_path）。
+/// 文件夹层据此按 dir 筛选 /api/cloudlib/items，展示该目录的图片+视频。
+struct CloudFolderOpenTarget: Hashable, Identifiable {
+    let dirPath: String
+    var id: String { dirPath }
+}
+
 final class PhotoViewerPresenter: ObservableObject {
     static let shared = PhotoViewerPresenter()
 
@@ -49,12 +56,20 @@ final class PhotoViewerPresenter: ObservableObject {
     /// 详情卡片点「人物头像」打开的照片集层：非 nil 时 RootView 在看图器之上
     /// 盖一层 PersonPageLayer。与相册层互斥（一次只开一个），看图器全程不卸载。
     @Published var personPageTarget: Person?
-    /// 相册页 / 人物页里点开照片时，看图器要临时升到该层之上（RootView 按它排 zIndex）。
+    /// 相册页 / 人物页 / 云端文件夹页里点开照片时，看图器要临时升到该层之上（RootView 按它排 zIndex）。
     @Published var viewerAboveAlbum = false
 
-    /// 相册层或人物层是否正盖在看图器上。状态栏语义对两者完全一致：
+    /// 「打开所在文件夹」打开的云端文件夹层：非 nil 时 RootView 在看图器之上盖一层
+    /// CloudFolderPageLayer（按 dir_path 筛选该目录的图片+视频，可继续点开）。
+    /// 与相册层/人物层互斥，看图器全程不卸载，返回时撤层就是详情卡片。
+    @Published var cloudFolderTarget: CloudFolderOpenTarget?
+    /// 云端文件夹层的整屏快照与代际令牌，用途与相册层完全相同（push/pop 过渡不露白屏）。
+    var cloudFolderBackdrop: UIImage? = nil
+    var cloudFolderOpenGeneration = 0
+
+    /// 相册层 / 人物层 / 云端文件夹层是否正盖在看图器上。状态栏语义对三者完全一致：
     /// 有层盖着时，退出看图器露出的仍是不带状态栏的那一层。
-    private var hasPageLayer: Bool { albumPageTarget != nil || personPageTarget != nil }
+    private var hasPageLayer: Bool { albumPageTarget != nil || personPageTarget != nil || cloudFolderTarget != nil }
 
     /// 「进入相册」时抓的整屏快照（看图器 + 详情卡片），相册层 NavigationStack 根的
     /// 不透明背景。普通属性（非 @Published）：openAlbum 里先抓快照再设 albumPageTarget，
@@ -151,6 +166,24 @@ final class PhotoViewerPresenter: ObservableObject {
         personPageTarget = nil
         viewerAboveAlbum = false
         personBackdrop = nil
+        if !isVisible && !hasPageLayer { statusBarHidden = false }
+    }
+
+    /// 打开当前云端图片所在文件夹：看图器原地不动，文件夹层直接盖上来。
+    /// 返回时撤掉文件夹层就是详情卡片 —— 全程不重建、不重新弹出。
+    /// 与 openAlbum/openPerson 同构（含整屏快照，push/pop 过渡不露白屏）。
+    func openCloudFolder(dirPath: String) {
+        viewerAboveAlbum = false
+        cloudFolderOpenGeneration += 1
+        cloudFolderBackdrop = Self.captureWindowSnapshot()
+        cloudFolderTarget = CloudFolderOpenTarget(dirPath: dirPath)
+    }
+
+    /// 关闭云端文件夹层（返回）：下面的看图器和详情卡片本来就在那儿
+    func closeCloudFolder() {
+        cloudFolderTarget = nil
+        viewerAboveAlbum = false
+        cloudFolderBackdrop = nil
         if !isVisible && !hasPageLayer { statusBarHidden = false }
     }
 

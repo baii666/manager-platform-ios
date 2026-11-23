@@ -161,6 +161,16 @@ struct RootView: View {
                         .zIndex(2)
                         .allowsHitTesting(!photoViewer.viewerAboveAlbum)
                 }
+                // 看图器顶栏「打开所在文件夹」→ 云端文件夹层（与相册/人物层互斥，同为 z2）。
+                // 按 dir_path 列该目录图片+视频；pop 掉撤层，露出下面的看图器+详情卡片。
+                if let folder = photoViewer.cloudFolderTarget {
+                    CloudFolderPageLayer(target: folder,
+                                         backdrop: photoViewer.cloudFolderBackdrop,
+                                         onClose: { photoViewer.closeCloudFolder() })
+                        .id(photoViewer.cloudFolderOpenGeneration)
+                        .zIndex(2)
+                        .allowsHitTesting(!photoViewer.viewerAboveAlbum)
+                }
                 // 短视频刷流：挂在 tab 层之上（z4），右滑退出时露出的是它背后的
                 // 那个 tab —— 首页卡进的露首页，短视频页点卡片进的露短视频页。
                 // ⚠️ 不能挂在 ShortsView 内部：那样右滑露出的永远是短视频列表页。
