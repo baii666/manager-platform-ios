@@ -27,6 +27,10 @@ struct PhotoGrid: View {
     var onColumnsChange: ((Int) -> Void)? = nil
     var onSelect: (Photo) -> Void = { _ in }
     var onReachEnd: () -> Void = {}
+    /// 下拉刷新回调（仅网格自己滚的根视图模式有效）。nil = 不挂 UIRefreshControl，
+    /// 现有所有调用点都不传，行为完全不变。云端浏览器靠它替代 SwiftUI .refreshable
+    /// （后者需要外层 ScrollView，会让 fitsContent=true 触发 onReachEnd 连锁）。
+    var onRefresh: (() async -> Void)? = nil
 
     /// fitsContent 模式的内容总高，由布局回调持续更新
     @State private var contentHeight: CGFloat = 0
@@ -46,6 +50,7 @@ struct PhotoGrid: View {
             onColumnsChange: onColumnsChange,
             onSelect: onSelect,
             onReachEnd: onReachEnd,
+            onRefresh: onRefresh,
             onContentHeight: { height in
                 // 负高度/NaN 一律挡掉：.frame(height:) 收到负数等于没给，收到 NaN 更糟
                 guard height.isFinite, height > 0 else { return }
@@ -71,6 +76,7 @@ private struct PhotoGridRepresentable: UIViewRepresentable {
     var onColumnsChange: ((Int) -> Void)? = nil
     var onSelect: (Photo) -> Void = { _ in }
     var onReachEnd: () -> Void = {}
+    var onRefresh: (() async -> Void)? = nil
     /// 内容总高变化（MasonryLayout 每次 prepare 后高度变了就回调）
     var onContentHeight: ((CGFloat) -> Void)? = nil
 
@@ -108,12 +114,24 @@ private struct PhotoGridRepresentable: UIViewRepresentable {
         let pinch = UIPinchGestureRecognizer(target: context.coordinator,
                                              action: #selector(Coordinator.handlePinch(_:)))
         cv.addGestureRecognizer(pinch)
+        // 下拉刷新（可选）：仅根视图模式 + 传了 onRefresh 时挂。
+        // UIRefreshControl 是 UICollectionView 原生控件，不依赖外层 SwiftUI ScrollView，
+        // 因此网格可以保持 fitsContent=false 自己滚 —— 瀑布流 + onReachEnd 自动翻页
+        // 走全 App 验证过的标准路径，不受 fitsContent 连锁翻页影响。
+        if !fitsContent, onRefresh != nil {
+            let control = UIRefreshControl()
+            control.addTarget(context.coordinator,
+                              action: #selector(Coordinator.handleRefresh(_:)),
+                              for: .valueChanged)
+            cv.refreshControl = control
+        }
         context.coordinator.collectionView = cv
         return cv
     }
 
     func updateUIView(_ cv: UICollectionView, context: Context) {
         context.coordinator.parent = self
+        context.coordinator.refreshHandler = onRefresh
         let layout = cv.collectionViewLayout as? MasonryLayout
         // columns 参数只在「父视图显式改了它」时跟随（持久化恢复 / 宽度自适应的默认值变化）。
         // ⚠️ 两个不能无条件写回的理由：
@@ -163,6 +181,14 @@ private struct PhotoGridRepresentable: UIViewRepresentable {
         /// 上次 reloadData 时的数据指纹（count + 首尾 id），用于跳过无谓的整表重载。
         /// ⚠️ 同上，外层 updateUIView 要读写
         var dataToken: (Int, Int, Int)
+        /// 下拉刷新回调（云端浏览器传；其他页面为 nil，不挂 refreshControl）
+        var refreshHandler: (() async -> Void)?
+        @objc func handleRefresh(_ control: UIRefreshControl) {
+            Task { @MainActor in
+                await refreshHandler?()
+                control.endRefreshing()
+            }
+        }
         /// 捏合开始时视野顶部的 item：列数变化后把它钉回顶部，避免内容跳动
         private var pinchAnchor: IndexPath?
         /// 每档步进的触感反馈（对齐系统相册捏合的手感）

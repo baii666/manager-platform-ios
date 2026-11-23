@@ -104,40 +104,17 @@ struct PhotoBrowserView: View {
 struct CloudBrowserView: View {
     @StateObject private var vm = CloudBrowserViewModel()
     @State private var playRequest: PlaybackRequest?
-
-    private let columns = [GridItem(.adaptive(minimum: 110), spacing: 8)]
+    /// 瀑布流列数：捏合缩放 + 各页记忆（与相册/搜索/人物页同一套 PhotoGrid）。
+    @State private var columns = PhotoGridPrefs.load("cloudBrowser", fallback: 3)
+    /// 视频卡片用固定网格（条数少，不需要捏合缩放）
+    private let videoColumns = [GridItem(.adaptive(minimum: 110), spacing: 8)]
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                VStack(spacing: 12) {
-                    // 切 tab 回顶锚点（避免切换后停在半截，也避免哨兵误触发）
-                    Color.clear.frame(height: 0).id("cloudTop")
-
-                    if vm.items.isEmpty && !vm.isLoading {
-                        emptyState
-                    } else {
-                        if vm.filter == "image" && !vm.imageItems.isEmpty {
-                            imageGrid
-                        }
-                        if vm.filter == "video" && !vm.videoItems.isEmpty {
-                            videoSection
-                        }
-                        if vm.isLoading && vm.visibleItems.isEmpty {
-                            ProgressView().padding()
-                        }
-                        errorBanner
-                    }
-
-                    loadMoreFooter
-                }
-                .padding(.horizontal, 10)
-                .padding(.top, 8)
-            }
-            .onChange(of: vm.filter) { _ in
-                withAnimation(.easeInOut(duration: 0.18)) {
-                    proxy.scrollTo("cloudTop", anchor: .top)
-                }
+        Group {
+            if vm.filter == "image" {
+                cloudImageGrid
+            } else {
+                cloudVideoGrid
             }
         }
         .navigationTitle("云端浏览器")
@@ -150,7 +127,6 @@ struct CloudBrowserView: View {
             }
             .withoutGlass()
         }
-        .refreshable { await vm.reload() }   // 🔴 只有下拉才重新请求
         .searchable(text: $vm.query, prompt: "搜索云端文件名")
         .onChange(of: vm.query) { _ in Task { await vm.reload() } }
         .bottomBarClearance()
@@ -161,33 +137,44 @@ struct CloudBrowserView: View {
         .task { await vm.loadInitial() }
     }
 
-    // 🔴 下面这些视图/闭包单独拆出来：body 里内联太多复杂表达式会让 Swift 类型检查器
-    // 直接超时（"unable to type-check this expression"，报在 ViewBuilder 的某个 if 行上）。
-    // 拆成具名计算属性后编译器分块检查，body 就轻了。
-
-    /// 原生懒加载网格：LazyVGrid 只创建可视区附近的 cell，配合底部哨兵 onAppear
-    /// 自动翻页是 SwiftUI 标准写法，不需要 PhotoGrid 的 fitsContent 套壳和连锁补丁。
-    /// 缩略图走现成的 CachedAsyncImage（同一个 ImageCache，云端 7 天缓存照旧）。
-    private var imageGrid: some View {
-        LazyVGrid(columns: columns, spacing: 8) {
-            ForEach(vm.imagePhotos) { photo in
-                Button { openImage(photo) } label: {
-                    // 先用 Color.clear 撑出确定的 2:3 盒子，再把图片 fill 进去裁切。
-                    // 直接给 CachedAsyncImage 加 aspectRatio(.fill) 在 LazyVGrid 里
-                    // 会取图片原始像素尺寸撑破 cell → 全部叠在一起。
-                    Color.clear
-                        .aspectRatio(2.0 / 3.0, contentMode: .fit)
-                        .overlay {
-                            CachedAsyncImage(url: photo.thumbURL)
-                                .aspectRatio(contentMode: .fill)
-                        }
-                        .clipped()
-                        .cornerRadius(6)
-                }
-                .buttonStyle(.plain)
+    /// 🔴 图片走项目现成的瀑布流组件 PhotoGrid（MasonryLayout 按图片真实宽高比排版），
+    /// fitsContent=false 让它自己滚 —— willDisplay 只在 cell 进入可视区时触发，
+    /// 底部 onReachEnd 自动翻页是全 App（相册/搜索/人物页）验证过的标准路径，不会连锁。
+    /// 下拉刷新用 PhotoGrid 原生 UIRefreshControl（onRefresh），不再靠 SwiftUI .refreshable
+    /// （后者必须套外层 ScrollView，正是 fitsContent=true 连锁翻页的根源）。
+    private var cloudImageGrid: some View {
+        PhotoGrid(
+            photos: vm.imagePhotos,
+            columns: columns,
+            onColumnsChange: { columns = $0; PhotoGridPrefs.save("cloudBrowser", $0) },
+            onSelect: openImage,
+            onReachEnd: { Task { await vm.loadMore() } },
+            onRefresh: { await vm.reload() }
+        )
+        .overlay {
+            if vm.items.isEmpty && !vm.isLoading { emptyState }
+            else if !vm.error.isEmpty && !vm.isLoading {
+                VStack { errorBanner; Spacer() }
             }
         }
     }
+
+    /// 视频条数少，用普通 ScrollView + LazyVGrid（保留 SwiftUI 原生下拉刷新）。
+    private var cloudVideoGrid: some View {
+        ScrollView {
+            videoSection
+                .padding(.horizontal, 10)
+                .padding(.top, 8)
+        }
+        .refreshable { await vm.reload() }
+        .overlay {
+            if vm.videoItems.isEmpty && !vm.isLoading { emptyState }
+        }
+    }
+
+    // 🔴 下面这些视图/闭包单独拆出来：body 里内联太多复杂表达式会让 Swift 类型检查器
+    // 直接超时（"unable to type-check this expression"，报在 ViewBuilder 的某个 if 行上）。
+    // 拆成具名计算属性后编译器分块检查，body 就轻了。
 
     private func openImage(_ photo: Photo) {
         guard let idx = vm.imagePhotos.firstIndex(where: { $0.id == photo.id }) else { return }
@@ -214,22 +201,6 @@ struct CloudBrowserView: View {
             }
             .buttonStyle(.plain)
             .padding(.bottom, 8)
-        }
-    }
-
-    /// 底部哨兵：LazyVGrid 懒加载，滚到最后一个 cell 后这个 footer 才进入可视区，
-    /// onAppear 触发翻页——标准写法。loadMore 内部有 !isLoading 保护，不会并发重复拉。
-    @ViewBuilder
-    private var loadMoreFooter: some View {
-        if vm.hasMore && vm.error.isEmpty {
-            HStack(spacing: 6) {
-                if vm.isLoading { ProgressView() }
-                Text(vm.isLoading ? "加载更多…" : "上滑加载更多")
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .padding(.vertical, 12)
-            .onAppear { Task { await vm.loadMore() } }
         }
     }
 
@@ -268,7 +239,7 @@ struct CloudBrowserView: View {
     private var videoSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("视频 · \(vm.videoItems.count)").font(.caption).foregroundStyle(.secondary)
-            LazyVGrid(columns: columns, spacing: 8) {
+            LazyVGrid(columns: videoColumns, spacing: 8) {
                 ForEach(vm.videoItems) { item in
                     Button { startPlay(item) } label: {
                         VStack(spacing: 0) {
