@@ -1283,6 +1283,33 @@ func viewerPreviewMaxPixel(container: CGSize, photo: Photo) -> Int {
     return Int(ceil(longEdge * 2))
 }
 
+/// 动图播放层：SwiftUI 的 `Image(uiImage:)` 对 `UIImage.animatedImage` 只画第一帧，
+/// 必须借 UIKit 的 `UIImageView`（赋值 animated UIImage 会自动逐帧播放）。
+/// 只负责把动图按 contentMode 铺满父给的 frame；捏合缩放/旋转/拖动由外层 singleImage 处理。
+private struct AnimatedUIImageView: UIViewRepresentable {
+    let image: UIImage
+    let contentMode: UIView.ContentMode
+
+    func makeUIView(context: Context) -> UIImageView {
+        let iv = UIImageView()
+        iv.contentMode = contentMode
+        iv.clipsToBounds = true
+        iv.isUserInteractionEnabled = false // 手势交给外层 imageLayer，别吞掉
+        return iv
+    }
+
+    func updateUIView(_ iv: UIImageView, context: Context) {
+        iv.contentMode = contentMode
+        // 同一张动图翻页回来别重置动画；换了图才重新赋值 + 启动
+        if iv.image !== image {
+            iv.image = image
+            iv.startAnimating()
+        } else if !iv.isAnimating {
+            iv.startAnimating()
+        }
+    }
+}
+
 struct ViewerImageView: View {
     let photo: Photo
     /// 容器（即整屏）尺寸，用来决定 fit / fill 并把图撑到屏宽
@@ -1344,7 +1371,16 @@ struct ViewerImageView: View {
         let px = rotated
             ? CGSize(width: img.size.height, height: img.size.width)
             : img.size
-        if let fit = viewerFit(image: px, container: containerSize) {
+        let fit = viewerFit(image: px, container: containerSize)
+        // 🔴 动图必须用 UIKit UIImageView 播放：SwiftUI 的 Image(uiImage:) 对
+        // UIImage.animatedImage 只画第一帧（瀑布流 cell 是 UIImageView 所以能动，
+        // 看图器原来是 Image(uiImage:) 所以不动）。缩放/旋转/平移由外层 singleImage
+        // 的 scaleEffect/rotationEffect/offset 负责，这里只按 contentMode 铺满 frame。
+        if (img.images?.count ?? 0) > 1 {
+            AnimatedUIImageView(image: img,
+                                contentMode: fit?.mode == .fill ? .scaleAspectFill : .scaleAspectFit)
+                .frame(width: containerSize.width, height: containerSize.height)
+        } else if let fit {
             Image(uiImage: img)
                 .resizable()
                 .aspectRatio(contentMode: fit.mode)
