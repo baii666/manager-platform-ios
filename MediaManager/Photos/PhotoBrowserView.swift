@@ -464,8 +464,11 @@ final class CloudBrowserViewModel: ObservableObject {
             //   命中时出 webp 缩略图，都保不住动画。/raw + ImageCache 动图解码才能动。
             // - 静态图（jpg/png/heic）：走 /thumb?fast=1 缩略图，秒开；它们本就无动画。
             //   heic 后端 fast=1 有强制转码例外，能正常显示。
-            let ext = item.ext.lowercased()
-            let isAnimated = (ext == "gif" || ext == "apng")
+            // 🔴 后端 ext 字段带前导点（实测 ".gif"/".jpg"），且部分脏数据
+            // （".41g_17v_1配额】"）—— 不能用 ext == "gif"，永远不匹配。
+            // 直接用 localPath 后缀判断最稳。
+            let lower = item.localPath.lowercased()
+            let isAnimated = lower.hasSuffix(".gif") || lower.hasSuffix(".apng")
             let u = isAnimated
                 ? client?.cloudRawURL(path: item.localPath)
                 : client?.cloudThumbURL(path: item.localPath)
