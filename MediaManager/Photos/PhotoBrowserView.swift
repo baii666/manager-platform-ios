@@ -458,11 +458,13 @@ final class CloudBrowserViewModel: ObservableObject {
     /// 图片转瀑布流 Photo：thumb/full URL 由 APIClient 拼（带 token 兼容收紧认证）
     var imagePhotos: [Photo] {
         imageItems.map { item in
-            // 🔴 fullURL 也用 /thumb?fast=1（与缩略图同 URL）：云端 fast=1 在缓存缺失时
-            // 直出原图、命中时出可显示档，本身就是"能显示的最大档"。若 fullURL 用 /raw，
-            // 看图器会按另一套缓存 key 重新下大原图 —— 占位图（缩略图=原图）已显示，
-            // 但 /raw 下载慢导致"加载原图"转圈一直不停。同 URL 后看图器走快速路径秒开。
-            let u = client?.cloudThumbURL(path: item.localPath)
+            // 🔴 云端一律用 /raw 原图，不用 /thumb 缩略图：
+            // 1) 云端是本地入库快照，原图就是压缩档（jpg ~97KB / png ~457KB，实测），
+            //    并非几千万像素的大原片，瀑布流直出原图不会撑爆内存；
+            // 2) /thumb?fast=1 缓存缺失时直吐 gif 原图（2~3MB），走 X: 挂载盘下载慢 → 灰块；
+            // 3) gif/heic 经 /thumb 转出的 webp 在 ImageCache.forceDecoded 下会丢动画。
+            // 统一 /raw 后：gif 原样保动画、heic 由系统原生解码、看图器 thumb==full 秒开。
+            let u = client?.cloudRawURL(path: item.localPath)
             return item.asPhoto(thumb: u, full: u)
         }
     }

@@ -1091,8 +1091,11 @@ final class APIClient: DataProviding, @unchecked Sendable {
     }
 
     /// 云端原图 / 视频直链（后端 /raw，Range 流式返回）。
+    /// `cloud=1` 是客户端标记（后端忽略），让 ImageCache 认出这是云端快照图，
+    /// 套用 7 天校验间隔而非普通 /raw 的 5 分钟。
     func cloudRawURL(path: String) -> URL? {
-        var items = [URLQueryItem(name: "path", value: path)]
+        var items = [URLQueryItem(name: "path", value: path),
+                     URLQueryItem(name: "cloud", value: "1")]
         if let tok = AppSession.shared.sessionToken, !tok.isEmpty {
             items.append(URLQueryItem(name: "token", value: tok))
         }

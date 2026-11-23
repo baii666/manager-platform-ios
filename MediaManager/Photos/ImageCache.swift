@@ -83,12 +83,26 @@ final class ImageCache: @unchecked Sendable {
         return img
     }
 
-    func store(_ image: UIImage, for url: URL) {
+    /// - Parameter originalData: 下载到的原始字节。动图（gif/apng）必须传它：
+    ///   `jpegData()` 只编码第一帧，会把动画压成静态图；存原始字节才能让
+    ///   `image(for:)` 用 `UIImage(data:)` 还原出可播放的动图。静态图不传，继续存 jpeg。
+    func store(_ image: UIImage, for url: URL, originalData: Data? = nil) {
         memory.setObject(image, forKey: url.absoluteString as NSString)
         let file = diskDir.appendingPathComponent(key(for: url))
-        if let data = image.jpegData(compressionQuality: 0.85) {
+        if let originalData, (image.images?.count ?? 0) > 1 {
+            try? originalData.write(to: file, options: .atomic)
+        } else if let data = image.jpegData(compressionQuality: 0.85) {
             try? data.write(to: file, options: .atomic)
         }
+    }
+
+    /// 把下载到的字节解码成可显示图片：动图不 forceDecoded（渲染器只画第一帧，会把
+    /// gif/apng 压成静态），静态图照旧强制解码消除首帧主线程卡顿。
+    /// 返回 (图片, 是否动图)，调用方据此决定是否把原始字节交给 store 保住动画。
+    private func decode(_ data: Data) -> (UIImage, Bool)? {
+        guard let src = UIImage(data: data) else { return nil }
+        let animated = (src.images?.count ?? 0) > 1
+        return (animated ? src : forceDecoded(src), animated)
     }
 
     /// 下载 + 缓存 + 返回；命中缓存则直接返回
@@ -140,8 +154,8 @@ final class ImageCache: @unchecked Sendable {
                 do {
                     let (data2, resp2) = try await URLSession.shared.data(
                         for: URLRequest(url: url, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: 30))
-                    guard let img2 = UIImage(data: data2).map(forceDecoded) else { return nil }
-                    if cacheToDisk { store(img2, for: url) }
+                    guard let (img2, animated) = decode(data2) else { return nil }
+                    if cacheToDisk { store(img2, for: url, originalData: animated ? data2 : nil) }
                     else { memory.setObject(img2, forKey: url.absoluteString as NSString) }
                     saveMeta(EntryMeta(etag: (resp2 as? HTTPURLResponse)?.value(forHTTPHeaderField: "ETag"),
                                        validatedAt: Date()), for: url)
@@ -153,13 +167,14 @@ final class ImageCache: @unchecked Sendable {
 
             // 惰性解码坑：UIImage(data:) 只标记数据，真正的位图解码发生在
             // 「首次上屏渲染」那一刻（主线程同步解码，几十 ms → 掉帧）。
-            // 这里主动重画一遍强制解码，把开销留在后台线程。
-            guard let img = UIImage(data: data).map(forceDecoded) else {
+            // 静态图主动重画一遍强制解码，把开销留在后台线程；
+            // 🔴 动图（gif/apng）绝不能 forceDecoded —— 渲染器只画第一帧，会毁掉动画。
+            guard let (img, animated) = decode(data) else {
                 // 解不出来也别开天窗：有旧图就先顶着
                 return image(for: url)
             }
             if cacheToDisk {
-                store(img, for: url)
+                store(img, for: url, originalData: animated ? data : nil)
             } else {
                 memory.setObject(img, forKey: url.absoluteString as NSString)
             }
@@ -214,15 +229,19 @@ final class ImageCache: @unchecked Sendable {
         return Date().timeIntervalSince(m.validatedAt) < revalidateInterval(for: url)
     }
 
-    /// 云端缩略图（/thumb + fast=1）7 天，其余 5 分钟。
+    /// 云端快照图 7 天，其余 5 分钟。两种云端 URL 都认：
+    /// - 旧版缩略图 /thumb?fast=1（其它页面仍可能命中历史缓存）
+    /// - 现在云端浏览器统一用的 /raw?cloud=1（cloud=1 是客户端标记，后端忽略）
     private func revalidateInterval(for url: URL) -> TimeInterval {
         guard let comps = URLComponents(url: url, resolvingAgainstBaseURL: false),
-              comps.path.hasSuffix("/thumb"),
-              let items = comps.queryItems,
-              items.contains(where: { $0.name == "fast" && $0.value == "1" }) else {
+              let items = comps.queryItems else {
             return revalidateInterval
         }
-        return cloudRevalidateInterval
+        let isCloudThumb = comps.path.hasSuffix("/thumb") &&
+            items.contains(where: { $0.name == "fast" && $0.value == "1" })
+        let isCloudRaw = comps.path.hasSuffix("/raw") &&
+            items.contains(where: { $0.name == "cloud" && $0.value == "1" })
+        return (isCloudThumb || isCloudRaw) ? cloudRevalidateInterval : revalidateInterval
     }
 
     /// 正在后台校验的 URL
@@ -277,9 +296,9 @@ final class ImageCache: @unchecked Sendable {
                 touchValidated(for: url)
                 return
             }
-            guard let img = UIImage(data: data).map(forceDecoded) else { return }
+            guard let (img, animated) = decode(data) else { return }
             if cacheToDisk {
-                store(img, for: url)
+                store(img, for: url, originalData: animated ? data : nil)
             } else {
                 memory.setObject(img, forKey: url.absoluteString as NSString)
             }

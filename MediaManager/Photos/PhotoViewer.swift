@@ -513,12 +513,18 @@ struct PhotoViewerView: View {
         for delta in 1...3 {
             for i in [idx - delta, idx + delta] where list.indices.contains(i) {
                 guard let url = list[i].fullURL else { continue }
-                // 预热 **preview 档**（与 ViewerImageView 同 key，翻页滑入即命中缓存）。
-                // 之前预载全尺寸原图：单张 48~96MB，±3 张把 256MB 的 NSCache 撑爆，
-                // 既白下流量又触发反复淘汰。
-                let target = viewerPreviewMaxPixel(container: containerSize, photo: list[i])
-                Task.detached(priority: .userInitiated) {
-                    _ = await ImageCache.shared.loadDownsampled(from: url, maxPixel: target, cacheToDisk: true)
+                // 🔴 云端 /raw 原图（最大 gif 3MB）：直接预热原图缓存，不走降采样，
+                // 否则 gif 动图会被压成静态第一帧。其余大原图仍预热 preview 档
+                // （与 ViewerImageView 同 key，翻页滑入即命中；避免预载全尺寸撑爆 NSCache）。
+                if url.path.hasSuffix("/raw") {
+                    Task.detached(priority: .userInitiated) {
+                        _ = await ImageCache.shared.load(from: url, cacheToDisk: false)
+                    }
+                } else {
+                    let target = viewerPreviewMaxPixel(container: containerSize, photo: list[i])
+                    Task.detached(priority: .userInitiated) {
+                        _ = await ImageCache.shared.loadDownsampled(from: url, maxPixel: target, cacheToDisk: true)
+                    }
                 }
             }
         }
@@ -1396,6 +1402,29 @@ struct ViewerImageView: View {
             return
         }
 
+        // 🔴 云端 /raw 原图：原版本身就是压缩档（最大 gif 3MB，实测），无需降采样。
+        // 更关键的是 loadDownsampled 用 CGImageSource 缩略图 API，对 gif/apng 只取第一帧，
+        // 会把动图压成静态图。云端图直接走 ImageCache.load（保动画），缓存命中也秒开。
+        if url.path.hasSuffix("/raw") {
+            if let cached = ImageCache.shared.image(for: url) {
+                finish(cached, newTier: .full)
+                return
+            }
+            let rawSpinner = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 800_000_000)
+                if isLoading { showSpinner = true }
+            }
+            let rawLoaded = await ImageCache.shared.load(from: url, cacheToDisk: false)
+            rawSpinner.cancel()
+            if let rawLoaded {
+                finish(rawLoaded, newTier: .full)
+            } else {
+                isLoading = false
+                showSpinner = false
+            }
+            return
+        }
+
         // preview 档：先同步查缓存（相邻图已被 preloadNeighbors 预热 → 翻页滑入秒开）
         let target = viewerPreviewMaxPixel(container: containerSize, photo: photo)
         if let cached = ImageCache.shared.downsampledImage(for: url, maxPixel: target) {
@@ -1768,8 +1797,13 @@ private struct ZoomPage: View {
         // fullURL 为 nil（人脸头像只有 600 档裁切图）时直接跳过，不回挂载盘。
         .task(id: "\(item.fullURL?.absoluteString ?? "")|\(loadFull)") {
             guard let url = item.fullURL, loadFull, image == nil else { return }
-            image = await ImageCache.shared.loadDownsampled(from: url, maxPixel: 2400,
-                                                            cacheToDisk: true)
+            // 🔴 云端 /raw 动图不能被降采样压成静态第一帧，直接走 load 保动画。
+            if url.path.hasSuffix("/raw") {
+                image = await ImageCache.shared.load(from: url, cacheToDisk: false)
+            } else {
+                image = await ImageCache.shared.loadDownsampled(from: url, maxPixel: 2400,
+                                                                cacheToDisk: true)
+            }
         }
     }
 }
