@@ -1099,28 +1099,8 @@ final class APIClient: DataProviding, @unchecked Sendable {
         return makeURL("/raw", queryItems: items)
     }
 
-    /// 配置的入库目录列表（含每目录 active 条目数），用于云端浏览器首页。
-    /// 后端 hStatus 的 roots 没有 active_items，需按 root_net_path 把 per_root 合并进去。
-    func fetchCloudStatus() async throws -> CloudStatusResponse {
-        var resp: CloudStatusResponse = try await request("/api/cloudlib/status")
-        // 🔴 用下标赋值而不是 Dictionary(uniqueKeysWithValues:)：
-        // 后者遇到重复 key 会直接 trap（Fatal error: duplicate keys）杀掉整个 App → 启动全白。
-        // per_root 里同一 net_path 挂多个 mount 很常见，去重后必然撞车。
-        var counts: [String: Int] = [:]
-        for p in resp.perRoot {
-            let k = p.rootNetPath.replacingOccurrences(of: "/", with: "")
-            counts[k] = (counts[k] ?? 0) + p.activeItems
-        }
-        resp.roots = resp.roots.map {
-            var r = $0
-            r.activeItems = counts[r.netPath.replacingOccurrences(of: "/", with: "")] ?? 0
-            return r
-        }
-        return resp
-    }
-
-    /// 分页查云端入库条目。type: nil / "image" / "video"；root: root_key 筛选；只取 active。
-    func fetchCloudItems(type: String? = nil, dir: String? = nil, root: String? = nil, q: String? = nil,
+    /// 分页查云端入库条目。type: nil / "image" / "video"；只取 active。
+    func fetchCloudItems(type: String? = nil, dir: String? = nil, q: String? = nil,
                          limit: Int = 200, offset: Int = 0) async throws -> CloudItemsResponse {
         var items: [URLQueryItem] = [
             URLQueryItem(name: "status", value: "active"),
@@ -1129,7 +1109,6 @@ final class APIClient: DataProviding, @unchecked Sendable {
         ]
         if let type, type != "all" { items.append(URLQueryItem(name: "type", value: type)) }
         if let dir, !dir.isEmpty { items.append(URLQueryItem(name: "dir", value: dir)) }
-        if let root, !root.isEmpty { items.append(URLQueryItem(name: "root", value: root)) }
         if let q, !q.isEmpty { items.append(URLQueryItem(name: "q", value: q)) }
         return try await request("/api/cloudlib/items", queryItems: items)
     }

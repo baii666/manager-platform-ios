@@ -79,11 +79,7 @@ struct RootView: View {
                 .opacity(tab == .short ? 1 : 0)
                 .allowsHitTesting(tab == .short)
 
-            // 🔴 云端浏览器：临时回退到直接瀑布流入口。
-            // CloudRootListView（配置目录首页）在真机上导致启动全白 —— App 一启动，
-            // ZStack 里所有 tab 都会创建，云 tab 的 .task{fetchCloudStatus} 立即触发。
-            // 两轮修复未解，先摘掉止血，恢复到最后确认可用的 CloudBrowserView。
-            // CloudRootListView 代码保留未删，之后换写法再接回来。
+            // 云端浏览器：cloudlib 本地入库轻表的图片瀑布流 + 视频卡片
             NavigationStack { CloudBrowserView() }
                 .opacity(tab == .cloud ? 1 : 0)
                 .allowsHitTesting(tab == .cloud)
