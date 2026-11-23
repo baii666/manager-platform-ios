@@ -108,10 +108,10 @@ struct CloudRootListView: View {
         Group {
             if vm.isLoading && vm.roots.isEmpty {
                 ProgressView("加载目录…")
-            } else if let err = vm.error, !err.isEmpty, vm.roots.isEmpty {
+            } else if !vm.error.isEmpty, vm.roots.isEmpty {
                 VStack(spacing: 12) {
                     Image(systemName: "exclamationmark.triangle").font(.title2).foregroundStyle(.orange)
-                    Text(err).font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                    Text(vm.error).font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
                     Button("重试") { Task { await vm.load() } }
                 }
             } else {
