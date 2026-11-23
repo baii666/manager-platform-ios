@@ -264,7 +264,8 @@ struct CloudBrowserView: View {
             onColumnsChange: { columns = $0; PhotoGridPrefs.save("cloudBrowser", $0) },
             onSelect: openImage,
             onReachEnd: { Task { await vm.loadMore() } },
-            onRefresh: { await vm.reload() }
+            onRefresh: { await vm.reload() },
+            gridThumbPixel: 600   // 云端全原图，网格本地降采样防 OOM；看图器仍拿完整原图
         )
         .overlay {
             if vm.items.isEmpty && vm.isLoading {

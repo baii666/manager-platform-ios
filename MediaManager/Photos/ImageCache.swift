@@ -56,6 +56,21 @@ final class ImageCache: @unchecked Sendable {
         try? fileManager.createDirectory(at: diskDir, withIntermediateDirectories: true)
     }
 
+    /// 🔴 统一写内存缓存并**计入 cost**。
+    /// NSCache 的 totalCostLimit（256MB）只在 setObject 带 cost 时才会触发淘汰；
+    /// 此前所有 setObject 都不传 cost（默认 0），等于上限失效，只剩 countLimit=500，
+    /// 云端全原图滚动时几百张全尺寸位图只增不减 → 内存爆掉被系统 Jetsam 杀掉（闪退）。
+    private func setMemory(_ img: UIImage, forKey k: NSString) {
+        memory.setObject(img, forKey: k, cost: imgCost(img))
+    }
+
+    /// 位图占用字节数：宽×高×4（RGBA）；动图按所有帧累加。
+    private func imgCost(_ img: UIImage) -> Int {
+        func bytes(_ i: UIImage) -> Int { Int(i.size.width * i.size.height) * 4 }
+        if let frames = img.images { return frames.reduce(0) { $0 + bytes($1) } }
+        return bytes(img)
+    }
+
     /// 清空内存 + 磁盘缓存（设置里的「清除图片缓存」）。
     /// 换过海报/封面但 App 一直显示旧图时的手动兜底 —— 缓存没有过期机制，
     /// 而封面 URL 又是稳定的，不主动清就永远命中第一版。
@@ -83,7 +98,7 @@ final class ImageCache: @unchecked Sendable {
         // 和下载路径一样先走 ImageIO 解码。
         let img = decodeAnimated(data) ?? UIImage(data: data)
         guard let img else { return nil }
-        memory.setObject(img, forKey: memKey)
+        setMemory(img, forKey: memKey)
         return img
     }
 
@@ -91,7 +106,7 @@ final class ImageCache: @unchecked Sendable {
     ///   `jpegData()` 只编码第一帧，会把动画压成静态图；存原始字节才能让
     ///   `image(for:)` 用 `UIImage(data:)` 还原出可播放的动图。静态图不传，继续存 jpeg。
     func store(_ image: UIImage, for url: URL, originalData: Data? = nil) {
-        memory.setObject(image, forKey: url.absoluteString as NSString)
+        setMemory(image, forKey: url.absoluteString as NSString)
         let file = diskDir.appendingPathComponent(key(for: url))
         if let originalData, (image.images?.count ?? 0) > 1 {
             try? originalData.write(to: file, options: .atomic)
@@ -192,7 +207,7 @@ final class ImageCache: @unchecked Sendable {
                         for: URLRequest(url: url, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: 30))
                     guard let (img2, animated) = decode(data2) else { return nil }
                     if cacheToDisk { store(img2, for: url, originalData: animated ? data2 : nil) }
-                    else { memory.setObject(img2, forKey: url.absoluteString as NSString) }
+                    else { setMemory(img2, forKey: url.absoluteString as NSString) }
                     saveMeta(EntryMeta(etag: (resp2 as? HTTPURLResponse)?.value(forHTTPHeaderField: "ETag"),
                                        validatedAt: Date()), for: url)
                     return img2
@@ -212,7 +227,7 @@ final class ImageCache: @unchecked Sendable {
             if cacheToDisk {
                 store(img, for: url, originalData: animated ? data : nil)
             } else {
-                memory.setObject(img, forKey: url.absoluteString as NSString)
+                setMemory(img, forKey: url.absoluteString as NSString)
             }
             let etag = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "ETag")
             saveMeta(EntryMeta(etag: etag, validatedAt: Date()), for: url)
@@ -336,12 +351,45 @@ final class ImageCache: @unchecked Sendable {
             if cacheToDisk {
                 store(img, for: url, originalData: animated ? data : nil)
             } else {
-                memory.setObject(img, forKey: url.absoluteString as NSString)
+                setMemory(img, forKey: url.absoluteString as NSString)
             }
             saveMeta(EntryMeta(etag: http?.value(forHTTPHeaderField: "ETag"),
                                validatedAt: Date()), for: url)
         } catch {
             // 后台校验失败无所谓：meta 不推进，下次还会再试
+        }
+    }
+
+    // MARK: - 网格缩略图加载（云端原图专用档）
+    //
+    // 🔴 云端浏览器网格里的图全部来自 /raw 原图（用户红线：云端不出缩略图），
+    //    若按原尺寸全量解码进内存，滚动几百张就会 OOM 被系统杀进程（一滑就退出）。
+    //    这里给网格单独开一档降采样：静态图按显示尺寸解码、独立缓存 key，
+    //    **不写原图档**（看图器点开仍从原图档拿完整原图，红线不受影响）。
+    //    动图保持原样走动画解码，不改动画行为（用户要求不改动图）。
+
+    /// 网格专用：静态图按 maxPixel 降采样，动图走原档（保动画）。
+    /// - Parameter maxPixel: 长边像素上限。网格 cell 显示尺寸很小，600 足够清晰。
+    func loadGridThumb(from url: URL, maxPixel: Int = 600) async -> UIImage? {
+        // 静态图：命中独立降采样档直接回
+        if let img = downsampledImage(for: url, maxPixel: maxPixel) { return img }
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            // 动图（多帧）：交回原档走动画解码，保持动画不变
+            if let src = CGImageSourceCreateWithData(data as CFData, nil), CGImageSourceGetCount(src) > 1,
+               let animated = decodeAnimated(data) {
+                setMemory(animated, forKey: url.absoluteString as NSString)
+                return animated
+            }
+            // 静态图：ImageIO 直接产出目标尺寸的已解码位图
+            guard let src = CGImageSourceCreateWithData(data as CFData, nil),
+                  let img = downsample(src, maxPixel: maxPixel) else {
+                return await load(from: url, cacheToDisk: false)  // 兜底：原流程
+            }
+            setMemory(img, forKey: downKey(url, maxPixel))
+            return img
+        } catch {
+            return downsampledImage(for: url, maxPixel: maxPixel) ?? image(for: url)
         }
     }
 
@@ -354,7 +402,7 @@ final class ImageCache: @unchecked Sendable {
         if let img = memory.object(forKey: memKey) { return img }
         let file = diskDir.appendingPathComponent(key(for: url) + "_ds\(maxPixel)")
         if let data = try? Data(contentsOf: file), let img = UIImage(data: data) {
-            memory.setObject(img, forKey: memKey)
+            setMemory(img, forKey: memKey)
             return img
         }
         return nil
@@ -381,7 +429,7 @@ final class ImageCache: @unchecked Sendable {
                 let file = diskDir.appendingPathComponent(key(for: url) + "_ds\(maxPixel)")
                 try? jpeg.write(to: file, options: .atomic)
             }
-            memory.setObject(img, forKey: downKey(url, maxPixel))
+            setMemory(img, forKey: downKey(url, maxPixel))
             return img
         } catch {
             return nil

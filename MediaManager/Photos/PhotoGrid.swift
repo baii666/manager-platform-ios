@@ -31,6 +31,9 @@ struct PhotoGrid: View {
     /// 现有所有调用点都不传，行为完全不变。云端浏览器靠它替代 SwiftUI .refreshable
     /// （后者需要外层 ScrollView，会让 fitsContent=true 触发 onReachEnd 连锁）。
     var onRefresh: (() async -> Void)? = nil
+    /// 网格缩略图降采样长边像素。0=走原 load（默认，其它页面零影响）；
+    /// >0=静态图按此尺寸本地降采样解码（云端原图专用，防 OOM；独立缓存档不碰看图器原图）。
+    var gridThumbPixel: Int = 0
 
     /// fitsContent 模式的内容总高，由布局回调持续更新
     @State private var contentHeight: CGFloat = 0
@@ -51,6 +54,7 @@ struct PhotoGrid: View {
             onSelect: onSelect,
             onReachEnd: onReachEnd,
             onRefresh: onRefresh,
+            gridThumbPixel: gridThumbPixel,
             onContentHeight: { height in
                 // 负高度/NaN 一律挡掉：.frame(height:) 收到负数等于没给，收到 NaN 更糟
                 guard height.isFinite, height > 0 else { return }
@@ -77,6 +81,7 @@ private struct PhotoGridRepresentable: UIViewRepresentable {
     var onSelect: (Photo) -> Void = { _ in }
     var onReachEnd: () -> Void = {}
     var onRefresh: (() async -> Void)? = nil
+    var gridThumbPixel: Int = 0
     /// 内容总高变化（MasonryLayout 每次 prepare 后高度变了就回调）
     var onContentHeight: ((CGFloat) -> Void)? = nil
 
@@ -222,7 +227,7 @@ private struct PhotoGridRepresentable: UIViewRepresentable {
         func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
             let cell = collectionView.dequeueReusableCell(withReuseIdentifier: PhotoCell.reuseID, for: indexPath) as! PhotoCell
             let photo = parent.photos[indexPath.item]
-            cell.configure(with: photo) { [weak self] ratio in
+            cell.configure(with: photo, gridThumbPixel: parent.gridThumbPixel) { [weak self] ratio in
                 self?.updateRatio(for: photo.id, ratio: ratio)
             }
             return cell
@@ -235,7 +240,14 @@ private struct PhotoGridRepresentable: UIViewRepresentable {
         func collectionView(_ collectionView: UICollectionView, prefetchItemsAt indexPaths: [IndexPath]) {
             for ip in indexPaths where ip.item < parent.photos.count {
                 if let url = parent.photos[ip.item].thumbURL {
-                    Task { _ = await ImageCache.shared.load(from: url) }
+                    let px = parent.gridThumbPixel
+                    Task {
+                        if px > 0 {
+                            _ = await ImageCache.shared.loadGridThumb(from: url, maxPixel: px)
+                        } else {
+                            _ = await ImageCache.shared.load(from: url)
+                        }
+                    }
                 }
             }
         }
@@ -340,6 +352,7 @@ final class PhotoCell: UICollectionViewCell {
     /// 左下角胶囊角标（语义搜索的相似度）。photo.badge 为 nil 时不显示
     private let badgeLabel = BadgeLabel()
     private var currentURL: URL?
+    private var gridThumbPixel: Int = 0
     private var onImageLoaded: ((CGFloat) -> Void)?
 
     override init(frame: CGRect) {
@@ -386,15 +399,17 @@ final class PhotoCell: UICollectionViewCell {
     override func prepareForReuse() {
         super.prepareForReuse()
         currentURL = nil
+        gridThumbPixel = 0
         onImageLoaded = nil
         imageView.image = nil
         badgeLabel.text = nil
         badgeLabel.isHidden = true
     }
 
-    func configure(with photo: Photo, onImageLoaded: ((CGFloat) -> Void)? = nil) {
+    func configure(with photo: Photo, gridThumbPixel: Int = 0, onImageLoaded: ((CGFloat) -> Void)? = nil) {
         let url = photo.thumbURL
         currentURL = url
+        self.gridThumbPixel = gridThumbPixel
         self.onImageLoaded = onImageLoaded
 
         // 角标：语义搜索会带相似度（"87%"），普通照片为 nil
@@ -406,7 +421,9 @@ final class PhotoCell: UICollectionViewCell {
             return
         }
 
-        if let cached = ImageCache.shared.image(for: url) {
+        if let cached = gridThumbPixel > 0
+            ? ImageCache.shared.downsampledImage(for: url, maxPixel: gridThumbPixel)
+            : ImageCache.shared.image(for: url) {
             imageView.image = cached
             reportSize(cached)
             return
@@ -414,7 +431,10 @@ final class PhotoCell: UICollectionViewCell {
 
         imageView.image = nil
         Task {
-            let image = await ImageCache.shared.load(from: url)
+            let px = self.gridThumbPixel
+            let image = px > 0
+                ? await ImageCache.shared.loadGridThumb(from: url, maxPixel: px)
+                : await ImageCache.shared.load(from: url)
             guard self.currentURL == url else { return } // cell 已被复用，丢弃过期结果
             await MainActor.run {
                 self.imageView.image = image
