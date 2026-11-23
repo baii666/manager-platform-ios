@@ -1103,9 +1103,14 @@ final class APIClient: DataProviding, @unchecked Sendable {
     /// 后端 hStatus 的 roots 没有 active_items，需按 root_net_path 把 per_root 合并进去。
     func fetchCloudStatus() async throws -> CloudStatusResponse {
         var resp: CloudStatusResponse = try await request("/api/cloudlib/status")
-        let counts = Dictionary(uniqueKeysWithValues: resp.perRoot.map {
-            ($0.rootNetPath.replacingOccurrences(of: "/", with: ""), $0.activeItems)
-        })
+        // 🔴 用下标赋值而不是 Dictionary(uniqueKeysWithValues:)：
+        // 后者遇到重复 key 会直接 trap（Fatal error: duplicate keys）杀掉整个 App → 启动全白。
+        // per_root 里同一 net_path 挂多个 mount 很常见，去重后必然撞车。
+        var counts: [String: Int] = [:]
+        for p in resp.perRoot {
+            let k = p.rootNetPath.replacingOccurrences(of: "/", with: "")
+            counts[k] = (counts[k] ?? 0) + p.activeItems
+        }
         resp.roots = resp.roots.map {
             var r = $0
             r.activeItems = counts[r.netPath.replacingOccurrences(of: "/", with: "")] ?? 0

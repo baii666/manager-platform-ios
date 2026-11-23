@@ -1705,10 +1705,13 @@ struct CloudRoot: Identifiable, Codable, Hashable, Sendable {
     var id: String { netPath }
     var key: String { netPath.trimmingCharacters(in: CharacterSet(charactersIn: "/")) }
 
+    /// 🔴 后端 roots[] 没有 active_items（计数只在 per_root[]），
+    /// 这里绝不能声明该 key —— 否则 Codable 解码缺字段抛 keyNotFound，
+    /// 整个 fetchCloudStatus 失败 → 云端目录首页进错误态。
+    /// activeItems 由 APIClient 从 per_root 合并后手动赋值，保持默认值 0 即可。
     enum CodingKeys: String, CodingKey {
         case netPath = "net_path"
         case mount
-        case activeItems = "active_items"
     }
 }
 
