@@ -113,6 +113,12 @@ private struct PhotoGridRepresentable: UIViewRepresentable {
         // 不经过父视图状态 → 没有每步 reloadData 的闪烁
         let pinch = UIPinchGestureRecognizer(target: context.coordinator,
                                              action: #selector(Coordinator.handlePinch(_:)))
+        // 🔴 允许捏合与其他手势同时识别：UICollectionView 自带的滚动 pan、
+        // 以及外层 SwiftUI .searchable（云端页）注入的下拉搜索手势，
+        // 默认都可能抢占加在 cv 上的自定义 pinch（表现：双指捏合没反应）。
+        // 设 delegate + shouldRecognizeSimultaneously 让两者并行；不吞触摸。
+        pinch.delegate = context.coordinator
+        pinch.cancelsTouchesInView = false
         cv.addGestureRecognizer(pinch)
         // 下拉刷新（可选）：仅根视图模式 + 传了 onRefresh 时挂。
         // UIRefreshControl 是 UICollectionView 原生控件，不依赖外层 SwiftUI ScrollView，
@@ -168,7 +174,14 @@ private struct PhotoGridRepresentable: UIViewRepresentable {
 
     // MARK: Coordinator
 
-    final class Coordinator: NSObject, UICollectionViewDataSource, UICollectionViewDelegate, UICollectionViewDataSourcePrefetching, MasonryLayoutDelegate {
+    final class Coordinator: NSObject, UICollectionViewDataSource, UICollectionViewDelegate, UICollectionViewDataSourcePrefetching, MasonryLayoutDelegate, UIGestureRecognizerDelegate {
+        // 让捏合与外部手势（.searchable 的下拉 pan、导航返回等）并行识别。
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                               shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+            // 只放开捏合手势；别的手势维持系统默认，避免影响 cell 点击/滚动
+            return gestureRecognizer is UIPinchGestureRecognizer
+        }
+
         var parent: PhotoGridRepresentable
         weak var collectionView: UICollectionView?
         /// 图片加载后回填的真实宽高比（photo.id → 宽/高）。
