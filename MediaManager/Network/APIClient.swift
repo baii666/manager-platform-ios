@@ -1112,8 +1112,12 @@ final class APIClient: DataProviding, @unchecked Sendable {
     /// 云端原图 / 视频直链（后端 /raw，Range 流式返回）。
     /// `cloud=1` 是客户端标记（后端忽略），让 ImageCache 认出这是云端快照图，
     /// 套用 7 天校验间隔而非普通 /raw 的 5 分钟。
+    ///
+    /// 🔴 `v=2`：动图解码修复（ImageIO 逐帧）之前的旧缓存是 `jpegData()` 存的静态第一帧。
+    /// 缓存 key = 整个 URL 的 SHA256，旧 URL 命中旧静态图、7 天内不回源 → 修复永远看不到。
+    /// 加版本号让 URL 变化 → 旧缓存全部自然作废、重新下载成可播放动图。后端忽略多余参数。
     func cloudRawURL(path: String) -> URL? {
-        cloudURL("/raw", path: path, extra: [("cloud", "1")])
+        cloudURL("/raw", path: path, extra: [("cloud", "1"), ("v", "2")])
     }
 
     /// 配置的入库目录列表（含每目录 active 条目数），用于云端浏览器首页。
