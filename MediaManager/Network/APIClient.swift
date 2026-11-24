@@ -105,9 +105,12 @@ final class APIClient: DataProviding, @unchecked Sendable {
     }
 
     func fetchPlaybackInfo(path: String) async throws -> PlaybackInfo {
-        guard let u = makeURL("/api/playback/info", queryItems: [
-            URLQueryItem(name: "path", value: path)
-        ]) else { throw DataError.server("播放地址拼接失败") }
+        // 🔴 严格编码：与 /stream、/hls 同源。URLQueryItem 不编码 + / #，
+        // 带特殊字符的路径探测会 404 → 内核误判 → 该走 KS 的走成 AVPlayer 黑屏。
+        var comp = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)
+        comp?.path = "/api/playback/info"
+        comp?.percentEncodedQuery = "path=" + encodedQueryValue(path)
+        guard let u = comp?.url else { throw DataError.server("播放地址拼接失败") }
         let (data, resp) = try await session.data(for: URLRequest(url: u))
         if let http = resp as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
             throw DataError.http(http.statusCode)
@@ -173,12 +176,18 @@ final class APIClient: DataProviding, @unchecked Sendable {
     /// 两步：GET /hls 返回 {"sessionId","m3u8Url":"/hls/<id>/index.m3u8"}，
     /// m3u8Url 是**相对路径**，必须拼到 baseURL 上再交给 AVPlayer。
     private func hlsURL(path: String, startAt: Double?, copyVideo: Bool) async throws -> URL {
-        var items = [URLQueryItem(name: "path", value: path)]
-        if copyVideo { items.append(URLQueryItem(name: "copyVideo", value: "1")) }
+        // 🔴 必须用严格编码：URLQueryItem 不编码 `+`（Gin 解成空格→路径匹配不上→
+        // 后端 os.Stat 失败返回"文件不存在"），也不编码 `#`（被当 fragment 截断）。
+        // 降级片源（hev1 的 MP4 / AVI）若路径带 + 或 #，走这里就会随机"无法播放"。
+        var parts = ["path=" + encodedQueryValue(path)]
+        if copyVideo { parts.append("copyVideo=1") }
         if let s = startAt, s.isFinite, s > 1 {
-            items.append(URLQueryItem(name: "startTime", value: String(format: "%.3f", s)))
+            parts.append("startTime=" + encodedQueryValue(String(format: "%.3f", s)))
         }
-        guard let u = makeURL("/hls", queryItems: items) else {
+        var comp = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)
+        comp?.path = "/hls"
+        comp?.percentEncodedQuery = parts.joined(separator: "&")
+        guard let u = comp?.url else {
             throw DataError.server("HLS 地址拼接失败")
         }
         let (data, resp) = try await session.data(for: URLRequest(url: u))
