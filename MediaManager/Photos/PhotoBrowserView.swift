@@ -460,14 +460,35 @@ private struct CloudVideoCard: View {
                 LinearGradient(colors: [.clear, .black.opacity(0.72)], startPoint: .center, endPoint: .bottom)
                     .frame(width: w, height: 44)
 
-                Text(item.displayName)
-                    .font(.caption2.weight(.medium))
-                    .foregroundStyle(.white)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
-                    .frame(width: w, alignment: .leading)
-                    .padding(.horizontal, 6)
-                    .padding(.bottom, 5)
+                // 文件名 + 网盘路径（点按复制）。视频不进看图器，路径只能在卡片上看。
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(item.displayName)
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .multilineTextAlignment(.leading)
+                        .frame(width: w, alignment: .leading)
+                    if !item.relPath.isEmpty {
+                        Button {
+                            UIPasteboard.general.string = item.relPath
+                        } label: {
+                            HStack(spacing: 3) {
+                                Text(item.relPath)
+                                    .font(.system(size: 8))
+                                    .foregroundStyle(.white.opacity(0.7))
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                                Image(systemName: "doc.on.doc")
+                                    .font(.system(size: 8))
+                                    .foregroundStyle(.white.opacity(0.7))
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .frame(width: w, alignment: .leading)
+                .padding(.horizontal, 6)
+                .padding(.bottom, 4)
             }
             .frame(width: w, height: h)
             .cornerRadius(7)

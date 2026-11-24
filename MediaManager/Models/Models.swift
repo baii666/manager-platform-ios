@@ -349,6 +349,11 @@ struct Photo: Identifiable, Codable, Sendable {
     /// ⚠️ 纯客户端字段，不在 CodingKeys 里，不参与 Codable。
     var cloudDirPath: String? = nil
 
+    /// 🔴 云端条目的 115 网盘完整路径（后端 cloud_items.rel_path，含文件名），看图器详情展示+复制用。
+    /// 仅 CloudItem.asPhoto 填入；本地照片为 nil。
+    /// ⚠️ 纯客户端字段，不在 CodingKeys 里，不参与 Codable。
+    var cloudRelPath: String? = nil
+
     /// 人类可读的文件大小，信息面板用
     var sizeText: String? {
         guard let fileSize, fileSize > 0 else { return nil }
@@ -1791,6 +1796,7 @@ struct CloudItem: Identifiable, Codable, Sendable {
         p.thumbURL = thumb
         p.fullURL = full
         p.cloudDirPath = dirPath   // 看图器「打开所在文件夹」用
+        p.cloudRelPath = relPath   // 看图器详情展示/复制网盘路径用
         return p
     }
 }

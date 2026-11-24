@@ -28,6 +28,8 @@ struct PhotoViewerView: View {
     @State private var cardDrag: CGFloat = 0
     @State private var showThumbs = false
     @State private var tip: String?
+    /// 网盘路径复制反馈（1.5s 后自动清空）
+    @State private var copiedPath: String? = nil
 
     // 变换
     @State private var scale: CGFloat = 1
@@ -831,6 +833,33 @@ struct PhotoViewerView: View {
                         }
                         if let d = photoDetail {
                             infoRow("缩略图", d.hasThumb ? "已生成" : "未生成")
+                        }
+                        // 🔴 云端条目：115 网盘完整路径（rel_path），点按复制。
+                        // 本地照片 cloudRelPath 为 nil，不显示这一行。
+                        if let rel = photo.cloudRelPath, !rel.isEmpty {
+                            Button {
+                                UIPasteboard.general.string = rel
+                                copiedPath = rel
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                                    if self?.copiedPath == rel { self?.copiedPath = nil }
+                                }
+                            } label: {
+                                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                                    Text("网盘路径")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                        .frame(width: 64, alignment: .leading)
+                                    Text(copiedPath == rel ? "已复制 ✓" : rel)
+                                        .font(.caption2)
+                                        .foregroundStyle(copiedPath == rel ? Color.green : Color.primary)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .lineLimit(3)
+                                    Image(systemName: "doc.on.doc")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .buttonStyle(.plain)
                         }
                     }
 
