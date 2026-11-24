@@ -20,6 +20,10 @@ struct MediaManagerApp: App {
         // 返回按钮样式（只剩箭头 + 品牌色）。必须在这里统一配：它是全局的，
         // 且 setBackButtonTitlePositionAdjustment 只对 appearance 代理生效。
         NavigationBarStyle.configure()
+
+        // 文件诊断日志：写一条启动头到 Documents/mm_debug.log，
+        // 从「我的 → 诊断日志」导出，用来定位卡顿 / 失败（随机视频进入慢等）。
+        AppFileLogger.shared.start()
     }
 
     var body: some Scene {

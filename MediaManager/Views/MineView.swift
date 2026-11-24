@@ -1,4 +1,78 @@
 import SwiftUI
+import UIKit
+
+// MARK: - 诊断日志（查看 / 导出 / 清空）
+// 把 AppFileLogger 写入的 mm_debug.log 显示出来，并用系统分享面板导出，
+// 方便把卡顿 / 失败的耗时明细发给开发者定位。刻意放本文件、不新增 Swift 文件。
+struct DebugLogView: View {
+    @State private var text = ""
+    @State private var showingShare = false
+    @State private var confirmClear = false
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("记录网络请求、播放首帧、随机批次等耗时与异常。点「导出」把日志发给我即可定位问题。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                HStack(spacing: 12) {
+                    Button {
+                        // 先落盘再导出；URL 存成可共享的文件地址
+                        _ = AppFileLogger.shared.exportFileURL
+                        showingShare = true
+                    } label: {
+                        Label("导出日志", systemImage: "square.and.arrow.up")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+
+                    Button(role: .destructive) {
+                        confirmClear = true
+                    } label: {
+                        Label("清空", systemImage: "trash")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                }
+
+                Text(text.isEmpty ? "（暂无日志）" : text)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.primary)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(16)
+        }
+        .appBackground()
+        .navigationTitle("诊断日志")
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear { text = AppFileLogger.shared.readText() }
+        .sheet(isPresented: $showingShare) {
+            DebugLogShareSheet(activityItems: [AppFileLogger.shared.exportFileURL])
+        }
+        .alert("清空日志", isPresented: $confirmClear) {
+            Button("清空", role: .destructive) {
+                AppFileLogger.shared.clear()
+                text = AppFileLogger.shared.readText()
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("删除本机保存的全部诊断日志，不可恢复。")
+        }
+    }
+}
+
+/// UIActivityViewController 的 SwiftUI 包装：调起系统分享面板导出日志文件。
+private struct DebugLogShareSheet: UIViewControllerRepresentable {
+    let activityItems: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}
 
 // MARK: - 服务器切换（已登录状态）
 // 「我的 → 服务器」进来：列出记住过的地址，一键切换；也能直接输入新 IP / 域名。
@@ -486,6 +560,33 @@ struct MineView: View {
                                 .foregroundStyle(.primary)
                             Text(cacheCleared ? "已清除，回到列表会重新加载"
                                               : "换过封面但一直显示旧图时用")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 13)
+                }
+                .buttonStyle(.plain)
+                Divider().padding(.leading, 44)
+                // 诊断日志：把耗时 / 异常记录导出发给我定位「随机视频进入慢」等问题。
+                NavigationLink {
+                    DebugLogView()
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "doc.text.magnifyingglass")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(Theme.brand)
+                            .frame(width: 20)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("诊断日志")
+                                .font(.subheadline)
+                                .foregroundStyle(.primary)
+                            Text("记录各操作耗时与异常，可导出发送给开发者")
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                         }

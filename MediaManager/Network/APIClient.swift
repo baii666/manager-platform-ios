@@ -1,5 +1,109 @@
 import Foundation
 
+// MARK: - 文件诊断日志
+// 把关键操作耗时 / 异常写到 App 沙盒 Documents/mm_debug.log，
+// 从「我的 → 诊断日志」用系统分享面板导出。主要用来定位「随机视频进入慢」。
+// ⚠️ 刻意写在本文件、不新建 Swift 文件 —— 新增文件要 xcodegen generate，会冲掉手选 Team。
+final class AppFileLogger {
+    static let shared = AppFileLogger()
+
+    private let queue = DispatchQueue(label: "mm.applog", qos: .utility)
+    private let fileURL: URL = {
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        return docs.appendingPathComponent("mm_debug.log")
+    }()
+    private static let maxBytes = 512 * 1024
+    /// DateFormatter 非线程安全：只在下面的串行 queue 内访问，别在 queue 外用。
+    private static let timeFmt: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "MM-dd HH:mm:ss.SSS"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        return f
+    }()
+
+    /// 本次启动的会话标记（同一会话的日志靠它串起来）
+    let sessionID: String = {
+        let f = DateFormatter()
+        f.dateFormat = "HHmmss"
+        return f.string(from: Date())
+    }()
+
+    /// 写一行。level: I=信息 / W=警告 / E=错误。
+    func log(_ tag: String, _ message: String, level: String = "I") {
+        queue.async {
+            let ts = Self.timeFmt.string(from: Date())
+            self.buffer.append("[\(ts)] \(level) [\(tag)] \(message)\n")
+            if self.buffer.utf8.count >= 4096 { self.flushLocked() }
+        }
+    }
+
+    /// 耗时打点：传开始时刻（AppFileLogger.now() 取），自动算毫秒。
+    func elapsed(_ tag: String, _ start: CFAbsoluteTime, _ detail: String = "", level: String = "I") {
+        let ms = (CFAbsoluteTimeGetCurrent() - start) * 1000
+        log(tag, String(format: "%.1fms", ms) + (detail.isEmpty ? "" : " \(detail)"), level: level)
+    }
+
+    static func now() -> CFAbsoluteTime { CFAbsoluteTimeGetCurrent() }
+
+    /// 启动头：记录系统 / App 版本，方便对照。
+    func start() {
+        let ver = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
+        let os = ProcessInfo.processInfo.operatingSystemVersionString
+        log("APP", "===== 启动 session=\(sessionID) iOS=\(os) App=\(ver) =====")
+    }
+
+    private var buffer = ""
+
+    /// 立即落盘（导出前调用，保证拿到最新内容）。
+    func flush() {
+        queue.sync { self.flushLocked() }
+    }
+
+    private func flushLocked() {
+        guard !buffer.isEmpty else { return }
+        let text = buffer
+        buffer.removeAll(keepingCapacity: true)
+        guard let data = text.data(using: .utf8) else { return }
+        if FileManager.default.fileExists(atPath: fileURL.path),
+           let handle = try? FileHandle(forWritingTo: fileURL) {
+            try? handle.seekToEnd()
+            try? handle.write(contentsOf: data)
+            try? handle.close()
+        } else {
+            try? text.write(to: fileURL, atomically: true, encoding: .utf8)
+        }
+        trimLockedIfNeeded()
+    }
+
+    /// 日志无限增长没意义：超过上限保留后一半，老的丢掉。
+    private func trimLockedIfNeeded() {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: fileURL.path),
+              let size = attrs[.size] as? NSNumber, size.intValue > Self.maxBytes,
+              let data = try? Data(contentsOf: fileURL) else { return }
+        try? data.suffix(Self.maxBytes / 2).write(to: fileURL, options: .atomic)
+    }
+
+    /// 导出用：先落盘再读全文。
+    func readText() -> String {
+        flush()
+        return (try? String(contentsOf: fileURL, encoding: .utf8)) ?? ""
+    }
+
+    var exportFileURL: URL {
+        flush()
+        return fileURL
+    }
+
+    /// 清空日志（诊断页按钮用）。
+    func clear() {
+        queue.sync {
+            buffer.removeAll()
+            try? FileManager.default.removeItem(at: fileURL)
+        }
+    }
+}
+
 // MARK: - 真实后端客户端
 // 对接 D:/manager-platform 的 Go 网关（默认 http://<host>:19876）。
 // 认证走 session cookie（URLSession.shared 自动管理），
@@ -111,7 +215,10 @@ final class APIClient: DataProviding, @unchecked Sendable {
         comp?.path = "/api/playback/info"
         comp?.percentEncodedQuery = "path=" + encodedQueryValue(path)
         guard let u = comp?.url else { throw DataError.server("播放地址拼接失败") }
+        let t0 = AppFileLogger.now()
         let (data, resp) = try await session.data(for: URLRequest(url: u))
+        let code = (resp as? HTTPURLResponse)?.statusCode ?? -1
+        AppFileLogger.shared.log("PROBE", "playback/info \(String(format: "%.1fms", (AppFileLogger.now() - t0) * 1000)) status=\(code) path=\((path as NSString).lastPathComponent)")
         if let http = resp as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
             throw DataError.http(http.statusCode)
         }
@@ -190,7 +297,10 @@ final class APIClient: DataProviding, @unchecked Sendable {
         guard let u = comp?.url else {
             throw DataError.server("HLS 地址拼接失败")
         }
+        let t0 = AppFileLogger.now()
         let (data, resp) = try await session.data(for: URLRequest(url: u))
+        let code = (resp as? HTTPURLResponse)?.statusCode ?? -1
+        AppFileLogger.shared.log("HLS", "开会话 copyVideo=\(copyVideo) \(String(format: "%.1fms", (AppFileLogger.now() - t0) * 1000)) status=\(code) path=\((path as NSString).lastPathComponent)")
         if let http = resp as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
             throw DataError.http(http.statusCode)
         }
@@ -303,9 +413,13 @@ final class APIClient: DataProviding, @unchecked Sendable {
             req.httpBody = try JSONSerialization.data(withJSONObject: json)
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }
+        let t0 = AppFileLogger.now()
         let (data, resp) = try await session.data(for: req)
+        let code = (resp as? HTTPURLResponse)?.statusCode ?? -1
+        AppFileLogger.shared.log("HTTP", "\(method) \(path) \(String(format: "%.1fms", (AppFileLogger.now() - t0) * 1000)) status=\(code) bytes=\(data.count)")
         if let http = resp as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
             if let err = try? decoder.decode(ErrorResponse.self, from: data), !err.error.isEmpty {
+                AppFileLogger.shared.log("HTTP", "\(path) 服务端错误: \(err.error)", level: "E")
                 throw DataError.server(err.error)
             }
             throw DataError.http(http.statusCode)
@@ -321,9 +435,15 @@ final class APIClient: DataProviding, @unchecked Sendable {
         guard let finalURL = comp?.url else { throw DataError.server("URL 构造失败") }
         var req = URLRequest(url: finalURL)
         req.httpMethod = "GET"
+        let t0 = AppFileLogger.now()
         let (data, resp) = try await session.data(for: req)
+        let code = (resp as? HTTPURLResponse)?.statusCode ?? -1
+        // 只记 path + 关键 query 名（不记 path 参数值，路径可能很长）
+        let keys = queryItems.map { $0.name }.joined(separator: ",")
+        AppFileLogger.shared.log("HTTP", "GET \(path) [\(keys)] \(String(format: "%.1fms", (AppFileLogger.now() - t0) * 1000)) status=\(code) bytes=\(data.count)")
         if let http = resp as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
             if let err = try? decoder.decode(ErrorResponse.self, from: data), !err.error.isEmpty {
+                AppFileLogger.shared.log("HTTP", "\(path) 服务端错误: \(err.error)", level: "E")
                 throw DataError.server(err.error)
             }
             throw DataError.http(http.statusCode)
@@ -710,7 +830,9 @@ final class APIClient: DataProviding, @unchecked Sendable {
             URLQueryItem(name: "n", value: "\(min(max(size, 1), 30))"),
         ]
         if let poolId, poolId > 0 { qi.append(URLQueryItem(name: "pool", value: "\(poolId)")) }
+        let t0 = AppFileLogger.now()
         let resp: ShortVideosResponse = try await request("/api/shorts/random", queryItems: qi)
+        AppFileLogger.shared.log("RANDOM", "批次 \(String(format: "%.1fms", (AppFileLogger.now() - t0) * 1000)) 返回=\(resp.items.count) 可见池=\(resp.total) pool=\(poolId.map(String.init) ?? "全部")")
         return (resp.items, resp.total)
     }
 

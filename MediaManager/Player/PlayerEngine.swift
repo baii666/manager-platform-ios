@@ -78,6 +78,8 @@ final class PlayerEngine: ObservableObject {
     private var pendingStart: Double?
     /// 当前装载的 URL，供 retry 使用
     private var currentURL: URL?
+    /// 首帧耗时打点：load 起点。用于定位「点进去半天才出画面」。
+    private var loadStartedAt: CFAbsoluteTime = 0
     /// 视频轨复查（延迟执行）
     private var trackCheckWork: DispatchWorkItem?
     /// 循环播放：播到末尾回到开头重播（短视频抖音式刷要用）
@@ -131,6 +133,9 @@ final class PlayerEngine: ObservableObject {
         videoTrackDisabled = false
         trackCheckWork?.cancel()
         isReady = false
+        loadStartedAt = AppFileLogger.now()
+        let host = url.host ?? "?"
+        AppFileLogger.shared.log("PLAY", "load 开始 kernel=\(usesKSPlayer ? "KS" : "AV") host=\(host) path=\((url.path as NSString).lastPathComponent)")
 
         // 渐进分流：MKV/HEVC/DTS 等走 KSPlayer(FFmpeg)，其余走系统 AVPlayer。
         if usesKSPlayer {
@@ -251,6 +256,7 @@ final class PlayerEngine: ObservableObject {
         }
         ksBridge.onReady = { [weak self] total in
             guard let self else { return }
+            AppFileLogger.shared.elapsed("PLAY", self.loadStartedAt, "KSPlayer 首帧就绪")
             self.isReady = true
             if total.isFinite, total > 0 { self.duration = total }
             // 续播位置已由 KSOptions.startPlayTime 处理，这里不再重复 seek
@@ -269,7 +275,9 @@ final class PlayerEngine: ObservableObject {
             self?.loadedRange = seconds
         }
         ksBridge.onFailure = { [weak self] msg in
-            self?.failure = msg
+            guard let self else { return }
+            AppFileLogger.shared.elapsed("PLAY", self.loadStartedAt, "KSPlayer 失败 \(msg)", level: "E")
+            self.failure = msg
         }
         ksBridge.onEnd = { [weak self] in
             guard let self, self.loop else { return }
@@ -288,6 +296,7 @@ final class PlayerEngine: ObservableObject {
                 guard let self else { return }
                 self.isReady = item.status == .readyToPlay
                 if item.status == .readyToPlay {
+                    AppFileLogger.shared.elapsed("PLAY", self.loadStartedAt, "AVPlayer 首帧就绪")
                     self.applyDuration(item.duration)
                     self.checkVideoTracks(item)
                     // 轨道启用状态不一定在 ready 的那一刻就定下来，稍后再确认一次
@@ -303,6 +312,7 @@ final class PlayerEngine: ObservableObject {
                     }
                 } else if item.status == .failed {
                     let desc = item.error?.localizedDescription ?? "未知错误"
+                    AppFileLogger.shared.elapsed("PLAY", self.loadStartedAt, "AVPlayer 失败 \(desc)", level: "E")
                     self.failure = desc
                 }
             }

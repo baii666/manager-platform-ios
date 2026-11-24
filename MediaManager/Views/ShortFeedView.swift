@@ -226,13 +226,16 @@ final class ShortRandomFeedLoader: ObservableObject {
     /// 只在首次进入时拉第一批；client 从常驻的列表 VM 借，不另建会话
     func start(poolId: Int?, client: APIClient?) async {
         guard items.isEmpty, !isLoading else { return }
+        let t0 = AppFileLogger.now()
         self.poolId = poolId
         guard let client else {
             errorMessage = "未连接服务器"
+            AppFileLogger.shared.log("RANDOM", "首批失败: 未连接服务器", level: "E")
             return
         }
         self.client = client
         await loadMore()
+        AppFileLogger.shared.elapsed("RANDOM", t0, "首批落地 items=\(items.count) err=\(errorMessage ?? "无")")
         if items.isEmpty, errorMessage == nil {
             errorMessage = "这个范围没有可随机播放的视频"
         }
@@ -1043,12 +1046,15 @@ private struct ShortFeedPage: View {
 
     @MainActor
     private func prepare() async {
+        let t0 = AppFileLogger.now()
         guard let path = video.filePath, !path.isEmpty else {
             error = "这条记录没有文件路径"
+            AppFileLogger.shared.log("PAGE", "视频 \(video.id) 无文件路径", level: "E")
             return
         }
         guard let client else {
             error = "还没连接到服务器，请重新登录"
+            AppFileLogger.shared.log("PAGE", "视频 \(video.id) 未连接服务器", level: "E")
             return
         }
         do {
@@ -1056,6 +1062,7 @@ private struct ShortFeedPage: View {
             // 有 hint 时先判内核：KS 片源不能走快车道，交给 resolvePlayback 走 KS，
             // 并把 hint 透传下去省掉一次探测。无 hint 维持旧行为。
             let resolved: PlaybackTarget
+            var route = "直连"
             if let url = client.streamURL(path: path),
                client.canFastPath(path: path, hintCodec: video.probeCodec, hintTag: video.probeTag) {
                 resolved = PlaybackTarget(url: url, title: video.titleText,
@@ -1063,15 +1070,18 @@ private struct ShortFeedPage: View {
                                           startAt: 0, timeOffset: 0,
                                           knownDuration: video.duration, sourcePath: path)
             } else {
+                route = "解析(KS或HLS)"
                 resolved = try await client.resolvePlayback(
                     path: path, startAt: nil, title: video.titleText,
                     assetType: nil, assetID: nil, knownDuration: video.duration,
                     hintCodec: video.probeCodec, hintTag: video.probeTag)
             }
             target = resolved
+            AppFileLogger.shared.elapsed("PAGE", t0, "视频 \(video.id) \(route) ks=\(resolved.usesKSPlayer) 扩展=\((path as NSString).pathExtension)")
             // 回填预取池：滑走再滑回来不用重新解析（非直连容器尤其省一次 HLS 会话）
             prefetcher.store(resolved, for: video.id)
         } catch {
+            AppFileLogger.shared.log("PAGE", "视频 \(video.id) 解析失败: \(error.localizedDescription)", level: "E")
             self.error = error.localizedDescription
         }
     }
