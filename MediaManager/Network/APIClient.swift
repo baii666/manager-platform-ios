@@ -1282,18 +1282,40 @@ final class APIClient: DataProviding, @unchecked Sendable {
     }
 
     /// 分页查云端入库条目。type: nil / "image" / "video"；root: root_key 筛选；只取 active。
+    /// 🔴 dir/q 必须严格编码：目录名常带 `+`（如 "19V+34P_1配额"）和 `#`，
+    /// 用 URLQueryItem 会把 `+` 原样留下，Gin c.Query 解成空格 → dir_path 匹配不上
+    /// → 看图器「打开所在文件夹」进来一片空。这里走和 /raw 同一套 percentEncodedQuery。
     func fetchCloudItems(type: String? = nil, dir: String? = nil, root: String? = nil, q: String? = nil,
                          limit: Int = 200, offset: Int = 0) async throws -> CloudItemsResponse {
-        var items: [URLQueryItem] = [
-            URLQueryItem(name: "status", value: "active"),
-            URLQueryItem(name: "limit", value: String(limit)),
-            URLQueryItem(name: "offset", value: String(offset)),
+        var parts: [String] = [
+            "status=" + encodedQueryValue("active"),
+            "limit=" + encodedQueryValue(String(limit)),
+            "offset=" + encodedQueryValue(String(offset)),
         ]
-        if let type, type != "all" { items.append(URLQueryItem(name: "type", value: type)) }
-        if let dir, !dir.isEmpty { items.append(URLQueryItem(name: "dir", value: dir)) }
-        if let root, !root.isEmpty { items.append(URLQueryItem(name: "root", value: root)) }
-        if let q, !q.isEmpty { items.append(URLQueryItem(name: "q", value: q)) }
-        return try await request("/api/cloudlib/items", queryItems: items)
+        var logKeys = ["status", "limit", "offset"]
+        if let type, type != "all" { parts.append("type=" + encodedQueryValue(type)); logKeys.append("type") }
+        if let dir, !dir.isEmpty { parts.append("dir=" + encodedQueryValue(dir)); logKeys.append("dir") }
+        if let root, !root.isEmpty { parts.append("root=" + encodedQueryValue(root)); logKeys.append("root") }
+        if let q, !q.isEmpty { parts.append("q=" + encodedQueryValue(q)); logKeys.append("q") }
+
+        var comp = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)
+        comp?.path = "/api/cloudlib/items"
+        comp?.percentEncodedQuery = parts.joined(separator: "&")
+        guard let finalURL = comp?.url else { throw DataError.server("URL 构造失败") }
+        var req = URLRequest(url: finalURL)
+        req.httpMethod = "GET"
+        let t0 = AppFileLogger.now()
+        let (data, resp) = try await session.data(for: req)
+        let code = (resp as? HTTPURLResponse)?.statusCode ?? -1
+        AppFileLogger.shared.log("HTTP", "GET /api/cloudlib/items [\(logKeys.joined(separator: ","))] \(String(format: "%.1fms", (AppFileLogger.now() - t0) * 1000)) status=\(code) bytes=\(data.count)")
+        if let http = resp as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+            if let err = try? decoder.decode(ErrorResponse.self, from: data), !err.error.isEmpty {
+                AppFileLogger.shared.log("HTTP", "cloudlib/items 服务端错误: \(err.error)", level: "E")
+                throw DataError.server(err.error)
+            }
+            throw DataError.http(code)
+        }
+        return try decoder.decode(CloudItemsResponse.self, from: data)
     }
 }
 
