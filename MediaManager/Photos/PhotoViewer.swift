@@ -840,8 +840,8 @@ struct PhotoViewerView: View {
                             Button {
                                 UIPasteboard.general.string = rel
                                 copiedPath = rel
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-                                    if self?.copiedPath == rel { self?.copiedPath = nil }
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                                    if self.copiedPath == rel { self.copiedPath = nil }
                                 }
                             } label: {
                                 HStack(alignment: .firstTextBaseline, spacing: 10) {
