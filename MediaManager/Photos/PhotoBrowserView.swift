@@ -431,38 +431,49 @@ private struct CloudVideoCard: View {
     let coverURL: URL?
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            // 封面铺满裁切；ImageCache 两层缓存，动图取第一帧静态显示（封面无需动）
-            RemoteImage(url: coverURL, fallbackIcon: "film",
-                        fallbackColors: [Color.purple.opacity(0.35), Color.blue.opacity(0.18)])
-                .aspectRatio(16 / 9, contentMode: .fill)
-                .frame(maxWidth: .infinity)
-                .clipped()
+        // 🔴 必须先量出列宽、算出确切高度再钉给封面：
+        // RemoteImage 内部是 Image.resizable().scaledToFill()，拿不到确定尺寸时会按
+        // 原图像素当 ideal size（预览图动辄 3000×4000），把 ZStack 撑破 → 播放角标
+        // 和文件名被挤出可视区，只剩一张铺满的大图（视频 tab「错乱」的根因）。
+        // 与 ShortsView/MediaListView 的封面写法一致：imageFilled + 外层 frame(width:height:)。
+        // 外层 aspectRatio 按列宽推出卡片高度（GeometryReader 自身不给高度）。
+        GeometryReader { geo in
+            let w = geo.size.width
+            let h = w * 9.0 / 16.0
+            ZStack(alignment: .bottom) {
+                // 封面铺满裁切；ImageCache 两层缓存，动图取第一帧静态显示（封面无需动）
+                RemoteImage(url: coverURL, fallbackIcon: "film",
+                            fallbackColors: [Color.purple.opacity(0.35), Color.blue.opacity(0.18)])
+                    .imageFilled()
+                    .frame(width: w, height: h)
+                    .clipped()
 
-            // 顶部中央播放角标（半透明圆底，任何封面颜色上都清晰）
-            Image(systemName: "play.fill")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: 30, height: 30)
-                .background(.black.opacity(0.45), in: Circle())
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                // 顶部中央播放角标（半透明圆底，任何封面颜色上都清晰）
+                Image(systemName: "play.fill")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 30, height: 30)
+                    .background(.black.opacity(0.45), in: Circle())
+                    .frame(width: w, height: h, alignment: .center)
 
-            // 底部渐变 + 文件名（保证浅色封面上的文字可读）
-            LinearGradient(colors: [.clear, .black.opacity(0.72)], startPoint: .center, endPoint: .bottom)
-                .frame(height: 44)
+                // 底部渐变 + 文件名（保证浅色封面上的文字可读）
+                LinearGradient(colors: [.clear, .black.opacity(0.72)], startPoint: .center, endPoint: .bottom)
+                    .frame(width: w, height: 44)
 
-            Text(item.displayName)
-                .font(.caption2.weight(.medium))
-                .foregroundStyle(.white)
-                .lineLimit(2)
-                .multilineTextAlignment(.leading)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 6)
-                .padding(.bottom, 5)
+                Text(item.displayName)
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.white)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                    .frame(width: w, alignment: .leading)
+                    .padding(.horizontal, 6)
+                    .padding(.bottom, 5)
+            }
+            .frame(width: w, height: h)
+            .cornerRadius(7)
+            .clipped()
         }
         .aspectRatio(16 / 9, contentMode: .fit)
-        .cornerRadius(7)
-        .clipped()
     }
 }
 
