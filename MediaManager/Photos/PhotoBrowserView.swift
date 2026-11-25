@@ -272,8 +272,9 @@ struct CloudBrowserView: View {
             onColumnsChange: { columns = $0; PhotoGridPrefs.save("cloudBrowser", $0) },
             onSelect: openImage,
             onReachEnd: { Task { await vm.loadMore() } },
-            onRefresh: { await vm.reload() },
-            gridThumbPixel: 600   // 云端全原图，网格本地降采样防 OOM；看图器仍拿完整原图
+            onRefresh: { await vm.reload() }
+            // 🔴 缓存策略与相册完全一致：不传 gridThumbPixel（=0），
+            // 网格走 ImageCache.load 原图档（内存+磁盘+ETag 300s），不再用云端专属降采样档。
         )
         .overlay {
             if vm.items.isEmpty && vm.isLoading {
