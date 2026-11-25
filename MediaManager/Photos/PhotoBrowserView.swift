@@ -206,7 +206,9 @@ struct CloudBrowserView: View {
     /// 瀑布流列数：捏合缩放 + 各页记忆（与相册/搜索/人物页同一套 PhotoGrid）。
     @State private var columns = PhotoGridPrefs.load("cloudBrowser", fallback: 3)
     /// 视频卡片用固定网格（条数少，不需要捏合缩放）
-    private let videoColumns = [GridItem(.adaptive(minimum: 110), spacing: 8)]
+    /// 视频卡片 16:9，列宽太小会让卡片只有几十像素高、封面和标题挤成一团。
+    /// 提到 200 → 高度约 112pt，iPad 上一屏 4~6 列，观感接近图片网格。
+    private let videoColumns = [GridItem(.adaptive(minimum: 200), spacing: 10)]
 
     init(root: CloudRoot? = nil, dir: String? = nil) {
         self.root = root
@@ -383,12 +385,11 @@ struct CloudBrowserView: View {
         let covers = vm.videoCoverURLs
         return VStack(alignment: .leading, spacing: 8) {
             Text("视频 · \(vm.videoItems.count)").font(.caption).foregroundStyle(.secondary)
-            LazyVGrid(columns: videoColumns, spacing: 8) {
+            LazyVGrid(columns: videoColumns, spacing: 10) {
                 ForEach(vm.videoItems) { item in
-                    Button { startPlay(item) } label: {
-                        CloudVideoCard(item: item, coverURL: covers[item.id])
-                    }
-                    .buttonStyle(.plain)
+                    // 🔴 不再用 Button 包整卡：卡片内有复制路径的 Button，
+                    // 嵌套 Button 会让外层点击（播放）整个失效。改用卡片自带 onTapGesture。
+                    CloudVideoCard(item: item, coverURL: covers[item.id], onPlay: { startPlay(item) })
                 }
             }
         }
@@ -429,6 +430,7 @@ struct CloudBrowserView: View {
 private struct CloudVideoCard: View {
     let item: CloudItem
     let coverURL: URL?
+    var onPlay: () -> Void = {}
 
     var body: some View {
         // 🔴 必须先量出列宽、算出确切高度再钉给封面：
@@ -474,16 +476,18 @@ private struct CloudVideoCard: View {
                         } label: {
                             HStack(spacing: 3) {
                                 Text(item.relPath)
-                                    .font(.system(size: 8))
-                                    .foregroundStyle(.white.opacity(0.7))
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(.white.opacity(0.75))
                                     .lineLimit(1)
                                     .truncationMode(.middle)
                                 Image(systemName: "doc.on.doc")
-                                    .font(.system(size: 8))
-                                    .foregroundStyle(.white.opacity(0.7))
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(.white.opacity(0.75))
                             }
                         }
                         .buttonStyle(.plain)
+                        // 吞掉冒泡，避免触发卡片整体的 onTapGesture（播放）
+                        .onTapGesture { }
                     }
                 }
                 .frame(width: w, alignment: .leading)
@@ -495,6 +499,8 @@ private struct CloudVideoCard: View {
             .clipped()
         }
         .aspectRatio(16 / 9, contentMode: .fit)
+        .contentShape(Rectangle())
+        .onTapGesture { onPlay() }
     }
 }
 
