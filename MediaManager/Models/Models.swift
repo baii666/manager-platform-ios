@@ -1799,6 +1799,19 @@ struct CloudItem: Identifiable, Codable, Sendable {
         p.cloudRelPath = relPath   // 看图器详情展示/复制网盘路径用
         return p
     }
+
+    /// 转成短视频模型，喂给上下滑刷流页 ShortFeedView（externalItems 模式）。
+    /// filePath 用 localPath（X: 挂载路径，播放链路认它）；封面走配对预览图的 /raw URL。
+    /// ⚠️ 纯展示映射，不改 CloudItem 本身；id 复用保证刷流定位/缓存 key 稳定。
+    func asShortVideo(coverURL: URL?) -> ShortVideo {
+        var v = ShortVideo(id: id)
+        v.fileName = fileName
+        v.title = displayName
+        v.filePath = localPath
+        v.fileSize = size
+        if let coverURL { v.posterUrl = coverURL.absoluteString }
+        return v
+    }
 }
 
 /// GET /api/cloudlib/items 响应

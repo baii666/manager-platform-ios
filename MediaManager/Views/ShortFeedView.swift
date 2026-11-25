@@ -306,6 +306,10 @@ struct ShortFeedView: View {
     let startIndex: Int
     /// true = 真随机刷流：队列由 randomLoader 供给，不用列表 VM 的顺序分页
     var randomMode: Bool = false
+    /// 🔴 外部注入的刷流队列（云浏览器视频用）。非 nil 时完全接管 items，
+    /// 且不走随机 loader / 顺序分页（云视频一次拉全，不翻页）。
+    /// nil = 短视频页原行为，零变化。
+    var externalItems: [ShortVideo]? = nil
     /// 退出回调：关掉根层 overlay 回到**进来时的那个 tab**（首页进的回首页、
     /// 短视频页进的回短视频页）—— 刷流挂在 RootView 的 overlay 上，背后就是来源页
     var onClose: () -> Void = {}
@@ -347,26 +351,33 @@ struct ShortFeedView: View {
 
     init(viewModel: ShortsViewModel, startIndex: Int,
          randomMode: Bool = false,
+         externalItems: [ShortVideo]? = nil,
          onClose: @escaping () -> Void = {},
          onBeginExit: @escaping () -> Void = {}) {
         self.viewModel = viewModel
         self.startIndex = startIndex
         self.randomMode = randomMode
+        self.externalItems = externalItems
         self.onClose = onClose
         self.onBeginExit = onBeginExit
         // 随机模式的队列要等首批网络结果，此刻为空 → currentID 从 nil 起，
-        // 由 .task 里的 start() 完成后设为第一条；顺序模式沿用列表快照。
-        let initial: [ShortVideo] = randomMode ? [] : viewModel.items
+        // 由 .task 里的 start() 完成后设为第一条；其余（含外部注入）用现成快照。
+        let initial: [ShortVideo] = externalItems ?? (randomMode ? [] : viewModel.items)
         let idx = min(max(startIndex, 0), max(initial.count - 1, 0))
         _currentIndex = State(initialValue: idx)
         _currentID = State(initialValue: initial.indices.contains(idx) ? initial[idx].id : nil)
     }
 
-    /// 刷流队列：随机模式用随机批次，其余用列表 VM 的顺序分页。
+    /// 刷流队列：外部注入优先；其余随机模式用随机批次、顺序模式用 VM 分页。
     /// 预取 / 连播 / 关联页回跳都只认它，不各自去读 viewModel.items。
-    private var items: [ShortVideo] { randomMode ? randomLoader.items : viewModel.items }
+    private var items: [ShortVideo] {
+        if let externalItems { return externalItems }
+        return randomMode ? randomLoader.items : viewModel.items
+    }
 
     private func loadMore() async {
+        // 外部队列一次拉全，不翻页（云浏览器视频）；短路，零请求。
+        if externalItems != nil { return }
         if randomMode { await randomLoader.loadMore() } else { await viewModel.loadMore() }
     }
 

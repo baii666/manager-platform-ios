@@ -193,7 +193,7 @@ final class CloudRootListViewModel: ObservableObject {
 
 // MARK: - 云端浏览器（cloudlib 本地入库轻表：图片瀑布流 + 视频卡片）
 // 数据源 = GET /api/cloudlib/items（读本地 cloud_items，零 115、零 X 盘 stat）。
-// 图片缩略图走 /thumb、原图走 /raw（都免认证）；视频点开复用 PlayerHostView 全套播放链路。
+// 图片缩略图走 /thumb、原图走 /raw（都免认证）；视频点开进上下滑刷流页（与短视频同模式）。
 // 🔴 放在本文件（不新建 .swift）：Windows 无 xcodegen，新建文件要重新 generate 且冲掉手选 Team。
 struct CloudBrowserView: View {
     /// 选中的配置目录；nil = 全部。目录列表页点进来时传入。
@@ -202,7 +202,10 @@ struct CloudBrowserView: View {
     /// root 忽略。复用本视图 = 图片+视频都能显示、都能继续点开（点图看图、点视频播放）。
     var dir: String? = nil
     @StateObject private var vm: CloudBrowserViewModel
-    @State private var playRequest: PlaybackRequest?
+    /// 🔴 视频走上下滑刷流页（与短视频同模式）：点卡片带上整批视频 + 起始下标。
+    @State private var feedRequest: CloudFeedRequest?
+    /// 刷流页需要一个 ShortsViewModel 提供 client（externalItems 模式下不拉它的数据）。
+    @StateObject private var feedVM = ShortsViewModel()
     /// 瀑布流列数：捏合缩放 + 各页记忆（与相册/搜索/人物页同一套 PhotoGrid）。
     @State private var columns = PhotoGridPrefs.load("cloudBrowser", fallback: 3)
     /// 视频卡片用固定网格（条数少，不需要捏合缩放）
@@ -248,8 +251,11 @@ struct CloudBrowserView: View {
         .onChange(of: vm.query) { _ in Task { await vm.reload() } }
         .bottomBarClearance()
         .appBackground()
-        .fullScreenCover(item: $playRequest) { request in
-            PlayerHostView(request: request)
+        .fullScreenCover(item: $feedRequest) { request in
+            ShortFeedView(viewModel: feedVM,
+                          startIndex: request.startIndex,
+                          externalItems: request.items,
+                          onClose: { feedRequest = nil })
         }
         .task { await vm.loadInitial() }
     }
@@ -417,12 +423,21 @@ struct CloudBrowserView: View {
         .frame(maxWidth: .infinity, minHeight: 320)
     }
 
+    /// 🔴 点视频进上下滑刷流页（与短视频同模式）：把当前目录的全部视频转成 ShortVideo，
+    /// 带上配对封面，定位到被点的那条。整批一次拉全，刷流页不再翻页。
     private func startPlay(_ item: CloudItem) {
-        playRequest = PlaybackRequest(path: item.localPath,
-                                      title: item.displayName,
-                                      assetType: nil, assetID: nil,
-                                      startAt: nil, knownDuration: nil)
+        let covers = vm.videoCoverURLs
+        let videos = vm.videoItems.map { $0.asShortVideo(coverURL: covers[$0.id]) }
+        guard let start = videos.firstIndex(where: { $0.id == item.id }) else { return }
+        feedRequest = CloudFeedRequest(items: videos, startIndex: start)
     }
+}
+
+/// 云视频刷流请求：整批视频 + 点中的起始下标。Identifiable 供 fullScreenCover(item:) 用。
+private struct CloudFeedRequest: Identifiable {
+    let id = UUID()
+    let items: [ShortVideo]
+    let startIndex: Int
 }
 
 /// 取视频/图片文件名的「配对键」：去扩展名 + 剥掉常见分辨率/序号/转码标记并小写。
