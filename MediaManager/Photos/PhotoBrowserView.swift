@@ -425,6 +425,24 @@ struct CloudBrowserView: View {
     }
 }
 
+/// 取视频/图片文件名的「配对键」：去扩展名 + 剥掉常见分辨率/序号/转码标记并小写。
+/// `1271v_hi.avi` / `1271v_lg.jpg` → `1271v`；`IMG_2725.mp4` / `IMG_2725_01.gif` → `img_2725`；
+/// `[23-09-12] 1701562504676307380_p0.emby_converted.mp4` → `[23-09-12] 1701562504676307380`。
+private func cloudCoverKey(_ name: String) -> String {
+    var s = (name as NSString).deletingPathExtension.lowercased()
+    // 剥掉 .emby_converted 之类的多段转码后缀（此时 deletingPathExtension 只去了 .mp4）
+    while let dot = s.lastIndex(of: ".") { s = String(s[..<dot]) }
+    for marker in ["_hi", "_lg", "_sd", "_hd", "_th", "_p0", "_p1", "_p2", "_p3"] {
+        if s.hasSuffix(marker) { s = String(s.dropLast(marker.count)); break }
+    }
+    // 剥掉尾部序号（IMG_2725_01 → IMG_2725），只剥 1~3 位纯数字段
+    let parts = s.split(separator: "_", omittingEmptySubsequences: false)
+    if let last = parts.last, !last.isEmpty, last.count <= 3, last.allSatisfy({ $0.isNumber }), parts.count > 1 {
+        s = parts.dropLast().joined(separator: "_")
+    }
+    return s.trimmingCharacters(in: .whitespaces)
+}
+
 /// 云端视频卡片：同目录预览图铺满 16:9 + 播放角标 + 底部渐变标题。
 /// 无封面/加载失败时 RemoteImage 自动降级到渐变 + 胶片图标占位，不会开天窗。
 private struct CloudVideoCard: View {
@@ -471,23 +489,19 @@ private struct CloudVideoCard: View {
                         .multilineTextAlignment(.leading)
                         .frame(width: w, alignment: .leading)
                     if !item.relPath.isEmpty {
-                        Button {
-                            UIPasteboard.general.string = item.relPath
-                        } label: {
-                            HStack(spacing: 3) {
-                                Text(item.relPath)
-                                    .font(.system(size: 9))
-                                    .foregroundStyle(.white.opacity(0.75))
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                                Image(systemName: "doc.on.doc")
-                                    .font(.system(size: 9))
-                                    .foregroundStyle(.white.opacity(0.75))
-                            }
+                        // 🔴 用 onTapGesture 而非 Button：子视图手势会优先消费、不会冒泡到
+                        // 外层卡片的 onTapGesture（播放），也不会像嵌套 Button 那样吞掉滚动。
+                        HStack(spacing: 3) {
+                            Text(item.relPath)
+                                .font(.system(size: 9))
+                                .foregroundStyle(.white.opacity(0.75))
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                            Image(systemName: "doc.on.doc")
+                                .font(.system(size: 9))
+                                .foregroundStyle(.white.opacity(0.75))
                         }
-                        .buttonStyle(.plain)
-                        // 吞掉冒泡，避免触发卡片整体的 onTapGesture（播放）
-                        .onTapGesture { }
+                        .onTapGesture { UIPasteboard.general.string = item.relPath }
                     }
                 }
                 .frame(width: w, alignment: .leading)
@@ -499,7 +513,6 @@ private struct CloudVideoCard: View {
             .clipped()
         }
         .aspectRatio(16 / 9, contentMode: .fit)
-        .contentShape(Rectangle())
         .onTapGesture { onPlay() }
     }
 }
@@ -547,18 +560,22 @@ final class CloudBrowserViewModel: ObservableObject {
         }
     }
 
-    /// 视频卡片封面 = 同目录下第一张图片的 /raw URL。
-    /// jav 压制视频旁都有配套预览图（IMG_2725.mp4 ↔ IMG_2725_01.gif），
-    /// 图片/视频本来就在同一批 items 里 → 本地构建 dir→封面 映射，零额外请求。
-    /// 挂载盘在线时显示真实预览图，离线时 RemoteImage 自动降级到渐变占位。
+    /// 视频卡片封面：按文件名配对同批次的预览图，配对不到就 nil（渐变占位）。
+    /// 🔴 之前只按目录取第一张 → 同目录所有视频共用一张图（用户反馈「封面都显示成一个」）。
+    /// 命名规律（实测）：`1271v_hi.avi` ↔ `1271v_lg.jpg`、`IMG_2725.mp4` ↔ `IMG_2725_01.gif`，
+    /// 即去扩展名后剥掉 `_hi`/`_lg`/`_01` 等标记，基础名相同。图片/视频本就同一批 items，零额外请求。
+    /// 挂载盘在线显示真实预览图，离线 RemoteImage 自动降级到渐变占位。
     var videoCoverURLs: [Int: URL] {
-        var coverByDir: [String: String] = [:]
+        var imagesByKey: [String: String] = [:]
         for item in items where item.isImage && !item.localPath.isEmpty {
-            if coverByDir[item.dirPath] == nil { coverByDir[item.dirPath] = item.localPath }
+            let key = cloudCoverKey(item.fileName)
+            if imagesByKey[key] == nil { imagesByKey[key] = item.localPath }
         }
         var result: [Int: URL] = [:]
         for item in items where item.isVideo {
-            if let p = coverByDir[item.dirPath], let u = client?.cloudRawURL(path: p) {
+            // 🔴 只按文件名配对，配对不到就 nil（卡片走渐变+胶片占位）。
+            // 不再用「同目录第一张图」兜底：大目录里上千视频会全显示同一张图。
+            if let p = imagesByKey[cloudCoverKey(item.fileName)], let u = client?.cloudRawURL(path: p) {
                 result[item.id] = u
             }
         }
